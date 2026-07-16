@@ -168,3 +168,28 @@ Base `--radius: .7rem` (11.2px):
 - Dark = default theme (`data-theme="dark"` on html, same as Polymarket)
 - Light theme swaps the primitive ladder (see §2) — brand intentionally differs per theme (`#0093fd` dark / `#1452f0` light)
 - Worldstreet rebrand later = new primitive values + font swap, zero component changes
+
+## 9. Motion (extracted 2026-07-16)
+
+Measured from live CSS + DOM instance inspection:
+
+| element | spec |
+|---------|------|
+| buttons (CTA, promo) | `color/background-color 0.12s cubic-bezier(0,0,0.2,1)` (= Tailwind `ease-out`) |
+| category pills | `0.15s cubic-bezier(0.4,0,0.2,1)` (= Tailwind `ease-in-out`) |
+| carousel dots | `all 0.3s cubic-bezier(0.4,0,0.2,1)` — active-dot width elongation animates |
+| slide/pickers speed | Swiper `speed: 300` (site-wide 300ms motion constant) |
+| comments feed | CSS marquee: `@keyframes marquee-vertical { to { transform: translateY(-33.333%) } }`, `25s linear infinite`, content rendered ×3 |
+| scroll fades | `pk-scroll-fade-*` keyframes driving CSS-var mask fades on scrollable strips |
+
+Architecture findings:
+- **Hero carousel is NOT a Swiper** — hero card content is swapped via React state
+  (~300ms transition); dots + pager pills are the controls. Auto-advance interval
+  unobservable while tab hidden (assumed ~8s, pause on hover).
+- Swiper.js IS used for the small spread/total number pickers inside sports game
+  cards (`speed: 300, slidesPerView: 'auto', no autoplay, no loop`).
+- Charts are SVG. Crosshair: dashed vertical line at hover x, timestamp label at
+  top, per-series value pills (colored 3px left bar + name + %, dark surface bg),
+  and the chart legend live-updates to the hovered point's values.
+- "All markets" filter chips: active = brand-500 @ 20% bg (oklab), `#0093fd` text,
+  radius 6px, h32, 14px/500, px-12; inactive = transparent bg, `#7b8996` text.

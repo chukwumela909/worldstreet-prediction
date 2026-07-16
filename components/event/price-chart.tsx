@@ -15,18 +15,20 @@ import { isBinary, type MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
 import { getSeries, TIMEFRAMES, type Timeframe } from "@/lib/mock-series";
 import { usePageNow } from "@/lib/use-now";
+import { CrosshairCursor, ValuePills } from "@/components/chart/crosshair";
 
 const LINE_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"];
 const MAX_LINES = 3;
 
 /**
- * Probability-over-time chart with timeframe toggles.
- * Multi-outcome: top 3 markets as colored lines + legend.
- * Binary: single line + big "n% chance" header with delta.
+ * Probability-over-time chart with timeframe toggles and the measured
+ * crosshair behavior (recon §9): dashed cursor + timestamp, value pills,
+ * legend / chance header live-updating to the hovered point.
  */
 export function PriceChart({ event }: { event: MarketEvent }) {
   const [tf, setTf] = useState<Timeframe>("ALL");
   const endTime = usePageNow();
+  const [hovered, setHovered] = useState<Record<string, number> | null>(null);
 
   const markets = event.markets.slice(0, MAX_LINES);
   const binary = isBinary(event);
@@ -45,8 +47,7 @@ export function PriceChart({ event }: { event: MarketEvent }) {
     return { data: merged, deltas: ds };
   }, [markets, tf, endTime]);
 
-  // explicit ticks: first point of each distinct label, thinned to ≤7,
-  // so long windows never repeat a month ("Mar Mar") like default spacing does
+  // explicit ticks: first point of each distinct label, thinned to ≤7
   const ticks = useMemo(() => {
     if (!data.length) return undefined;
     const firsts: number[] = [];
@@ -64,21 +65,24 @@ export function PriceChart({ event }: { event: MarketEvent }) {
     return firsts.filter((_, i) => i % step === 0);
   }, [data, tf]);
 
+  const nameFor = (id: string) =>
+    markets.find((m) => m.id === id)?.groupItemTitle ?? "Yes";
+
+  const displayPct = (m: (typeof markets)[number]) =>
+    hovered?.[m.id] ?? toPercent(m.outcomePrices[0]);
+
   return (
     <div>
-      {/* legend / chance header */}
+      {/* legend / chance header tracks hover */}
       {binary ? (
-        <ChanceHeader pct={toPercent(markets[0].outcomePrices[0])} delta={deltas[0] ?? 0} />
+        <ChanceHeader pct={Math.round(displayPct(markets[0]))} delta={deltas[0] ?? 0} />
       ) : (
         <div className="flex flex-wrap gap-x-4 gap-y-1">
           {markets.map((m, i) => (
             <span key={m.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
-              <span
-                className="size-2 rounded-full"
-                style={{ background: LINE_COLORS[i] }}
-              />
+              <span className="size-2 rounded-full" style={{ background: LINE_COLORS[i] }} />
               <span className="text-secondary">{m.groupItemTitle}</span>
-              <span>{toPercent(m.outcomePrices[0])}%</span>
+              <span className="tabular-nums">{Number(displayPct(m)).toFixed(1)}%</span>
             </span>
           ))}
         </div>
@@ -88,7 +92,15 @@ export function PriceChart({ event }: { event: MarketEvent }) {
       <div className="mt-2 h-[300px]">
         {endTime !== null && (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data} margin={{ top: 8, right: 0, bottom: 0, left: 8 }}>
+            <LineChart
+              data={data}
+              margin={{ top: 20, right: 0, bottom: 0, left: 8 }}
+              onMouseMove={(state) => {
+                const i = Number(state?.activeTooltipIndex);
+                if (Number.isFinite(i) && data[i]) setHovered(data[i]);
+              }}
+              onMouseLeave={() => setHovered(null)}
+            >
               <CartesianGrid
                 horizontal
                 vertical={false}
@@ -115,8 +127,9 @@ export function PriceChart({ event }: { event: MarketEvent }) {
                 tick={{ fill: "var(--neutral-500)", fontSize: 12, fontWeight: 500 }}
               />
               <Tooltip
-                content={<ChartTooltip markets={markets} tf={tf} />}
-                cursor={{ stroke: "var(--border-active)", strokeDasharray: "3 3" }}
+                cursor={<CrosshairCursor formatTimestamp={(t) => formatTimestamp(t, tf)} />}
+                content={<ValuePills nameFor={nameFor} />}
+                isAnimationActive={false}
               />
               {markets.map((m, i) => (
                 <Line
@@ -126,6 +139,7 @@ export function PriceChart({ event }: { event: MarketEvent }) {
                   stroke={LINE_COLORS[i]}
                   strokeWidth={2}
                   dot={false}
+                  activeDot={{ r: 3, fill: LINE_COLORS[i], strokeWidth: 0 }}
                   isAnimationActive={false}
                 />
               ))}
@@ -140,10 +154,8 @@ export function PriceChart({ event }: { event: MarketEvent }) {
           <button
             key={t}
             onClick={() => setTf(t)}
-            className={`h-8 rounded-md px-2 text-sm font-semibold transition-colors ${
-              tf === t
-                ? "bg-element-2 text-primary"
-                : "text-secondary hover:text-primary"
+            className={`h-8 rounded-md px-2 text-sm font-semibold transition-colors duration-150 ease-in-out ${
+              tf === t ? "bg-element-2 text-primary" : "text-secondary hover:text-primary"
             }`}
           >
             {t}
@@ -157,7 +169,9 @@ export function PriceChart({ event }: { event: MarketEvent }) {
 function ChanceHeader({ pct, delta }: { pct: number; delta: number }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="text-[28px] font-semibold leading-none">{pct}% chance</span>
+      <span className="text-[28px] font-semibold leading-none tabular-nums">
+        {pct}% chance
+      </span>
       {delta !== 0 && (
         <span
           className={`flex items-center text-sm font-semibold ${
@@ -187,48 +201,11 @@ function formatTick(t: number, tf: Timeframe): string {
   return d.toLocaleDateString("en-US", { month: "short" });
 }
 
-interface TooltipEntry {
-  dataKey: string;
-  value: number;
-  color: string;
-}
-
-function ChartTooltip({
-  active,
-  payload,
-  label,
-  markets,
-  tf,
-}: {
-  active?: boolean;
-  payload?: TooltipEntry[];
-  label?: number;
-  markets: MarketEvent["markets"];
-  tf: Timeframe;
-}) {
-  if (!active || !payload?.length || label === undefined) return null;
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2 text-xs font-medium shadow-popover">
-      <p className="text-tertiary">
-        {new Date(label).toLocaleString("en-US", {
-          month: "short",
-          day: "numeric",
-          hour: tf === "ALL" ? undefined : "numeric",
-          minute: tf === "ALL" ? undefined : "2-digit",
-        })}
-      </p>
-      {payload.map((entry) => {
-        const market = markets.find((m) => m.id === entry.dataKey);
-        return (
-          <p key={entry.dataKey} className="mt-1 flex items-center gap-1.5">
-            <span className="size-2 rounded-full" style={{ background: entry.color }} />
-            <span className="text-secondary">
-              {market?.groupItemTitle ?? "Yes"}
-            </span>
-            <span className="font-semibold text-primary">{entry.value}%</span>
-          </p>
-        );
-      })}
-    </div>
-  );
+function formatTimestamp(t: number, tf: Timeframe): string {
+  return new Date(t).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: tf === "ALL" ? undefined : "numeric",
+    minute: tf === "ALL" ? undefined : "2-digit",
+  });
 }

@@ -1,0 +1,35 @@
+import { HERO_COMMENTS } from "@/lib/mock-home";
+
+/**
+ * Vertical comments ticker, exactly Polymarket's mechanism (recon §9):
+ * content rendered 3x inside an overflow-hidden window, animated
+ * translateY(0 -> -33.333%) over 25s linear infinite; paused on hover.
+ */
+export function CommentsMarquee() {
+  return (
+    <div className="group/marquee relative mt-4 min-h-0 flex-1 overflow-hidden [mask-image:linear-gradient(to_bottom,transparent,black_16px,black_calc(100%-16px),transparent)]">
+      <div className="flex animate-marquee-vertical flex-col group-hover/marquee:[animation-play-state:paused]">
+        {[0, 1, 2].map((copy) => (
+          <div key={copy} className="flex shrink-0 flex-col gap-3 pb-3" aria-hidden={copy > 0}>
+            {HERO_COMMENTS.map((c) => (
+              <div key={c.user} className="flex gap-2">
+                <span
+                  className="mt-0.5 size-6 shrink-0 rounded-full"
+                  style={{
+                    background: `linear-gradient(135deg, hsl(${c.hue} 60% 55%), hsl(${c.hue + 60} 60% 45%))`,
+                  }}
+                />
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold leading-4">{c.user}</p>
+                  <p className="line-clamp-2 text-[13px] leading-[18px] text-secondary">
+                    {c.text}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
