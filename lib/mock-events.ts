@@ -1,0 +1,164 @@
+import type { MarketEvent } from "@/types/market";
+
+/**
+ * Mock fixtures shaped like Polymarket's Gamma API responses.
+ * Mix of binary (1 market) and multi-outcome (n markets) events.
+ */
+export const MOCK_EVENTS: MarketEvent[] = [
+  {
+    id: "evt-1",
+    slug: "world-cup-winner",
+    title: "World Cup Winner",
+    icon: "⚽",
+    category: "Sports",
+    volume: "4248952871",
+    endDate: "2026-07-20",
+    markets: [
+      { id: "m-1a", question: "Will Spain win the 2026 FIFA World Cup?", groupItemTitle: "Spain", outcomePrices: ["0.582", "0.419"], volume: "115897715" },
+      { id: "m-1b", question: "Will England win the 2026 FIFA World Cup?", groupItemTitle: "England", outcomePrices: ["0.228", "0.773"], volume: "103371986" },
+      { id: "m-1c", question: "Will Argentina win the 2026 FIFA World Cup?", groupItemTitle: "Argentina", outcomePrices: ["0.200", "0.801"], volume: "98214550" },
+      { id: "m-1d", question: "Will France win the 2026 FIFA World Cup?", groupItemTitle: "France", outcomePrices: ["0.041", "0.960"], volume: "66120044" },
+    ],
+  },
+  {
+    id: "evt-2",
+    slug: "fed-decision-july",
+    title: "Fed decision in July?",
+    icon: "🏦",
+    category: "Economy",
+    volume: "24618340",
+    endDate: "2026-07-29",
+    markets: [
+      { id: "m-2a", question: "Will the Fed decrease rates by 25 bps after the July 2026 meeting?", groupItemTitle: "25 bps decrease", outcomePrices: ["0.06", "0.94"], volume: "8120031" },
+      { id: "m-2b", question: "Will there be no change in Fed rates after the July 2026 meeting?", groupItemTitle: "No change", outcomePrices: ["0.93", "0.07"], volume: "14804226" },
+      { id: "m-2c", question: "Will the Fed increase rates after the July 2026 meeting?", groupItemTitle: "25+ bps increase", outcomePrices: ["0.01", "0.99"], volume: "1694083" },
+    ],
+  },
+  {
+    id: "evt-3",
+    slug: "btc-150k-2026",
+    title: "Bitcoin above $150k by December 31?",
+    icon: "₿",
+    category: "Crypto",
+    volume: "18240933",
+    endDate: "2026-12-31",
+    markets: [
+      { id: "m-3a", question: "Bitcoin above $150k by December 31?", outcomePrices: ["0.34", "0.66"], volume: "18240933" },
+    ],
+  },
+  {
+    id: "evt-4",
+    slug: "us-iran-blockade",
+    title: "US announces end of Iranian blockade by...?",
+    icon: "🛢️",
+    category: "Geopolitics",
+    volume: "9120744",
+    endDate: "2026-08-31",
+    markets: [
+      { id: "m-4a", question: "US announces end of Iranian blockade by July 24, 2026?", groupItemTitle: "July 24", outcomePrices: ["0.09", "0.91"], volume: "2110520" },
+      { id: "m-4b", question: "US announces end of Iranian blockade by July 31, 2026?", groupItemTitle: "July 31", outcomePrices: ["0.21", "0.79"], volume: "3480118" },
+      { id: "m-4c", question: "US announces end of Iranian blockade by August 15, 2026?", groupItemTitle: "August 15", outcomePrices: ["0.34", "0.66"], volume: "2130087" },
+      { id: "m-4d", question: "US announces end of Iranian blockade by August 31, 2026?", groupItemTitle: "August 31", outcomePrices: ["0.47", "0.53"], volume: "1400019" },
+    ],
+  },
+  {
+    id: "evt-5",
+    slug: "gpt-6-2026",
+    title: "OpenAI releases GPT-6 in 2026?",
+    icon: "🤖",
+    category: "Tech",
+    volume: "7429981",
+    endDate: "2026-12-31",
+    markets: [
+      { id: "m-5a", question: "OpenAI releases GPT-6 in 2026?", outcomePrices: ["0.61", "0.39"], volume: "7429981" },
+    ],
+  },
+  {
+    id: "evt-6",
+    slug: "premier-league-winner",
+    title: "Premier League Winner 2026-27",
+    icon: "🏆",
+    category: "Sports",
+    volume: "31208441",
+    endDate: "2027-05-23",
+    markets: [
+      { id: "m-6a", question: "Will Arsenal win the 2026-27 Premier League?", groupItemTitle: "Arsenal", outcomePrices: ["0.38", "0.62"], volume: "10422811" },
+      { id: "m-6b", question: "Will Manchester City win the 2026-27 Premier League?", groupItemTitle: "Man City", outcomePrices: ["0.29", "0.71"], volume: "9108234" },
+      { id: "m-6c", question: "Will Liverpool win the 2026-27 Premier League?", groupItemTitle: "Liverpool", outcomePrices: ["0.22", "0.78"], volume: "8891207" },
+    ],
+  },
+  {
+    id: "evt-7",
+    slug: "us-recession-2026",
+    title: "US recession in 2026?",
+    icon: "📉",
+    category: "Economy",
+    volume: "12083440",
+    endDate: "2026-12-31",
+    markets: [
+      { id: "m-7a", question: "US recession in 2026?", outcomePrices: ["0.17", "0.83"], volume: "12083440" },
+    ],
+  },
+  {
+    id: "evt-8",
+    slug: "eth-10k-2026",
+    title: "Ethereum above $10k by December 31?",
+    icon: "💎",
+    category: "Crypto",
+    volume: "6203112",
+    endDate: "2026-12-31",
+    markets: [
+      { id: "m-8a", question: "Ethereum above $10k by December 31?", outcomePrices: ["0.22", "0.78"], volume: "6203112" },
+    ],
+  },
+  {
+    id: "evt-9",
+    slug: "next-uk-pm",
+    title: "Next UK Prime Minister?",
+    icon: "🇬🇧",
+    category: "Politics",
+    volume: "8817253",
+    endDate: "2027-01-31",
+    markets: [
+      { id: "m-9a", question: "Will Kemi Badenoch be the next UK PM?", groupItemTitle: "Kemi Badenoch", outcomePrices: ["0.31", "0.69"], volume: "2201835" },
+      { id: "m-9b", question: "Will Angela Rayner be the next UK PM?", groupItemTitle: "Angela Rayner", outcomePrices: ["0.24", "0.76"], volume: "1980242" },
+      { id: "m-9c", question: "Will Nigel Farage be the next UK PM?", groupItemTitle: "Nigel Farage", outcomePrices: ["0.19", "0.81"], volume: "2455108" },
+    ],
+  },
+  {
+    id: "evt-10",
+    slug: "starship-mars-2026",
+    title: "SpaceX Starship reaches orbit 10+ times in 2026?",
+    icon: "🚀",
+    category: "Tech",
+    volume: "4110762",
+    endDate: "2026-12-31",
+    markets: [
+      { id: "m-10a", question: "SpaceX Starship reaches orbit 10+ times in 2026?", outcomePrices: ["0.72", "0.28"], volume: "4110762" },
+    ],
+  },
+  {
+    id: "evt-11",
+    slug: "hottest-year-2026",
+    title: "2026 hottest year on record?",
+    icon: "🌡️",
+    category: "Weather",
+    volume: "2901441",
+    endDate: "2027-01-15",
+    markets: [
+      { id: "m-11a", question: "Will 2026 be the hottest year on record?", outcomePrices: ["0.44", "0.56"], volume: "2901441" },
+    ],
+  },
+  {
+    id: "evt-12",
+    slug: "sp500-7000-2026",
+    title: "S&P 500 closes above 7,000 in 2026?",
+    icon: "📈",
+    category: "Finance",
+    volume: "5511092",
+    endDate: "2026-12-31",
+    markets: [
+      { id: "m-12a", question: "S&P 500 closes above 7,000 in 2026?", outcomePrices: ["0.55", "0.45"], volume: "5511092" },
+    ],
+  },
+];
