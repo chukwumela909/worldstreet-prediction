@@ -34,10 +34,10 @@ export function MarketSlide({ event }: { event: MarketEvent }) {
           <div className="flex w-[318px] shrink-0 flex-col">
             {top2.map((m) => (
               <div key={m.id} className="flex h-12 items-center gap-3 border-b border-border">
-                <span className="text-[26px] leading-none">
+                <span className="flex size-[30px] shrink-0 items-center justify-center overflow-hidden rounded-xs text-[22px] leading-none">
                   {OUTCOME_FLAGS[m.groupItemTitle ?? ""] ?? "🏳️"}
                 </span>
-                <span className="flex-1 text-base font-medium">{m.groupItemTitle}</span>
+                <span className="flex-1 text-[15px] font-[450]">{m.groupItemTitle}</span>
                 <span className="text-xl font-semibold tracking-tight">
                   {toPercent(m.outcomePrices[0])}%
                 </span>

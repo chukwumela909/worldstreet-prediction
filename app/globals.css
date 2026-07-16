@@ -114,7 +114,7 @@
   --chart-1: #4378ff;
   --chart-2: #87bfff;
   --chart-3: #fdc503;
-  --chart-4: #e0342b; /* team-red (hero sports lines, approx) */
+  --chart-4: #ff5952; /* hero series red (measured: hero chart stroke #FF5952) */
 
   /* hero + promo-rail primitives (measured on homepage) */
   --neutral-25: #181d21; /* featured hero card bg */
@@ -338,6 +338,29 @@
 
 @utility animate-marquee-vertical {
   animation: marquee-vertical 25s linear infinite;
+}
+
+/* chart end-dot pulse: real site keeps a second circle at scale(0) and
+   pings it on live price updates; we ping on a slow idle cycle */
+@keyframes hero-ping {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.6;
+  }
+  28% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+  100% {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+
+@utility animate-hero-ping {
+  animation: hero-ping 4.5s ease-out infinite;
+  transform-origin: 50% 50%;
+  transform-box: fill-box;
 }
 
 /* ---------- base ---------- */

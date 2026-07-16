@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { MarketEvent } from "@/types/market";
 import { MOCK_EVENTS } from "@/lib/mock-events";
@@ -9,12 +9,13 @@ import { GameSlide } from "./hero/game-slide";
 import { MarketSlide } from "./hero/market-slide";
 
 /**
- * Featured hero carousel. Mirrors the real site's mechanism (recon §9):
- * React state swap with a 300ms fade (their site-wide motion constant),
- * width-animated dots (300ms ease-in-out), pager pills labeled with the
- * neighboring slides. Auto-advances every 8s, paused while hovered.
+ * Featured hero carousel — the real site's exact mechanism (recon §9):
+ * every slide stays mounted, absolutely positioned, offset by
+ * translateX((i - active) * 100%) with NO transform transition — advancing
+ * is an instant swap (only `opacity 120ms ease-in` is declared). Only the
+ * active slide and its immediate neighbors are `visibility: visible`.
+ * No auto-advance: the real hero moves only via dots / pager pills.
  */
-const AUTO_ADVANCE_MS = 8000;
 const HERO_HEIGHT = "h-[471px]";
 
 interface Slide {
@@ -37,53 +38,62 @@ export function FeaturedHero({ event }: { event: MarketEvent }) {
   }, [event]);
 
   const [index, setIndex] = useState(0);
-  const [hovering, setHovering] = useState(false);
+  const n = slides.length;
+  const prev = (index - 1 + n) % n;
+  const next = (index + 1) % n;
 
-  useEffect(() => {
-    if (hovering) return;
-    const id = setInterval(
-      () => setIndex((i) => (i + 1) % slides.length),
-      AUTO_ADVANCE_MS,
-    );
-    return () => clearInterval(id);
-  }, [hovering, slides.length]);
-
-  const prev = (index - 1 + slides.length) % slides.length;
-  const next = (index + 1) % slides.length;
+  /** shortest-path offset from active, in slide widths (matches real DOM) */
+  const offsetFor = (i: number) => {
+    let d = i - index;
+    if (d > n / 2) d -= n;
+    if (d < -n / 2) d += n;
+    return d;
+  };
 
   return (
     <div className="min-w-0 flex-1">
-      {/* card: slides stacked, active one fades in over 300ms */}
       <div
         className={`relative ${HERO_HEIGHT} overflow-hidden rounded-[18px] border border-border bg-hero-surface`}
-        onMouseEnter={() => setHovering(true)}
-        onMouseLeave={() => setHovering(false)}
       >
-        {slides.map((s, i) => (
-          <div
-            key={s.key}
-            className={`absolute inset-0 transition-opacity duration-300 ease-in-out ${
-              i === index ? "opacity-100" : "pointer-events-none opacity-0"
-            }`}
-            aria-hidden={i !== index}
-          >
-            {s.render()}
-          </div>
-        ))}
+        <div className="absolute inset-0 overflow-hidden">
+          {slides.map((s, i) => {
+            const d = offsetFor(i);
+            return (
+              <div
+                key={s.key}
+                className="absolute inset-0"
+                style={{
+                  transform: d === 0 ? "none" : `translateX(${d * 100}%)`,
+                  visibility: Math.abs(d) <= 1 ? "visible" : "hidden",
+                  transition: "opacity 120ms ease-in",
+                }}
+                aria-hidden={d !== 0}
+              >
+                {s.render()}
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* dots + pagers strip */}
       <div className="mt-2 flex h-14 items-center">
-        <div className="flex items-center gap-1.5 pl-4">
+        <div className="-mx-1.5 flex items-center pl-4">
           {slides.map((s, i) => (
             <button
               key={s.key}
               aria-label={`Go to ${s.label}`}
               onClick={() => setIndex(i)}
-              className={`h-1.5 rounded-full transition-all duration-300 ease-in-out ${
-                i === index ? "w-8 bg-border-active" : "w-1.5 bg-element-3 hover:bg-border-active"
-              }`}
-            />
+              className="flex h-[30px] items-center px-1.5"
+            >
+              <span
+                className={`h-1.5 rounded-full transition-all duration-300 ease-in-out ${
+                  i === index
+                    ? "w-[26px] bg-border-active"
+                    : "w-1.5 bg-element-3 hover:bg-border-active"
+                }`}
+              />
+            </button>
           ))}
         </div>
         <div className="ml-auto flex items-center gap-2">

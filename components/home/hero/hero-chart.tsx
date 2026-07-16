@@ -11,14 +11,18 @@ import {
   YAxis,
 } from "recharts";
 import type { Market } from "@/types/market";
-import { getSeries } from "@/lib/mock-series";
+import { getStepSeries } from "@/lib/mock-series";
 import { usePageNow } from "@/lib/use-now";
 import { CrosshairCursor, ValuePills } from "@/components/chart/crosshair";
 
 /**
- * Hero chart with legend that live-updates to the hovered point,
- * dashed crosshair + timestamp, end dots — per recon §9.
+ * Hero chart, matched to the real one (recon §9):
+ * dense per-pixel stepped series, 2.75px lines, dotted 1×(1,3) gridlines
+ * in border-active, dim x labels (neutral-200), y labels every 15% up to
+ * the data peak, end dots at 0.6 opacity with a pulse circle.
  */
+const POINTS = 448; // ≈ one sample per horizontal pixel, like the real chart
+
 export function HeroChart({
   markets,
   colors,
@@ -31,20 +35,27 @@ export function HeroChart({
 
   const { data, xTicks, yTicks } = useMemo(() => {
     if (now === null) return { data: [], xTicks: [], yTicks: [] as number[] };
-    const series = markets.map((m) => getSeries(m, "1M", now));
+    const series = markets.map((m) => getStepSeries(m, POINTS, now));
     const merged = series[0].map((pt, i) => {
       const row: Record<string, number> = { t: pt.t };
       markets.forEach((m, mi) => (row[m.id] = series[mi][i].p));
       return row;
     });
-    const first = merged[0].t;
-    const last = merged[merged.length - 1].t;
-    const week = 7 * 86_400_000;
+    // weekly labels ~5 days in, snapped to real data points (a category
+    // axis drops tick values that don't exist in the data)
+    const stepMs = merged[1].t - merged[0].t;
+    const day = 86_400_000;
     const ticks: number[] = [];
-    for (let t = first + week / 2; t < last - week / 4; t += week) ticks.push(t);
+    for (let k = 0; k < 4; k++) {
+      const idx = Math.round(((5 + 7 * k) * day) / stepMs);
+      if (merged[idx]) ticks.push(merged[idx].t);
+    }
+    // y ticks: pick the step (multiple of 5) that lands ≤5 ticks —
+    // matches the real axis (peak 58 → step 15, 0–60; peak 64 → step 20, 0–80)
     const peak = Math.max(...series.flat().map((p) => p.p));
-    const yMax = Math.ceil((peak * 1.05) / 15) * 15;
-    const ySteps = Array.from({ length: yMax / 15 + 1 }, (_, i) => i * 15);
+    const step = Math.max(5, Math.ceil(peak / 4 / 5) * 5);
+    const yMax = Math.ceil(peak / step) * step;
+    const ySteps = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
     return { data: merged, xTicks: ticks, yTicks: ySteps };
   }, [markets, now]);
   const lastIndex = data.length - 1;
@@ -81,8 +92,8 @@ export function HeroChart({
               <CartesianGrid
                 horizontal
                 vertical={false}
-                strokeDasharray="2 4"
-                stroke="var(--border-default)"
+                strokeDasharray="1 3"
+                stroke="var(--border-active)"
               />
               <XAxis
                 dataKey="t"
@@ -93,7 +104,7 @@ export function HeroChart({
                 }
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "var(--neutral-300)", fontSize: 12, fontWeight: 500 }}
+                tick={{ fill: "var(--neutral-200)", fontSize: 12, fontWeight: 450 }}
               />
               <YAxis
                 orientation="right"
@@ -103,7 +114,7 @@ export function HeroChart({
                 width={40}
                 axisLine={false}
                 tickLine={false}
-                tick={{ fill: "var(--neutral-300)", fontSize: 12, fontWeight: 500 }}
+                tick={{ fill: "var(--neutral-500)", fontSize: 12, fontWeight: 450 }}
               />
               <Tooltip
                 cursor={
@@ -125,19 +136,20 @@ export function HeroChart({
                 <Line
                   key={m.id}
                   dataKey={m.id}
-                  type="monotone"
+                  type="stepAfter"
                   stroke={colors[i]}
-                  strokeWidth={2}
+                  strokeWidth={2.75}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
                   isAnimationActive={false}
                   activeDot={{ r: 3, fill: colors[i], strokeWidth: 0 }}
                   dot={(props: { index?: number; cx?: number; cy?: number }) =>
                     props.index === lastIndex ? (
-                      <circle
+                      <EndDot
                         key={`end-${m.id}`}
                         cx={props.cx}
                         cy={props.cy}
-                        r={4}
-                        fill={colors[i]}
+                        color={colors[i]}
                       />
                     ) : (
                       <g key={`d-${m.id}-${props.index}`} />
@@ -150,5 +162,20 @@ export function HeroChart({
         )}
       </div>
     </div>
+  );
+}
+
+/**
+ * End-of-line marker, exactly the real structure: a persistent r=4 dot at
+ * 0.6 opacity plus a second circle that pulses (theirs pings on live
+ * price updates; ours pings on an idle cycle).
+ */
+function EndDot({ cx, cy, color }: { cx?: number; cy?: number; color: string }) {
+  if (cx === undefined || cy === undefined) return <g />;
+  return (
+    <g className="pointer-events-none">
+      <circle cx={cx} cy={cy} r={4} fill={color} className="animate-hero-ping" />
+      <circle cx={cx} cy={cy} r={4} fill={color} opacity={0.6} />
+    </g>
   );
 }

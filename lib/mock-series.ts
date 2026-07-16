@@ -82,3 +82,45 @@ export function dayDelta(market: Market): number {
 function clamp(n: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, n));
 }
+
+/**
+ * Dense stepped series for hero charts, mimicking the real site's
+ * per-pixel data: odds hold flat for stretches, then jump (sports-book
+ * style). One point per horizontal pixel; ends exactly at the market's
+ * current price via a late spike, like live game odds.
+ */
+export function getStepSeries(
+  market: Market,
+  points: number,
+  endTime: number = 1_750_000_000_000,
+  windowMs: number = 30 * 86_400_000,
+): SeriesPoint[] {
+  const rand = mulberry32(hashSeed(`${market.id}:step`));
+  const end = yesProbability(market) * 100;
+  const stepMs = windowMs / (points - 1);
+
+  // pre-spike baseline: both series idle in a low band (like real game odds),
+  // so the drama happens in the endgame spike
+  const base = clamp(end > 40 ? end - 38 - rand() * 8 : end - 6 - rand() * 8, 4, 90);
+  const spikeStart = Math.floor(points * (0.93 + rand() * 0.03));
+
+  const out: SeriesPoint[] = new Array(points);
+  let level = clamp(base + (rand() - 0.5) * 8, 3, 95);
+  let holdLeft = 0;
+  for (let i = 0; i < points; i++) {
+    if (i >= spikeStart) {
+      // sharp move to the final value over the spike zone
+      const f = (i - spikeStart) / Math.max(1, points - 1 - spikeStart);
+      const eased = f < 0.35 ? f * 2.4 : 0.84 + f * 0.16; // fast jump, brief settle
+      level = clamp(base + (end - base) * Math.min(1, eased), 2, 98);
+    } else if (holdLeft-- <= 0) {
+      // hold flat for a stretch, then step
+      holdLeft = 4 + Math.floor(rand() * 26);
+      const jump = (rand() - 0.5) * (rand() < 0.12 ? 9 : 2.6); // mostly small, occasionally big
+      level = clamp(level + jump + (base - level) * 0.05, 3, 95);
+    }
+    out[i] = { t: endTime - (points - 1 - i) * stepMs, p: Math.round(level * 10) / 10 };
+  }
+  out[points - 1].p = Math.round(end * 10) / 10;
+  return out;
+}

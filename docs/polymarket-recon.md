@@ -169,25 +169,67 @@ Base `--radius: .7rem` (11.2px):
 - Light theme swaps the primitive ladder (see §2) — brand intentionally differs per theme (`#0093fd` dark / `#1452f0` light)
 - Worldstreet rebrand later = new primitive values + font swap, zero component changes
 
-## 9. Motion (extracted 2026-07-16)
+## 9. Motion + hero internals (extracted 2026-07-16, deep-inspected same day)
 
-Measured from live CSS + DOM instance inspection:
+Measured from live CSS, DOM instance inspection, and MutationObserver traces:
 
 | element | spec |
 |---------|------|
 | buttons (CTA, promo) | `color/background-color 0.12s cubic-bezier(0,0,0.2,1)` (= Tailwind `ease-out`) |
 | category pills | `0.15s cubic-bezier(0.4,0,0.2,1)` (= Tailwind `ease-in-out`) |
 | carousel dots | `all 0.3s cubic-bezier(0.4,0,0.2,1)` — active-dot width elongation animates |
-| slide/pickers speed | Swiper `speed: 300` (site-wide 300ms motion constant) |
 | comments feed | CSS marquee: `@keyframes marquee-vertical { to { transform: translateY(-33.333%) } }`, `25s linear infinite`, content rendered ×3 |
 | scroll fades | `pk-scroll-fade-*` keyframes driving CSS-var mask fades on scrollable strips |
 
-Architecture findings:
-- **Hero carousel is NOT a Swiper** — hero card content is swapped via React state
-  (~300ms transition); dots + pager pills are the controls. Auto-advance interval
-  unobservable while tab hidden (assumed ~8s, pause on hover).
+### Hero carousel — true mechanism (MutationObserver-verified)
+
+- ALL slides (10) stay mounted: `absolute inset-0 p-5 pb-4` inside an
+  `absolute inset-0 overflow-hidden` viewport in the 908×480 card
+  (bg `#181d21`, border `#242b32`, radius 18, shadow `0 4px 16px rgba(0,0,0,…)`).
+- Each slide: `transform: translateX((i − active) × 100%)` (shortest-path wrap,
+  e.g. slide 6 of 10 sits at −400%), `visibility: visible` ONLY for active ± 1,
+  `transition: opacity 120ms ease-in` (no transform transition!).
+- **Advancing is an instant transform swap** — a click rewrites the inline styles
+  in one frame; there is NO sliding/fading animation of the card content.
+- **No auto-advance observed** (~5 min watch, zero index changes) — moves only
+  via dots and pager pills. Whole slide is wrapped by an `<a href="/event/…">`
+  overlay (`absolute inset-0`).
+- Pager pills: h40 rounded-full, bg surface `#1e2428`, hover `neutral-100`,
+  text 16px/400 `#dee3e7`, chevron.
+- Dots: 30px-tall hit areas (`-mx-1.5`, px-1.5), inner pill h6; active ≈26px
+  wide, inactive 6px circles; `transition: all .3s`.
+
+### Hero chart (SVG, 496×276, right column of market slide)
+
+- Per series THREE stacked paths, identical `d`: casing `stroke-neutral-50` 2px
+  → color 1.75px → color 2.75px on top (all opacity 1). Effective visual: 2.75px
+  colored line; casing separates crossings. Colors this slide: `#FF5952` (red),
+  `#87BFFF` (light blue).
+- Data is dense (≈1 pt/px, `d` ≈ 20k chars): odds hold flat then jump —
+  staircase comes from the data, drawn with linear-ish curve segments.
+- End of each line: `<g class="pointer-events-none">` with TWO r=4 circles —
+  one persistent at `opacity 0.6`, one pulse layer idling at
+  `opacity 0; transform: scale(0)` (pings on live price updates),
+  `transform-origin: 50% 50%; transform-box: fill-box`.
+- Gridlines: `<line>` per y-tick, `stroke #586879` 1px, dasharray `1,3` (dotted).
+- Y ticks: 0% → peak rounded up to multiple of 15 (peak 58 → 0/15/30/45/60),
+  anchored right, 12px `#7b8996`.
+- X ticks: weekly "Jun 21"-style labels inside plot bottom, anchor middle,
+  12px `#2e3841` (very dim).
+- Legend: 8px dot + name (secondary) + value with ONE decimal ("57.9%"), 13px.
+
+### Hero market slide (left column)
+
+- Header: icon 56px rounded-md, breadcrumb small secondary, title 24px/600 (an <a>).
+- Outcome rows (top 2 only): flag image 30px radius 5.2 (rounded-xs), name 15px
+  w450 `#e5e5e5`, big % 20px w600 right-aligned, hairline row borders.
+- Below rows: comments marquee window ~224px (avatar 20px, name 13px `#e5e5e5`).
+- Footer: "$4B Vol" left + "Ends Jul 20, 2026 · Polymarket" right, 13px w490 `#586879`.
+
+### Other
+
 - Swiper.js IS used for the small spread/total number pickers inside sports game
-  cards (`speed: 300, slidesPerView: 'auto', no autoplay, no loop`).
+  cards (`speed: 300, slidesPerView: 'auto', no autoplay, no loop`) — NOT for the hero.
 - Charts are SVG. Crosshair: dashed vertical line at hover x, timestamp label at
   top, per-series value pills (colored 3px left bar + name + %, dark surface bg),
   and the chart legend live-updates to the hovered point's values.
