@@ -4,6 +4,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toCents, toPercent } from "@/lib/format";
 import { dayDelta } from "@/lib/mock-series";
+import { useAuth } from "@/components/auth/auth-context";
 import { useTradeSelection } from "./trade-context";
 
 /**
@@ -23,8 +24,17 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
 
 function OutcomeRow({ market }: { market: Market }) {
   const { marketId, side, select } = useTradeSelection();
+  const { user, openAuth } = useAuth();
   const pct = toPercent(market.outcomePrices[0]);
   const delta = dayDelta(market);
+
+  const pick = (s: "yes" | "no") => {
+    if (!user) {
+      openAuth();
+      return;
+    }
+    select(market.id, s);
+  };
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
@@ -60,13 +70,13 @@ function OutcomeRow({ market }: { market: Market }) {
           label={`Buy Yes ${toCents(market.outcomePrices[0])}`}
           side="yes"
           selected={marketId === market.id && side === "yes"}
-          onClick={() => select(market.id, "yes")}
+          onClick={() => pick("yes")}
         />
         <BuySideButton
           label={`Buy No ${toCents(market.outcomePrices[1])}`}
           side="no"
           selected={marketId === market.id && side === "no"}
-          onClick={() => select(market.id, "no")}
+          onClick={() => pick("no")}
         />
       </div>
     </div>

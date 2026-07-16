@@ -1,13 +1,16 @@
 import { TrendingUp, Zap } from "lucide-react";
 import { CATEGORIES } from "@/types/market";
+import { ScrollStrip } from "@/components/scroll-strip";
 
 /**
- * Category pill bar (~56px) below the top nav.
+ * Category pill bar (~56px) below the top nav — a slider strip with
+ * chevron pagers when the pills overflow.
  * Inactive pills text-secondary, active text-primary; 14px semibold.
  */
 export function CategoryBar({ active = "Trending" }: { active?: string }) {
   return (
-    <nav className="flex h-14 items-center gap-1 overflow-x-auto px-4 [scrollbar-width:none]">
+    <nav className="flex h-14 items-center px-4">
+      <ScrollStrip className="items-center gap-1">
       {CATEGORIES.map((cat, i) => {
         const isActive = cat === active;
         return (
@@ -46,6 +49,7 @@ export function CategoryBar({ active = "Trending" }: { active?: string }) {
           </span>
         );
       })}
+      </ScrollStrip>
     </nav>
   );
 }

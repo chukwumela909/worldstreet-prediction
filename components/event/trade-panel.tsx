@@ -4,6 +4,7 @@ import { useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { toCents } from "@/lib/format";
+import { useAuth } from "@/components/auth/auth-context";
 import { useTradeSelection } from "./trade-context";
 
 const QUICK_ADD = [1, 5, 10, 100];
@@ -15,6 +16,7 @@ const QUICK_ADD = [1, 5, 10, 100];
  */
 export function TradePanel({ event }: { event: MarketEvent }) {
   const { marketId, side, setSide } = useTradeSelection();
+  const { user, openAuth } = useAuth();
   const [mode, setMode] = useState<"buy" | "sell">("buy");
   const [amount, setAmount] = useState(0);
 
@@ -111,13 +113,22 @@ export function TradePanel({ event }: { event: MarketEvent }) {
           ))}
         </div>
 
-        {/* trade */}
-        <button
-          disabled={amount === 0}
-          className="mt-4 h-11 w-full rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
-        >
-          Trade
-        </button>
+        {/* trade — signed out it becomes the auth CTA, like the real site */}
+        {user ? (
+          <button
+            disabled={amount === 0}
+            className="mt-4 h-11 w-full rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+          >
+            Trade
+          </button>
+        ) : (
+          <button
+            onClick={openAuth}
+            className="mt-4 h-11 w-full rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover"
+          >
+            Log in to Trade
+          </button>
+        )}
 
         {toWin > 0 && mode === "buy" && (
           <p className="mt-3 text-center text-sm font-semibold">

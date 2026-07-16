@@ -1,11 +1,12 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ScrollStrip } from "@/components/scroll-strip";
 
 /**
  * Filter chips under "All markets" (measured): active = brand @ 20% bg +
  * accent text, radius 6px, h32, 14px/500, px-12; inactive text-secondary;
- * 150ms ease-in-out transitions. Controlled by MarketBrowser.
+ * 150ms ease-in-out transitions. Rendered as a slider strip with chevron
+ * pagers on overflow. Controlled by MarketBrowser.
  */
 const FILTERS = [
   "All",
@@ -31,8 +32,8 @@ export function MarketFilters({
   onChange: (filter: string) => void;
 }) {
   return (
-    <div className="relative mt-3">
-      <div className="flex gap-1.5 overflow-x-auto pr-8 [scrollbar-width:none] [mask-image:linear-gradient(to_right,black_calc(100%-40px),transparent)]">
+    <div className="mt-3 flex">
+      <ScrollStrip className="gap-1.5">
         {FILTERS.map((f) => (
           <button
             key={f}
@@ -46,8 +47,7 @@ export function MarketFilters({
             {f}
           </button>
         ))}
-      </div>
-      <ChevronRight className="pointer-events-none absolute right-0 top-1/2 size-4 -translate-y-1/2 text-secondary" />
+      </ScrollStrip>
     </div>
   );
 }

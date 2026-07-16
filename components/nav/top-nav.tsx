@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Info, Menu, Search } from "lucide-react";
+import { Info, Search } from "lucide-react";
+import { NavActions } from "@/components/nav/nav-actions";
 import { SearchBox } from "@/components/nav/search-box";
 
 /**
@@ -31,18 +32,7 @@ export function TopNav() {
           <Info className="size-4" strokeWidth={2.5} />
           How it works
         </button>
-        <button className="h-8 shrink-0 whitespace-nowrap rounded-full border border-border px-3.5 text-sm font-semibold text-primary hover:border-border-hover">
-          Log In
-        </button>
-        <button className="h-8 shrink-0 whitespace-nowrap rounded-full bg-blue-400 px-3.5 text-sm font-semibold text-white hover:bg-blue-500">
-          Sign Up
-        </button>
-        <button
-          aria-label="Menu"
-          className="p-1.5 text-primary hover:text-secondary"
-        >
-          <Menu className="size-5" />
-        </button>
+        <NavActions />
       </div>
     </div>
   );

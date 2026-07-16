@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Bookmark, Gift } from "lucide-react";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toPercent } from "@/lib/format";
+import { BuyButton } from "./buy-button";
 
 /**
  * Market card — the atomic unit of the home grid (~299×180 on desktop).
@@ -177,34 +178,3 @@ function CardTitle({ event }: { event: MarketEvent }) {
   );
 }
 
-/**
- * Buy button state model (recon §7):
- * rest = colored text on 15% tint · hover/selected = white on solid -400.
- */
-function BuyButton({
-  side,
-  label,
-  outcome,
-  mini = false,
-}: {
-  side: "yes" | "no";
-  label: string;
-  outcome?: string;
-  mini?: boolean;
-}) {
-  const palette =
-    side === "yes"
-      ? "bg-yes-tint text-yes hover:bg-yes-solid"
-      : "bg-no-tint text-no hover:bg-no-solid";
-  const size = mini
-    ? "h-6 rounded-xs px-2 text-xs"
-    : "h-10 flex-1 rounded-sm text-sm";
-  return (
-    <button
-      aria-label={outcome ? `Buy ${side} on ${outcome}` : undefined}
-      className={`${size} ${palette} font-semibold transition-colors hover:text-white`}
-    >
-      {label}
-    </button>
-  );
-}

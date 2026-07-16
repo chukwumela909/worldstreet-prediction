@@ -187,6 +187,9 @@
   /* semantic flips: page vs surface invert in light mode */
   --bg-page: var(--neutral-50);
   --bg-surface: var(--neutral-0);
+
+  /* hero card bg follows surface in light (dark value is a one-off #181d21) */
+  --neutral-25: #ffffff;
 }
 
 /* ---------- Tailwind theme mapping ----------

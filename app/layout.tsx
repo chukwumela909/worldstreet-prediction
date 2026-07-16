@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
+import { AuthProvider } from "@/components/auth/auth-context";
 import { SiteFooter } from "@/components/nav/site-footer";
 import "./globals.css";
+
+/** Apply the persisted theme before first paint (inline, FOUC-safe). */
+const THEME_INIT = `try{var t=localStorage.getItem("ws-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}`;
 
 const inter = Inter({
   variable: "--font-inter",
@@ -30,8 +34,11 @@ export default function RootLayout({
       className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        {children}
-        <SiteFooter />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
+        <AuthProvider>
+          {children}
+          <SiteFooter />
+        </AuthProvider>
       </body>
     </html>
   );

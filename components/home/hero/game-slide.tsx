@@ -2,6 +2,7 @@
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { HERO_GAME } from "@/lib/mock-home";
+import { useAuth } from "@/components/auth/auth-context";
 import { HeroFooter } from "./shared";
 
 /**
@@ -11,6 +12,10 @@ import { HeroFooter } from "./shared";
  */
 export function GameSlide() {
   const g = HERO_GAME;
+  const { user, openAuth } = useAuth();
+  const gate = () => {
+    if (!user) openAuth();
+  };
   return (
     <div className="flex h-full flex-col px-[21px] pb-[18px] pt-[23px]">
       <div>
@@ -23,13 +28,22 @@ export function GameSlide() {
         <div className="w-full min-w-0 md:w-[400px] md:shrink-0">
           {/* moneyline */}
           <div className="flex gap-2">
-            <button className="h-11 flex-1 rounded-sm bg-red-100 text-sm font-semibold text-red-700 transition-colors duration-[120ms] ease-out hover:bg-red-200">
+            <button
+              onClick={gate}
+              className="h-11 flex-1 rounded-sm bg-red-100 text-sm font-semibold text-red-700 transition-colors duration-[120ms] ease-out hover:bg-red-200"
+            >
               {g.home.name}
             </button>
-            <button className="h-11 w-20 rounded-sm border border-border text-sm font-semibold text-secondary transition-colors duration-[120ms] ease-out hover:border-border-hover">
+            <button
+              onClick={gate}
+              className="h-11 w-20 rounded-sm border border-border text-sm font-semibold text-secondary transition-colors duration-[120ms] ease-out hover:border-border-hover"
+            >
               DRAW
             </button>
-            <button className="h-11 flex-1 rounded-sm bg-blue-100 text-sm font-semibold text-blue-700 transition-colors duration-[120ms] ease-out hover:bg-blue-200">
+            <button
+              onClick={gate}
+              className="h-11 flex-1 rounded-sm bg-blue-100 text-sm font-semibold text-blue-700 transition-colors duration-[120ms] ease-out hover:bg-blue-200"
+            >
               {g.away.name}
             </button>
           </div>

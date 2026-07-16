@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import type { MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
 import { dayDelta } from "@/lib/mock-series";
+import { useAuth } from "@/components/auth/auth-context";
 import { HeroChart } from "./hero-chart";
 import { HeroFooter, HeroHeader } from "./shared";
 
@@ -13,6 +14,14 @@ export function BinarySlide({ event }: { event: MarketEvent }) {
   const market = event.markets[0];
   const pct = toPercent(market.outcomePrices[0]);
   const delta = dayDelta(market);
+  const { user, openAuth } = useAuth();
+
+  // the whole slide is a Link; buy clicks must not navigate
+  const buy = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!user) openAuth();
+  };
 
   return (
     <Link
@@ -42,12 +51,18 @@ export function BinarySlide({ event }: { event: MarketEvent }) {
             </div>
             <p className="mt-1 text-sm font-medium text-secondary">chance</p>
             <div className="mt-6 flex gap-2">
-              <span className="flex h-11 flex-1 items-center justify-center rounded-sm bg-yes-tint text-sm font-semibold text-yes transition-colors duration-[120ms] ease-out hover:bg-yes-solid hover:text-white">
+              <button
+                onClick={buy}
+                className="flex h-11 flex-1 items-center justify-center rounded-sm bg-yes-tint text-sm font-semibold text-yes transition-colors duration-[120ms] ease-out hover:bg-yes-solid hover:text-white"
+              >
                 Buy Yes
-              </span>
-              <span className="flex h-11 flex-1 items-center justify-center rounded-sm bg-no-tint text-sm font-semibold text-no transition-colors duration-[120ms] ease-out hover:bg-no-solid hover:text-white">
+              </button>
+              <button
+                onClick={buy}
+                className="flex h-11 flex-1 items-center justify-center rounded-sm bg-no-tint text-sm font-semibold text-no transition-colors duration-[120ms] ease-out hover:bg-no-solid hover:text-white"
+              >
                 Buy No
-              </span>
+              </button>
             </div>
           </div>
           <div className="hidden min-w-0 flex-1 md:block">
