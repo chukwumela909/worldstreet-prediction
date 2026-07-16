@@ -45,33 +45,42 @@ function BinaryBody({ event }: { event: MarketEvent }) {
   );
 }
 
-/** Semicircular probability gauge with % + "chance" label. */
+/**
+ * Circular probability gauge: a ~270° ring opening at the bottom, with
+ * the % and "chance" label centered inside — the shape on the live cards
+ * (the old semicircle was an eyeballed stand-in, not measured).
+ * Arc color bands like the live site: low = no, mid = yellow, high = yes.
+ */
 function Gauge({ pct }: { pct: number }) {
-  // semicircle of radius 20, circumference/2 ≈ 62.8
-  const half = Math.PI * 20;
+  // radius-20 ring spanning 270°: bottom-left → top → bottom-right
+  const ringLength = Math.PI * 40 * 0.75; // ≈ 94.2
+  const band =
+    pct >= 60 ? "stroke-yes" : pct <= 40 ? "stroke-no" : "stroke-yellow-500";
   return (
-    <div className="relative flex w-14 shrink-0 flex-col items-center">
-      <svg viewBox="0 0 48 26" className="w-14">
+    <div className="relative size-12 shrink-0">
+      <svg viewBox="0 0 48 48" className="size-12">
         <path
-          d="M 4 24 A 20 20 0 0 1 44 24"
+          d="M 9.86 38.14 A 20 20 0 1 1 38.14 38.14"
           fill="none"
           strokeWidth="3.5"
           strokeLinecap="round"
           className="stroke-element-3"
         />
         <path
-          d="M 4 24 A 20 20 0 0 1 44 24"
+          d="M 9.86 38.14 A 20 20 0 1 1 38.14 38.14"
           fill="none"
           strokeWidth="3.5"
           strokeLinecap="round"
-          strokeDasharray={`${(pct / 100) * half} ${half}`}
-          className={pct >= 50 ? "stroke-yes" : "stroke-no"}
+          strokeDasharray={`${(pct / 100) * ringLength} ${ringLength + 1}`}
+          className={band}
         />
       </svg>
-      <span className="absolute top-2.5 text-[15px] font-semibold leading-none">
-        {pct}%
+      <span className="absolute inset-0 flex flex-col items-center justify-center">
+        <span className="text-[15px] font-semibold leading-none">{pct}%</span>
+        <span className="text-[10px] font-medium leading-tight text-secondary">
+          chance
+        </span>
       </span>
-      <span className="text-[10px] font-medium text-secondary">chance</span>
     </div>
   );
 }
