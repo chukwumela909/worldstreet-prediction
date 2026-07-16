@@ -5,7 +5,7 @@ import { formatVolume, toPercent } from "@/lib/format";
 
 /**
  * Market card — the atomic unit of the home grid (~299×180 on desktop).
- * Binary events: title + semicircle gauge + Buy Yes/No buttons.
+ * Binary events: title + probability gauge + Buy Yes/No buttons.
  * Multi-outcome events: scrollable outcome rows with mini Yes/No pills.
  * Specs: docs/polymarket-recon.md §7.
  */
@@ -46,40 +46,73 @@ function BinaryBody({ event }: { event: MarketEvent }) {
 }
 
 /**
- * Circular probability gauge: a ~270° ring opening at the bottom, with
- * the % and "chance" label centered inside — the shape on the live cards
- * (the old semicircle was an eyeballed stand-in, not measured).
- * Arc color bands like the live site: low = no, mid = yellow, high = yes.
+ * Probability gauge, measured from the live card DOM + source (recon §7):
+ * r=29 arc spanning 200° (each end dips 10° below horizontal), stroke 4.5
+ * round-capped, 12° gap between fill and track. Fill from the site's own
+ * code: <30 red-500 · <50 amber-500 · else green-600, with
+ * stroke-opacity = |p−50|/50 × 0.45 + 0.55. The % sits inside the arc's
+ * lower half; "chance" hangs directly below the svg.
  */
+const GAUGE_R = 29;
+const GAUGE_SWEEP = 200;
+
+/** point at `a` degrees along the arc (0 = left end, 200 = right end) */
+function gaugePoint(a: number): [number, number] {
+  const phi = ((190 - a) * Math.PI) / 180;
+  return [GAUGE_R * Math.cos(phi), -GAUGE_R * Math.sin(phi)];
+}
+
+function gaugeArc(a1: number, a2: number): string {
+  const [x1, y1] = gaugePoint(a1);
+  const [x2, y2] = gaugePoint(a2);
+  const large = a2 - a1 > 180 ? 1 : 0;
+  return `M ${x1.toFixed(3)} ${y1.toFixed(3)} A ${GAUGE_R} ${GAUGE_R} 0 ${large} 1 ${x2.toFixed(3)} ${y2.toFixed(3)}`;
+}
+
 function Gauge({ pct }: { pct: number }) {
-  // radius-20 ring spanning 270°: bottom-left → top → bottom-right
-  const ringLength = Math.PI * 40 * 0.75; // ≈ 94.2
-  const band =
-    pct >= 60 ? "stroke-yes" : pct <= 40 ? "stroke-no" : "stroke-yellow-500";
+  // measured endpoints: fill ends at (2p−7)°, track resumes at (2p+5)°
+  const fillEnd = Math.min(pct * 2 - 7, GAUGE_SWEEP);
+  const trackStart = Math.min(Math.max(pct * 2 + 5, 0), GAUGE_SWEEP);
+  const fill =
+    pct < 30
+      ? "var(--red-500)"
+      : pct < 50
+        ? "var(--amber-500)"
+        : "var(--green-600)";
+  const opacity = (Math.abs(pct - 50) / 50) * 0.45 + 0.55;
   return (
-    <div className="relative size-12 shrink-0">
-      <svg viewBox="0 0 48 48" className="size-12">
-        <path
-          d="M 9.86 38.14 A 20 20 0 1 1 38.14 38.14"
-          fill="none"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          className="stroke-element-3"
-        />
-        <path
-          d="M 9.86 38.14 A 20 20 0 1 1 38.14 38.14"
-          fill="none"
-          strokeWidth="3.5"
-          strokeLinecap="round"
-          strokeDasharray={`${(pct / 100) * ringLength} ${ringLength + 1}`}
-          className={band}
-        />
+    <div className="relative flex w-[58px] shrink-0 flex-col items-center">
+      <svg
+        width="58"
+        height="34.04"
+        viewBox="-29 -29 58 34.036"
+        className="overflow-visible"
+      >
+        {trackStart < GAUGE_SWEEP && (
+          <path
+            d={gaugeArc(trackStart, GAUGE_SWEEP)}
+            fill="none"
+            strokeWidth="4.5"
+            strokeLinecap="round"
+            className="stroke-element-3"
+          />
+        )}
+        {fillEnd > 0 && (
+          <path
+            d={gaugeArc(0, fillEnd)}
+            fill="none"
+            strokeWidth="4.5"
+            strokeLinecap="round"
+            stroke={fill}
+            strokeOpacity={opacity}
+          />
+        )}
       </svg>
-      <span className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-[15px] font-semibold leading-none">{pct}%</span>
-        <span className="text-[10px] font-medium leading-tight text-secondary">
-          chance
-        </span>
+      <span className="absolute bottom-4 text-base font-medium leading-5">
+        {pct}%
+      </span>
+      <span className="text-xs font-semibold leading-4 text-secondary">
+        chance
       </span>
     </div>
   );

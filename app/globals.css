@@ -77,6 +77,9 @@
   --red-800: #ddaaaa;
   --red-900: #e2d1d1;
 
+  /* amber — binary-card gauge mid band (measured: Tailwind amber-500) */
+  --amber-500: #f59e0b;
+
   /* yellow */
   --yellow-50: #333c37;
   --yellow-100: #5a5933;
@@ -284,6 +287,7 @@
   --color-yellow-700: var(--yellow-700);
   --color-yellow-800: var(--yellow-800);
   --color-yellow-900: var(--yellow-900);
+  --color-amber-500: var(--amber-500);
   --color-alpha-white-100: var(--alpha-white-100);
   --color-alpha-white-200: var(--alpha-white-200);
   --color-alpha-white-300: var(--alpha-white-300);

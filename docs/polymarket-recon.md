@@ -141,6 +141,20 @@ Base `--radius: .7rem` (11.2px):
 - binary: icon + title + big % → Buy Yes / Buy No row → volume footer
 - multi-outcome: icon + title → scrollable outcome rows (name + % + mini yes/no) → volume footer
 
+### Binary-card gauge (measured 2026-07-16, live DOM + site JS)
+- svg 58×34.04, viewBox `-29 -29 58 34.036`, `overflow: visible` — r=29 arc spanning **200°**
+  (each end dips 10° below the horizontal), stroke-width 4.5, round caps
+- fill grows from the left end; measured endpoints ⇒ fill ends at **(2p−7)°**, track resumes
+  at **(2p+5)°** (≈12° visual gap); track = `neutral-200` dark (`#2e3841`)
+- fill color, from the site's own bundle:
+  `p<30 → red-500 · p<50 → amber-500 · else green-600`, with
+  `stroke-opacity = |p−50|/50 × 0.45 + 0.55` (computed on unrounded p)
+- amber-500 is Tailwind's default (`#f59e0b` ≈ `lab(72.7% 31.9 97.9)`); red-500/green-600
+  are the ladder values above
+- text: `%` 16px/20 w500 text-primary, horizontally centered, bottom edge flush with the
+  svg bottom (sits inside the arc); "chance" 12px/16 w600 text-secondary directly below;
+  whole block 58px wide, right-anchored in the card header
+
 ### Buy buttons (states confirmed)
 | state | text | bg |
 |-------|------|----|
