@@ -42,7 +42,9 @@ export function EventTabs({ event }: { event: MarketEvent }) {
         {tab === "Comments" && <Comments />}
         {(tab === "Top Holders" || tab === "Activity") && (
           <p className="py-6 text-center text-sm text-secondary">
-            {tab} coming in a later slice.
+            {tab === "Top Holders"
+              ? "No holder data to show yet."
+              : "No recent activity."}
           </p>
         )}
       </div>

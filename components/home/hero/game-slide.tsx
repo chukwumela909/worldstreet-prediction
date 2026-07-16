@@ -20,7 +20,7 @@ export function GameSlide() {
 
       <div className="mt-4 flex min-h-0 flex-1 gap-10">
         {/* left controls */}
-        <div className="w-[400px] shrink-0">
+        <div className="w-full min-w-0 md:w-[400px] md:shrink-0">
           {/* moneyline */}
           <div className="flex gap-2">
             <button className="h-11 flex-1 rounded-sm bg-red-100 text-sm font-semibold text-red-700 transition-colors duration-[120ms] ease-out hover:bg-red-200">
@@ -39,7 +39,7 @@ export function GameSlide() {
         </div>
 
         {/* center: flags + kickoff */}
-        <div className="flex flex-1 items-start justify-center gap-12 pt-4">
+        <div className="hidden flex-1 items-start justify-center gap-12 pt-4 md:flex">
           <TeamBadge flag={g.home.flag} name={g.home.name} />
           <div className="pt-3 text-center">
             <p className="text-xl font-semibold">{g.kickoff}</p>

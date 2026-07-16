@@ -112,7 +112,10 @@ export function TradePanel({ event }: { event: MarketEvent }) {
         </div>
 
         {/* trade */}
-        <button className="mt-4 h-11 w-full rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover">
+        <button
+          disabled={amount === 0}
+          className="mt-4 h-11 w-full rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+        >
           Trade
         </button>
 

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Info, Menu, Search } from "lucide-react";
+import { SearchBox } from "@/components/nav/search-box";
 
 /**
  * Top navigation bar (~60px) — logged-out state.
@@ -16,20 +17,7 @@ export function TopNav() {
       </Link>
 
       {/* Search — full input on ≥md, icon button below */}
-      <div className="relative hidden min-w-0 flex-1 max-w-3xl md:block">
-        <Search
-          className="pointer-events-none absolute left-3.5 top-1/2 size-4.5 -translate-y-1/2 text-secondary"
-          strokeWidth={2}
-        />
-        <input
-          type="search"
-          placeholder="Search markets..."
-          className="h-10 w-full rounded-md bg-surface pl-11 pr-9 text-sm text-primary placeholder:text-secondary outline-none focus:ring-1 focus:ring-border-active"
-        />
-        <kbd className="pointer-events-none absolute right-3.5 top-1/2 -translate-y-1/2 text-sm text-tertiary">
-          /
-        </kbd>
-      </div>
+      <SearchBox />
       <button
         aria-label="Search"
         className="flex size-9 items-center justify-center rounded-md bg-surface text-secondary md:hidden"

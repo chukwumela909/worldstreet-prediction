@@ -27,7 +27,7 @@ function OutcomeRow({ market }: { market: Market }) {
   const delta = dayDelta(market);
 
   return (
-    <div className="flex items-center gap-4 py-3">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
       <div className="min-w-0 flex-1">
         <p className="truncate text-[15px] font-semibold">
           {market.groupItemTitle ?? market.question}
@@ -55,7 +55,7 @@ function OutcomeRow({ market }: { market: Market }) {
         )}
       </div>
 
-      <div className="flex gap-2">
+      <div className="flex w-full gap-2 sm:w-auto">
         <BuySideButton
           label={`Buy Yes ${toCents(market.outcomePrices[0])}`}
           side="yes"
@@ -95,7 +95,7 @@ function BuySideButton({
   return (
     <button
       onClick={onClick}
-      className={`h-11 w-[124px] whitespace-nowrap rounded-sm text-sm font-semibold transition-colors ${palette}`}
+      className={`h-11 flex-1 whitespace-nowrap rounded-sm text-sm font-semibold transition-colors sm:w-[124px] sm:flex-none ${palette}`}
     >
       {label}
     </button>

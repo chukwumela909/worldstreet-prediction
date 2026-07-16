@@ -8,10 +8,10 @@ export interface HotTopic {
 
 export const HOT_TOPICS: HotTopic[] = [
   { rank: 1, name: "Argentina", volumeToday: "$51M" },
-  { rank: 2, name: "England", volumeToday: "$51M" },
-  { rank: 3, name: "Ballon", volumeToday: "$970K" },
+  { rank: 2, name: "England", volumeToday: "$47M" },
+  { rank: 3, name: "Ballon d'Or", volumeToday: "$970K" },
   { rank: 4, name: "Messi", volumeToday: "$13M" },
-  { rank: 5, name: "Orban", volumeToday: "$324K" },
+  { rank: 5, name: "Orbán", volumeToday: "$324K" },
 ];
 
 export interface HeroComment {

@@ -363,6 +363,15 @@
   transform-box: fill-box;
 }
 
+/* honor OS-level motion preferences: the marquee and chart ping are
+   pure decoration, so they stop entirely */
+@media (prefers-reduced-motion: reduce) {
+  .animate-marquee-vertical,
+  .animate-hero-ping {
+    animation: none;
+  }
+}
+
 /* ---------- base ---------- */
 body {
   background: var(--bg-page);

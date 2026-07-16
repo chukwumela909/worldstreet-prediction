@@ -21,8 +21,8 @@ export function BinarySlide({ event }: { event: MarketEvent }) {
     >
       <div className="flex h-full flex-col">
         <HeroHeader icon={event.icon} crumb={event.category} title={event.title} />
-        <div className="mt-5 flex min-h-0 flex-1 gap-[72px]">
-          <div className="flex w-[318px] shrink-0 flex-col">
+        <div className="mt-5 flex min-h-0 flex-1 gap-8 lg:gap-[72px]">
+          <div className="flex min-w-0 flex-1 flex-col md:w-[318px] md:flex-none">
             <div className="flex items-center gap-2">
               <span className="text-[40px] font-semibold leading-none">{pct}%</span>
               {delta !== 0 && (
@@ -50,7 +50,9 @@ export function BinarySlide({ event }: { event: MarketEvent }) {
               </span>
             </div>
           </div>
-          <HeroChart markets={[market]} colors={["var(--chart-1)"]} />
+          <div className="hidden min-w-0 flex-1 md:block">
+            <HeroChart markets={[market]} colors={["var(--chart-1)"]} />
+          </div>
         </div>
         <HeroFooter volume={event.volume} endDate={event.endDate} />
       </div>

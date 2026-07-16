@@ -11,6 +11,8 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "World Cup Winner",
     icon: "⚽",
     category: "Sports",
+    subcategory: "Soccer",
+    tags: ["World Cup"],
     volume: "4248952871",
     endDate: "2026-07-20",
     markets: [
@@ -26,6 +28,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "Fed decision in July?",
     icon: "🏦",
     category: "Economy",
+    tags: ["Fed"],
     volume: "24618340",
     endDate: "2026-07-29",
     markets: [
@@ -40,6 +43,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "Bitcoin above $150k by December 31?",
     icon: "₿",
     category: "Crypto",
+    tags: ["Bitcoin"],
     volume: "18240933",
     endDate: "2026-12-31",
     markets: [
@@ -52,6 +56,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "US announces end of Iranian blockade by...?",
     icon: "🛢️",
     category: "Geopolitics",
+    tags: ["Oil"],
     volume: "9120744",
     endDate: "2026-08-31",
     markets: [
@@ -67,6 +72,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "OpenAI releases GPT-6 in 2026?",
     icon: "🤖",
     category: "Tech",
+    tags: ["AI"],
     volume: "7429981",
     endDate: "2026-12-31",
     markets: [
@@ -79,6 +85,8 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "Premier League Winner 2026-27",
     icon: "🏆",
     category: "Sports",
+    subcategory: "Soccer",
+    tags: ["Premier League"],
     volume: "31208441",
     endDate: "2027-05-23",
     markets: [
@@ -105,6 +113,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "Ethereum above $10k by December 31?",
     icon: "💎",
     category: "Crypto",
+    tags: ["Bitcoin"],
     volume: "6203112",
     endDate: "2026-12-31",
     markets: [
@@ -117,6 +126,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "Next UK Prime Minister?",
     icon: "🇬🇧",
     category: "Politics",
+    tags: ["UK", "Elections"],
     volume: "8817253",
     endDate: "2027-01-31",
     markets: [
@@ -143,6 +153,7 @@ export const MOCK_EVENTS: MarketEvent[] = [
     title: "2026 hottest year on record?",
     icon: "🌡️",
     category: "Weather",
+    tags: ["Daily Temperature"],
     volume: "2901441",
     endDate: "2027-01-15",
     markets: [

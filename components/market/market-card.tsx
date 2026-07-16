@@ -79,10 +79,19 @@ function Gauge({ pct }: { pct: number }) {
 /* ---------- multi-outcome ---------- */
 
 function MultiBody({ event }: { event: MarketEvent }) {
+  // fade the bottom edge when rows overflow, so the hidden 4th+
+  // outcome has a visible scroll affordance
+  const overflows = event.markets.length > 3;
   return (
     <>
       <CardTitle event={event} />
-      <ul className="mt-2 flex flex-col gap-1 overflow-y-auto [scrollbar-width:thin]">
+      <ul
+        className={`mt-2 flex flex-col gap-1 overflow-y-auto [scrollbar-width:thin] ${
+          overflows
+            ? "[mask-image:linear-gradient(to_bottom,black_calc(100%-14px),transparent)]"
+            : ""
+        }`}
+      >
         {event.markets.map((m) => (
           <OutcomeRow key={m.id} market={m} />
         ))}
@@ -93,15 +102,16 @@ function MultiBody({ event }: { event: MarketEvent }) {
 
 function OutcomeRow({ market }: { market: Market }) {
   const pct = toPercent(market.outcomePrices[0]);
+  const name = market.groupItemTitle ?? market.question;
   return (
     <li className="flex items-center gap-2">
       <span className="min-w-0 flex-1 truncate text-sm font-medium">
-        {market.groupItemTitle ?? market.question}
+        {name}
       </span>
       <span className="text-sm font-semibold">{pct}%</span>
       <span className="flex gap-1">
-        <BuyButton side="yes" label="Yes" mini />
-        <BuyButton side="no" label="No" mini />
+        <BuyButton side="yes" label="Yes" outcome={name} mini />
+        <BuyButton side="no" label="No" outcome={name} mini />
       </span>
     </li>
   );
@@ -132,10 +142,12 @@ function CardTitle({ event }: { event: MarketEvent }) {
 function BuyButton({
   side,
   label,
+  outcome,
   mini = false,
 }: {
   side: "yes" | "no";
   label: string;
+  outcome?: string;
   mini?: boolean;
 }) {
   const palette =
@@ -147,6 +159,7 @@ function BuyButton({
     : "h-10 flex-1 rounded-sm text-sm";
   return (
     <button
+      aria-label={outcome ? `Buy ${side} on ${outcome}` : undefined}
       className={`${size} ${palette} font-semibold transition-colors hover:text-white`}
     >
       {label}

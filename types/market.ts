@@ -26,6 +26,10 @@ export interface MarketEvent {
   /** Emoji stand-in for the market icon image (fixtures only). */
   icon: string;
   category: Category;
+  /** Optional breadcrumb refinement, e.g. "Soccer" under Sports. */
+  subcategory?: string;
+  /** Home-grid filter chips this event belongs to (e.g. "World Cup"). */
+  tags?: string[];
   /** Total volume in USD as a decimal string. */
   volume: string;
   /** ISO date the event resolves/ends. */

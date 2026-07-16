@@ -96,7 +96,7 @@ export function FeaturedHero({ event }: { event: MarketEvent }) {
             </button>
           ))}
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto hidden items-center gap-2 sm:flex">
           <button
             onClick={() => setIndex(prev)}
             className="flex h-10 items-center gap-1.5 rounded-full bg-surface pl-3 pr-4 text-base text-primary transition-colors duration-[120ms] ease-out hover:bg-element-2"

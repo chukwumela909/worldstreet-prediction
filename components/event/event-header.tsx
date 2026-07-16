@@ -17,7 +17,10 @@ export function EventHeader({ event }: { event: MarketEvent }) {
         {event.icon}
       </span>
       <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-secondary">{event.category}</p>
+        <p className="text-xs font-semibold text-secondary">
+          {event.category}
+          {event.subcategory && ` · ${event.subcategory}`}
+        </p>
         <h1 className="mt-0.5 truncate text-xl font-semibold tracking-tight">
           {event.title}
         </h1>

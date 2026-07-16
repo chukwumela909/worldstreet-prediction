@@ -64,7 +64,7 @@ export function HeroChart({
     markets.find((m) => m.id === id)?.groupItemTitle ?? "Yes";
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col pt-10">
+    <div className="flex h-full min-w-0 flex-col pt-10">
       {/* legend tracks hover */}
       <div className="flex gap-4">
         {markets.map((m, i) => (

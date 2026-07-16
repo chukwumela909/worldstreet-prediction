@@ -99,9 +99,9 @@ export function getStepSeries(
   const end = yesProbability(market) * 100;
   const stepMs = windowMs / (points - 1);
 
-  // pre-spike baseline: both series idle in a low band (like real game odds),
-  // so the drama happens in the endgame spike
-  const base = clamp(end > 40 ? end - 38 - rand() * 8 : end - 6 - rand() * 8, 4, 90);
+  // baseline hovers near the current price so the hero tells the same
+  // story as the event-page chart; steps supply the texture, not a cliff
+  const base = clamp(end - 3 - rand() * 6, 4, 90);
   const spikeStart = Math.floor(points * (0.93 + rand() * 0.03));
 
   const out: SeriesPoint[] = new Array(points);
