@@ -1,0 +1,339 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Design tokens — two layers, mirroring Polymarket's own system.
+   Values extracted live from polymarket.com (see docs/polymarket-recon.md).
+
+   Layer 1: PRIMITIVES  (--neutral-*, --brand-*, --green-*, ...)
+   Layer 2: SEMANTIC    (--bg-page, --text-primary, --yes, ...)
+
+   Components consume ONLY semantic tokens (via the Tailwind
+   @theme mapping below). Rebrand = repoint primitives.
+
+   Default theme is DARK (html[data-theme="dark"], like Polymarket).
+   ============================================================ */
+
+/* ---------- Layer 1: primitives — dark (default) ---------- */
+:root {
+  /* neutral: 0 = page-dark ... 950 = text-bright */
+  --neutral-0: #15191d;
+  --neutral-50: #1e2428;
+  --neutral-100: #242b32;
+  --neutral-200: #2e3841;
+  --neutral-300: #586879;
+  --neutral-400: #697d91;
+  --neutral-500: #7b8996;
+  --neutral-600: #97a5b4;
+  --neutral-700: #afbac5;
+  --neutral-800: #bbc4cd;
+  --neutral-900: #d2d8df;
+  --neutral-950: #dee3e7;
+
+  /* brand — bright blue (Trade button, links, active states) */
+  --brand-50: #132533;
+  --brand-100: #112f45;
+  --brand-200: #103957;
+  --brand-300: #0e446b;
+  --brand-400: #0b568d;
+  --brand-500: #0093fd;
+  --brand-600: #26a3fd;
+  --brand-700: #59b9fe;
+  --brand-800: #8ccefe;
+  --brand-900: #b8e1fe;
+
+  /* blue — secondary blue (Sign Up button, info badges) */
+  --blue-50: #1c2f4b;
+  --blue-100: #1a366c;
+  --blue-200: #193d8d;
+  --blue-300: #1744ae;
+  --blue-400: #164bcf;
+  --blue-500: #1452f0;
+  --blue-600: #4475f3;
+  --blue-700: #7398f6;
+  --blue-800: #a3bcf9;
+  --blue-900: #d3dffc;
+
+  /* green — Yes */
+  --green-50: #1d3539;
+  --green-100: #234f42;
+  --green-200: #2a684b;
+  --green-300: #308154;
+  --green-400: #359a5e;
+  --green-500: #3db468;
+  --green-600: #5fbe82;
+  --green-700: #83c89c;
+  --green-800: #a6d2b6;
+  --green-900: #c9ddd0;
+
+  /* red — No */
+  --red-50: #2d2833;
+  --red-100: #4c2a32;
+  --red-200: #6b2d32;
+  --red-300: #8b2e32;
+  --red-400: #ac3031;
+  --red-500: #cb3131;
+  --red-600: #d05959;
+  --red-700: #d78282;
+  --red-800: #ddaaaa;
+  --red-900: #e2d1d1;
+
+  /* yellow */
+  --yellow-50: #333c37;
+  --yellow-100: #5a5933;
+  --yellow-200: #81772e;
+  --yellow-300: #a9952a;
+  --yellow-400: #d0b226;
+  --yellow-500: #f7d022;
+  --yellow-600: #f8da52;
+  --yellow-700: #fae483;
+  --yellow-800: #fcefb5;
+  --yellow-900: #fef9e6;
+
+  /* alpha ladders (overlays, hovers) */
+  --alpha-white-50: #ffffff05;
+  --alpha-white-100: #ffffff0d;
+  --alpha-white-200: #ffffff17;
+  --alpha-white-300: #ffffff1c;
+  --alpha-white-400: #ffffff24;
+  --alpha-white-500: #ffffff4a;
+  --alpha-white-600: #ffffff7d;
+  --alpha-white-700: #ffffff8c;
+  --alpha-white-800: #ffffff96;
+  --alpha-white-900: #ffffffeb;
+  --alpha-black-100: #0000000a;
+  --alpha-black-200: #00000017;
+  --alpha-black-300: #0000001f;
+  --alpha-black-400: #00000026;
+  --alpha-black-500: #0000005c;
+  --alpha-black-600: #00000091;
+  --alpha-black-700: #0000009e;
+  --alpha-black-800: #000000a6;
+  --alpha-black-900: #000000e0;
+
+  /* chart series (multi-outcome lines, sampled from legend) */
+  --chart-1: #4378ff;
+  --chart-2: #87bfff;
+  --chart-3: #fdc503;
+  --chart-4: #e0342b; /* team-red (hero sports lines, approx) */
+
+  /* hero + promo-rail primitives (measured on homepage) */
+  --neutral-25: #181d21; /* featured hero card bg */
+  --ink-0: #0a0b10; /* promo card gradient bottom */
+  --ink-50: #17181c; /* promo gradient top + CTA pill */
+  --ink-100: #202227; /* promo card border */
+  --ink-text: #ecedee;
+  --purple-100: #230b37; /* combo CTA bg */
+  --purple-200: #30104c; /* combo card wash */
+  --purple-800: #b884e6; /* combo CTA text */
+  --orange-500: #fa5b39; /* flame icon */
+
+  /* ---------- Layer 2: semantic ---------- */
+  --bg-page: var(--neutral-0);
+  --bg-surface: var(--neutral-50); /* cards, inputs, search */
+  --bg-element: var(--neutral-50);
+  --bg-element-2: var(--neutral-100); /* chips, secondary buttons */
+  --bg-element-3: var(--neutral-200); /* hover states */
+
+  --border-default: var(--neutral-100);
+  --border-hover: var(--neutral-200);
+  --border-active: var(--neutral-300);
+
+  --text-primary: var(--neutral-950);
+  --text-secondary: var(--neutral-500); /* muted labels, inactive tabs */
+  --text-tertiary: var(--neutral-300); /* volume labels */
+
+  --accent: var(--brand-500);
+  --accent-hover: var(--brand-600);
+
+  /* Buy-button state model (see recon §7):
+     rest = {yes|no} text on 15% tint · selected = white on {yes|no}-solid */
+  --yes: var(--green-500);
+  --yes-solid: var(--green-400);
+  --yes-tint: color-mix(in oklab, var(--green-500) 15%, transparent);
+  --no: var(--red-500);
+  --no-solid: var(--red-400);
+  --no-tint: color-mix(in oklab, var(--red-500) 15%, transparent);
+}
+
+/* ---------- Layer 1 overrides: primitives — light ----------
+   Only values actually measured on polymarket.com light theme;
+   unmeasured ladders keep dark values until the light-theme slice. */
+[data-theme="light"] {
+  --neutral-0: #ffffff;
+  --neutral-50: #f4f5f6;
+  --neutral-100: #e6e8ea;
+  --neutral-200: #caced3;
+  --neutral-300: #aeb4bc;
+  --neutral-400: #939aa5;
+  --neutral-500: #77808d;
+  --neutral-600: #5f6772;
+  --neutral-700: #484e56;
+  --neutral-800: #31353a;
+  --neutral-900: #1a1c1f;
+  --neutral-950: #0e0f11;
+
+  --brand-500: #1452f0; /* light-mode brand is the classic Polymarket blue */
+  --brand-600: #1043c9; /* approx darker hover */
+  --blue-500: #1652f0;
+  --green-500: #42c772;
+  --green-400: #30a159; /* measured as green-600; used as solid in light */
+  --red-500: #e23939;
+  --red-400: #c61d1d; /* measured as red-600; used as solid in light */
+  --yellow-500: #f8d743;
+
+  /* semantic flips: page vs surface invert in light mode */
+  --bg-page: var(--neutral-50);
+  --bg-surface: var(--neutral-0);
+}
+
+/* ---------- Tailwind theme mapping ----------
+   Generates: bg-page, bg-surface, bg-element-2, border-border,
+   text-primary, text-secondary, bg-yes-tint, text-yes, bg-accent, ... */
+@theme inline {
+  /* wipe Tailwind's default palette so only our tokens exist */
+  --color-*: initial;
+
+  --color-page: var(--bg-page);
+  --color-surface: var(--bg-surface);
+  --color-element: var(--bg-element);
+  --color-element-2: var(--bg-element-2);
+  --color-element-3: var(--bg-element-3);
+
+  --color-border: var(--border-default);
+  --color-border-hover: var(--border-hover);
+  --color-border-active: var(--border-active);
+
+  --color-primary: var(--text-primary);
+  --color-secondary: var(--text-secondary);
+  --color-tertiary: var(--text-tertiary);
+
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+
+  --color-yes: var(--yes);
+  --color-yes-solid: var(--yes-solid);
+  --color-yes-tint: var(--yes-tint);
+  --color-no: var(--no);
+  --color-no-solid: var(--no-solid);
+  --color-no-tint: var(--no-tint);
+
+  --color-white: #fff;
+  --color-black: #000;
+  --color-transparent: transparent;
+
+  /* primitive ladders, for one-offs and badges */
+  --color-neutral-0: var(--neutral-0);
+  --color-neutral-50: var(--neutral-50);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-900: var(--neutral-900);
+  --color-neutral-950: var(--neutral-950);
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
+  --color-blue-50: var(--blue-50);
+  --color-blue-100: var(--blue-100);
+  --color-blue-200: var(--blue-200);
+  --color-blue-300: var(--blue-300);
+  --color-blue-400: var(--blue-400);
+  --color-blue-500: var(--blue-500);
+  --color-blue-600: var(--blue-600);
+  --color-blue-700: var(--blue-700);
+  --color-blue-800: var(--blue-800);
+  --color-blue-900: var(--blue-900);
+  --color-green-50: var(--green-50);
+  --color-green-100: var(--green-100);
+  --color-green-200: var(--green-200);
+  --color-green-300: var(--green-300);
+  --color-green-400: var(--green-400);
+  --color-green-500: var(--green-500);
+  --color-green-600: var(--green-600);
+  --color-green-700: var(--green-700);
+  --color-green-800: var(--green-800);
+  --color-green-900: var(--green-900);
+  --color-red-50: var(--red-50);
+  --color-red-100: var(--red-100);
+  --color-red-200: var(--red-200);
+  --color-red-300: var(--red-300);
+  --color-red-400: var(--red-400);
+  --color-red-500: var(--red-500);
+  --color-red-600: var(--red-600);
+  --color-red-700: var(--red-700);
+  --color-red-800: var(--red-800);
+  --color-red-900: var(--red-900);
+  --color-yellow-50: var(--yellow-50);
+  --color-yellow-100: var(--yellow-100);
+  --color-yellow-200: var(--yellow-200);
+  --color-yellow-300: var(--yellow-300);
+  --color-yellow-400: var(--yellow-400);
+  --color-yellow-500: var(--yellow-500);
+  --color-yellow-600: var(--yellow-600);
+  --color-yellow-700: var(--yellow-700);
+  --color-yellow-800: var(--yellow-800);
+  --color-yellow-900: var(--yellow-900);
+  --color-alpha-white-100: var(--alpha-white-100);
+  --color-alpha-white-200: var(--alpha-white-200);
+  --color-alpha-white-300: var(--alpha-white-300);
+  --color-alpha-white-400: var(--alpha-white-400);
+  --color-alpha-white-500: var(--alpha-white-500);
+  --color-alpha-black-200: var(--alpha-black-200);
+  --color-alpha-black-400: var(--alpha-black-400);
+  --color-alpha-black-600: var(--alpha-black-600);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+
+  /* hero + promo rail */
+  --color-hero-surface: var(--neutral-25);
+  --color-ink-0: var(--ink-0);
+  --color-ink-50: var(--ink-50);
+  --color-ink-100: var(--ink-100);
+  --color-ink-text: var(--ink-text);
+  --color-promo-purple: var(--purple-100);
+  --color-promo-purple-wash: var(--purple-200);
+  --color-promo-purple-text: var(--purple-800);
+  --color-flame: var(--orange-500);
+
+  /* radius — Polymarket base .7rem; buttons=sm, inputs/chips=md, cards=xl */
+  --radius-xs: 0.325rem; /* 5.2px */
+  --radius-sm: 0.45rem; /* 7.2px — Buy Yes/No buttons */
+  --radius-md: 0.575rem; /* 9.2px — search, Trade btn, chips */
+  --radius-lg: 0.7rem; /* 11.2px — base */
+  --radius-xl: 0.95rem; /* 15.2px — grid cards */
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+
+  /* shadows */
+  --shadow-card: 0 8px 16px rgba(0, 0, 0, 0.04);
+  --shadow-md: 0 8px 16px #0000000f;
+  --shadow-popover: 0 18px 60px #00000047;
+
+  /* fonts */
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* ---------- base ---------- */
+body {
+  background: var(--bg-page);
+  color: var(--text-primary);
+  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  /* Inter alternates exactly as Polymarket enables them */
+  font-feature-settings:
+    "liga" 1, "calt" 1, "cv01" 1, "cv02" 1, "cv03" 1, "cv04" 1,
+    "cv09" 0, "cv11" 1, "cv15" 1;
+}
