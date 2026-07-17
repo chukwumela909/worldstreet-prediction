@@ -1,6 +1,7 @@
-import { Bookmark, Clock, Link2 } from "lucide-react";
+import { Clock, Link2 } from "lucide-react";
 import type { MarketEvent } from "@/types/market";
 import { formatVolume } from "@/lib/format";
+import { WatchButton } from "@/components/market/watch-button";
 
 /** Event page header: icon, breadcrumb category, title, volume + end date. */
 export function EventHeader({ event }: { event: MarketEvent }) {
@@ -34,7 +35,7 @@ export function EventHeader({ event }: { event: MarketEvent }) {
       </div>
       <div className="flex shrink-0 items-center gap-2 text-secondary">
         <Link2 className="size-4.5 cursor-pointer hover:text-primary" />
-        <Bookmark className="size-4.5 cursor-pointer hover:text-primary" />
+        <WatchButton slug={event.slug} size="md" />
       </div>
     </div>
   );

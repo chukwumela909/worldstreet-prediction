@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Bookmark, Gift } from "lucide-react";
+import { Gift } from "lucide-react";
+import { WatchButton } from "./watch-button";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toPercent } from "@/lib/format";
 import { BuyButton } from "./buy-button";
@@ -20,7 +21,7 @@ export function MarketCard({ event }: { event: MarketEvent }) {
         </span>
         <span className="flex items-center gap-2 text-tertiary">
           <Gift className="size-3.5 cursor-pointer hover:text-secondary" />
-          <Bookmark className="size-3.5 cursor-pointer hover:text-secondary" />
+          <WatchButton slug={event.slug} />
         </span>
       </footer>
     </article>
