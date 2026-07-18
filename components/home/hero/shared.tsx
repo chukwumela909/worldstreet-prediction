@@ -1,19 +1,25 @@
 /** Shared header/footer pieces for hero slides. */
 
+import { EventIcon } from "@/components/market/event-icon";
+
 export function HeroHeader({
   icon,
+  iconUrl,
   crumb,
   title,
 }: {
   icon: string;
+  iconUrl?: string;
   crumb: string;
   title: string;
 }) {
   return (
     <div className="flex items-center gap-4">
-      <span className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-element-2 text-3xl">
-        {icon}
-      </span>
+      <EventIcon
+        event={{ icon, iconUrl }}
+        className="size-14 rounded-lg text-3xl"
+        px={56}
+      />
       <div>
         <p className="text-sm font-medium text-secondary">{crumb}</p>
         <h2 className="text-2xl font-semibold leading-8">{title}</h2>

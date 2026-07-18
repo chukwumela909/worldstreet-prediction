@@ -8,21 +8,38 @@ import { PriceChart } from "@/components/event/price-chart";
 import { TradePanel } from "@/components/event/trade-panel";
 import { TradeProvider } from "@/components/event/trade-context";
 import { MOCK_EVENTS } from "@/lib/mock-events";
-import { isBinary } from "@/types/market";
+import { getEventBySlug } from "@/lib/polymarket";
+import { isBinary, type MarketEvent } from "@/types/market";
 
 interface Props {
   params: Promise<{ slug: string }>;
 }
 
+/**
+ * Live Gamma event first (fetch memoization dedupes the request between
+ * generateMetadata and the page), then the mock fixtures — so fixture
+ * links (portfolio, watchlist) keep resolving when live data lacks the
+ * slug or the API is unreachable.
+ */
+async function loadEvent(slug: string): Promise<MarketEvent | undefined> {
+  try {
+    const live = await getEventBySlug(slug);
+    if (live) return live;
+  } catch (err) {
+    console.warn(`[polymarket] event "${slug}" falling back to fixtures:`, err);
+  }
+  return MOCK_EVENTS.find((e) => e.slug === slug);
+}
+
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
-  const event = MOCK_EVENTS.find((e) => e.slug === slug);
+  const event = await loadEvent(slug);
   return { title: event ? `${event.title} | Worldstreet` : "Worldstreet" };
 }
 
 export default async function EventPage({ params }: Props) {
   const { slug } = await params;
-  const event = MOCK_EVENTS.find((e) => e.slug === slug);
+  const event = await loadEvent(slug);
   if (!event) notFound();
 
   return (

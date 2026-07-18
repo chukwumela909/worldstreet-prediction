@@ -16,6 +16,19 @@ export function MarketBrowser({ events }: { events: MarketEvent[] }) {
   const [filter, setFilter] = useState("All");
   const term = useSearchTerm().trim().toLowerCase();
 
+  // chips derived from the events' own tags (most frequent first), so
+  // every chip matches at least one card whether data is live or mock
+  const filters = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const e of events)
+      for (const t of e.tags ?? []) counts.set(t, (counts.get(t) ?? 0) + 1);
+    const derived = [...counts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 12)
+      .map(([tag]) => tag);
+    return ["All", ...derived];
+  }, [events]);
+
   const visible = useMemo(() => {
     return events.filter((e) => {
       if (filter !== "All" && !e.tags?.includes(filter)) return false;
@@ -51,7 +64,7 @@ export function MarketBrowser({ events }: { events: MarketEvent[] }) {
           <Bookmark className="size-4.5 cursor-pointer" strokeWidth={2} />
         </div>
       </div>
-      <MarketFilters active={filter} onChange={setFilter} />
+      <MarketFilters active={filter} onChange={setFilter} filters={filters} />
       {visible.length > 0 ? (
         <div className="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-3 pt-3">
           {visible.map((event) => (

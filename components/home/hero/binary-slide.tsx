@@ -29,7 +29,12 @@ export function BinarySlide({ event }: { event: MarketEvent }) {
       className="block h-full px-[21px] pb-[18px] pt-[23px]"
     >
       <div className="flex h-full flex-col">
-        <HeroHeader icon={event.icon} crumb={event.category} title={event.title} />
+        <HeroHeader
+          icon={event.icon}
+          iconUrl={event.iconUrl}
+          crumb={event.category}
+          title={event.title}
+        />
         <div className="mt-5 flex min-h-0 flex-1 gap-8 lg:gap-[72px]">
           <div className="flex min-w-0 flex-1 flex-col md:w-[318px] md:flex-none">
             <div className="flex items-center gap-2">

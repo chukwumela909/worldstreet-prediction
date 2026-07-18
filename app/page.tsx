@@ -3,9 +3,25 @@ import { FeaturedHero } from "@/components/home/featured-hero";
 import { MarketBrowser } from "@/components/home/market-browser";
 import { PromoRail } from "@/components/home/promo-rail";
 import { MOCK_EVENTS } from "@/lib/mock-events";
+import { getEvents } from "@/lib/polymarket";
+import { isBinary, type MarketEvent } from "@/types/market";
 
-export default function Home() {
-  const heroEvent = MOCK_EVENTS[0]; // World Cup Winner
+/** Live Gamma events, or the mock fixtures when the API is unreachable. */
+async function loadEvents(): Promise<MarketEvent[]> {
+  try {
+    const events = await getEvents({ limit: 24 });
+    if (events.length > 0) return events;
+  } catch (err) {
+    console.warn("[polymarket] home falling back to fixtures:", err);
+  }
+  return MOCK_EVENTS;
+}
+
+export default async function Home() {
+  const events = await loadEvents();
+  // hero slide 1 is a multi-outcome composition — feed it the top
+  // multi-outcome event by volume
+  const heroEvent = events.find((e) => !isBinary(e)) ?? events[0];
 
   return (
     <>
@@ -18,7 +34,7 @@ export default function Home() {
         </div>
 
         {/* all markets */}
-        <MarketBrowser events={MOCK_EVENTS} />
+        <MarketBrowser events={events} />
       </main>
     </>
   );

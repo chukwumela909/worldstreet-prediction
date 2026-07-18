@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Gift } from "lucide-react";
 import { WatchButton } from "./watch-button";
+import { EventIcon } from "./event-icon";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toPercent } from "@/lib/format";
 import { BuyButton } from "./buy-button";
@@ -169,9 +170,7 @@ function CardTitle({ event }: { event: MarketEvent }) {
       href={`/event/${event.slug}`}
       className="flex min-w-0 items-center gap-2.5"
     >
-      <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-element-2 text-xl">
-        {event.icon}
-      </span>
+      <EventIcon event={event} className="size-10 rounded-md text-xl" px={40} />
       <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-primary">
         {isBinary(event) ? event.markets[0].question : event.title}
       </h3>

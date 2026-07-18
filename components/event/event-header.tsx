@@ -2,6 +2,7 @@ import { Clock, Link2 } from "lucide-react";
 import type { MarketEvent } from "@/types/market";
 import { formatVolume } from "@/lib/format";
 import { WatchButton } from "@/components/market/watch-button";
+import { EventIcon } from "@/components/market/event-icon";
 
 /** Event page header: icon, breadcrumb category, title, volume + end date. */
 export function EventHeader({ event }: { event: MarketEvent }) {
@@ -14,9 +15,7 @@ export function EventHeader({ event }: { event: MarketEvent }) {
 
   return (
     <div className="flex items-start gap-3.5">
-      <span className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-element-2 text-3xl">
-        {event.icon}
-      </span>
+      <EventIcon event={event} className="size-14 rounded-lg text-3xl" px={56} />
       <div className="min-w-0 flex-1">
         <p className="text-xs font-semibold text-secondary">
           {event.category}

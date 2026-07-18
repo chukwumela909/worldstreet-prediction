@@ -27,14 +27,17 @@ const FILTERS = [
 export function MarketFilters({
   active,
   onChange,
+  filters = FILTERS,
 }: {
   active: string;
   onChange: (filter: string) => void;
+  /** Chip labels; defaults to the measured recon list for fixtures. */
+  filters?: string[];
 }) {
   return (
     <div className="mt-3 flex">
       <ScrollStrip className="gap-1.5">
-        {FILTERS.map((f) => (
+        {filters.map((f) => (
           <button
             key={f}
             onClick={() => onChange(f)}

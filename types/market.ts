@@ -25,6 +25,8 @@ export interface MarketEvent {
   title: string;
   /** Emoji stand-in for the market icon image (fixtures only). */
   icon: string;
+  /** Real icon image URL when sourced from the live Gamma API. */
+  iconUrl?: string;
   category: Category;
   /** Optional breadcrumb refinement, e.g. "Soccer" under Sports. */
   subcategory?: string;

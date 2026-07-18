@@ -27,6 +27,7 @@ export function MarketSlide({ event }: { event: MarketEvent }) {
       <div className="flex h-full flex-col">
         <HeroHeader
           icon={event.icon}
+          iconUrl={event.iconUrl}
           crumb={
             event.subcategory
               ? `${event.category} · ${event.subcategory}`
