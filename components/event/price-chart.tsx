@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -15,7 +15,15 @@ import { isBinary, type MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
 import { getSeries, TIMEFRAMES, type Timeframe } from "@/lib/mock-series";
 import { usePageNow } from "@/lib/use-now";
-import { CrosshairCursor, ValuePills } from "@/components/chart/crosshair";
+import {
+  AnchoredPills,
+  ClipStyles,
+  CrosshairCursor,
+  GHOST,
+  HoverBridge,
+  HoverClip,
+  type ChartRow,
+} from "@/components/chart/crosshair";
 
 const LINE_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)"];
 const MAX_LINES = 3;
@@ -28,18 +36,24 @@ const MAX_LINES = 3;
 export function PriceChart({ event }: { event: MarketEvent }) {
   const [tf, setTf] = useState<Timeframe>("ALL");
   const endTime = usePageNow();
-  const [hovered, setHovered] = useState<Record<string, number> | null>(null);
+  const [hoverRow, setHoverRow] = useState<ChartRow | null>(null);
+  const onHover = useCallback((row: ChartRow | null) => setHoverRow(row), []);
+  const clipId = "pc" + useId().replace(/[^a-zA-Z0-9]/g, "");
 
-  const markets = event.markets.slice(0, MAX_LINES);
+  // stable identity — a fresh slice each render would churn the chart data
+  // identity on every hover-state change and reset recharts' tooltip state
+  const markets = useMemo(() => event.markets.slice(0, MAX_LINES), [event]);
   const binary = isBinary(event);
 
   const { data, deltas } = useMemo(() => {
-    if (endTime === null) return { data: [], deltas: [] as number[] };
+    if (endTime === null) return { data: [] as ChartRow[], deltas: [] as number[] };
     const series = markets.map((m) => getSeries(m, tf, endTime));
-    const merged = series[0].map((pt, i) => {
-      const row: Record<string, number> = { t: pt.t };
+    const merged: ChartRow[] = series[0].map((pt, i) => {
+      const row: ChartRow = { t: pt.t };
       markets.forEach((m, mi) => {
-        row[m.id] = Math.round(series[mi][i].p * 10) / 10;
+        const v = Math.round(series[mi][i].p * 10) / 10;
+        row[m.id] = v;
+        row[GHOST + m.id] = v; // ghost copy under the solid line
       });
       return row;
     });
@@ -53,9 +67,10 @@ export function PriceChart({ event }: { event: MarketEvent }) {
     const firsts: number[] = [];
     let last = "";
     for (const row of data) {
-      const label = formatTick(row.t, tf);
+      const t = row.t as number;
+      const label = formatTick(t, tf);
       if (label !== last) {
-        firsts.push(row.t);
+        firsts.push(t);
         last = label;
       }
     }
@@ -68,8 +83,13 @@ export function PriceChart({ event }: { event: MarketEvent }) {
   const nameFor = (id: string) =>
     markets.find((m) => m.id === id)?.groupItemTitle ?? "Yes";
 
+  const hoveredValue = (m: (typeof markets)[number]) => {
+    const v = hoverRow?.[m.id];
+    return typeof v === "number" ? v : null;
+  };
+
   const displayPct = (m: (typeof markets)[number]) =>
-    hovered?.[m.id] ?? toPercent(m.outcomePrices[0]);
+    hoveredValue(m) ?? toPercent(m.outcomePrices[0]);
 
   return (
     <div>
@@ -82,25 +102,25 @@ export function PriceChart({ event }: { event: MarketEvent }) {
             <span key={m.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
               <span className="size-2 rounded-full" style={{ background: LINE_COLORS[i] }} />
               <span className="text-secondary">{m.groupItemTitle}</span>
-              <span className="tabular-nums">{Number(displayPct(m)).toFixed(1)}%</span>
+              {/* whole percents while hovering, one decimal at rest — like the real site */}
+              <span className="tabular-nums">
+                {hoverRow !== null
+                  ? `${Math.round(displayPct(m))}%`
+                  : `${Number(displayPct(m)).toFixed(1)}%`}
+              </span>
             </span>
           ))}
         </div>
       )}
 
       {/* chart */}
+      <ClipStyles id={clipId} />
       <div className="mt-2 h-[300px]">
         {endTime !== null && (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={data}
-              margin={{ top: 20, right: 0, bottom: 0, left: 8 }}
-              onMouseMove={(state) => {
-                const i = Number(state?.activeTooltipIndex);
-                if (Number.isFinite(i) && data[i]) setHovered(data[i]);
-              }}
-              onMouseLeave={() => setHovered(null)}
-            >
+            <LineChart data={data} margin={{ top: 20, right: 0, bottom: 0, left: 8 }}>
+              <HoverClip id={clipId} />
+              <HoverBridge onChange={onHover} />
               <CartesianGrid
                 horizontal
                 vertical={false}
@@ -128,18 +148,36 @@ export function PriceChart({ event }: { event: MarketEvent }) {
               />
               <Tooltip
                 cursor={<CrosshairCursor formatTimestamp={(t) => formatTimestamp(t, tf)} />}
-                content={<ValuePills nameFor={nameFor} />}
+                content={<AnchoredPills nameFor={nameFor} yMax={100} />}
+                position={{ x: 0, y: 0 }}
                 isAnimationActive={false}
               />
+              {/* ghost layer: clipped to the right of the cursor while hovering */}
+              {markets.map((m, i) => (
+                <Line
+                  key={GHOST + m.id}
+                  className={`${clipId}-g`}
+                  dataKey={GHOST + m.id}
+                  type="monotone"
+                  stroke={LINE_COLORS[i]}
+                  strokeWidth={2}
+                  strokeOpacity={0.14}
+                  dot={false}
+                  activeDot={false}
+                  isAnimationActive={false}
+                />
+              ))}
+              {/* solid layer: clipped to the left of the cursor while hovering */}
               {markets.map((m, i) => (
                 <Line
                   key={m.id}
+                  className={`${clipId}-s`}
                   dataKey={m.id}
                   type="monotone"
                   stroke={LINE_COLORS[i]}
                   strokeWidth={2}
                   dot={false}
-                  activeDot={{ r: 3, fill: LINE_COLORS[i], strokeWidth: 0 }}
+                  activeDot={{ r: 4, fill: LINE_COLORS[i], strokeWidth: 0 }}
                   isAnimationActive={false}
                 />
               ))}

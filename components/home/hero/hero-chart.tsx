@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useId, useMemo, useState } from "react";
 import {
   CartesianGrid,
   Line,
@@ -13,15 +13,28 @@ import {
 import type { Market } from "@/types/market";
 import { getStepSeries } from "@/lib/mock-series";
 import { usePageNow } from "@/lib/use-now";
-import { CrosshairCursor, ValuePills } from "@/components/chart/crosshair";
+import {
+  AnchoredPills,
+  ClipStyles,
+  CrosshairCursor,
+  GHOST,
+  HoverBridge,
+  HoverClip,
+  type ChartRow,
+} from "@/components/chart/crosshair";
 
 /**
- * Hero chart, matched to the real one (recon §9):
- * dense per-pixel stepped series, 2.75px lines, dotted 1×(1,3) gridlines
- * in border-active, dim x labels (neutral-200), y labels every 15% up to
- * the data peak, end dots at 0.6 opacity with a pulse circle.
+ * Hero chart, matched to the real one (recon §9 + hover screenshots):
+ * dense per-pixel stepped series, 2.75px lines, dotted gridlines, end
+ * dots with a pulse. Hovering rewinds the chart — solid lines clip at
+ * the cursor with the future ghosted underneath, the dots travel to the
+ * hover point, pills anchor to the lines, and the legend switches from
+ * one-decimal (rest) to whole-percent (hover) values. Seeded "+$N"
+ * trade markers sit on the lines like the live site's trade blips.
  */
 const POINTS = 448; // ≈ one sample per horizontal pixel, like the real chart
+const GHOST_OPACITY = 0.14;
+const MARKER_AMOUNTS = [2, 5, 10, 25, 52, 100, 250];
 
 export function HeroChart({
   markets,
@@ -31,24 +44,30 @@ export function HeroChart({
   colors: string[];
 }) {
   const now = usePageNow();
-  const [hovered, setHovered] = useState<Record<string, number> | null>(null);
+  const [hoverRow, setHoverRow] = useState<ChartRow | null>(null);
+  const onHover = useCallback((row: ChartRow | null) => setHoverRow(row), []);
+  const clipId = "hc" + useId().replace(/[^a-zA-Z0-9]/g, "");
 
   const { data, xTicks, yTicks } = useMemo(() => {
-    if (now === null) return { data: [], xTicks: [], yTicks: [] as number[] };
+    if (now === null)
+      return { data: [] as ChartRow[], xTicks: [], yTicks: [] as number[] };
     const series = markets.map((m) => getStepSeries(m, POINTS, now));
-    const merged = series[0].map((pt, i) => {
-      const row: Record<string, number> = { t: pt.t };
-      markets.forEach((m, mi) => (row[m.id] = series[mi][i].p));
+    const merged: ChartRow[] = series[0].map((pt, i) => {
+      const row: ChartRow = { t: pt.t };
+      markets.forEach((m, mi) => {
+        row[m.id] = series[mi][i].p;
+        row[GHOST + m.id] = series[mi][i].p; // ghost copy under the solid line
+      });
       return row;
     });
     // weekly labels ~5 days in, snapped to real data points (a category
     // axis drops tick values that don't exist in the data)
-    const stepMs = merged[1].t - merged[0].t;
+    const stepMs = (merged[1].t as number) - (merged[0].t as number);
     const day = 86_400_000;
     const ticks: number[] = [];
     for (let k = 0; k < 4; k++) {
       const idx = Math.round(((5 + 7 * k) * day) / stepMs);
-      if (merged[idx]) ticks.push(merged[idx].t);
+      if (merged[idx]) ticks.push(merged[idx].t as number);
     }
     // y ticks: pick the step (multiple of 5) that lands ≤5 ticks —
     // matches the real axis (peak 58 → step 15, 0–60; peak 64 → step 20, 0–80)
@@ -58,37 +77,53 @@ export function HeroChart({
     const ySteps = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
     return { data: merged, xTicks: ticks, yTicks: ySteps };
   }, [markets, now]);
+
   const lastIndex = data.length - 1;
+  const yMax = yTicks[yTicks.length - 1] ?? 100;
+
+  // one seeded "+$N" trade marker per series, like the live trade blips
+  const markers = useMemo(
+    () =>
+      markets.map((m, i) => {
+        let h = 0;
+        for (let c = 0; c < m.id.length; c++) h = (h * 31 + m.id.charCodeAt(c)) % 99991;
+        return {
+          index: Math.floor(POINTS * (0.08 + ((h % 47) / 47) * 0.45)) + i * 9,
+          amount: MARKER_AMOUNTS[(h + i * 3) % MARKER_AMOUNTS.length],
+        };
+      }),
+    [markets],
+  );
 
   const nameFor = (id: string) =>
     markets.find((m) => m.id === id)?.groupItemTitle ?? "Yes";
 
+  const legendValue = (m: Market) => {
+    const v = hoverRow?.[m.id];
+    // hovered legend rounds to whole percents, like the real site
+    if (typeof v === "number") return `${Math.round(v)}%`;
+    return `${(parseFloat(m.outcomePrices[0]) * 100).toFixed(1)}%`;
+  };
+
   return (
     <div className="flex h-full min-w-0 flex-col pt-10">
-      {/* legend tracks hover */}
+      <ClipStyles id={clipId} />
+      {/* legend tracks hover (integers while hovering, decimals at rest) */}
       <div className="flex gap-4">
         {markets.map((m, i) => (
           <span key={m.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
             <span className="size-2 rounded-full" style={{ background: colors[i] }} />
             <span className="text-secondary">{m.groupItemTitle ?? "Yes"}</span>
-            <span className="tabular-nums">
-              {(hovered?.[m.id] ?? parseFloat(m.outcomePrices[0]) * 100).toFixed(1)}%
-            </span>
+            <span className="tabular-nums">{legendValue(m)}</span>
           </span>
         ))}
       </div>
       <div className="mt-2 min-h-0 flex-1">
         {now !== null && (
           <ResponsiveContainer width="100%" height="100%">
-            <LineChart
-              data={data}
-              margin={{ top: 20, right: 0, bottom: 0, left: 8 }}
-              onMouseMove={(state) => {
-                const i = Number(state?.activeTooltipIndex);
-                if (Number.isFinite(i) && data[i]) setHovered(data[i]);
-              }}
-              onMouseLeave={() => setHovered(null)}
-            >
+            <LineChart data={data} margin={{ top: 20, right: 0, bottom: 0, left: 8 }}>
+              <HoverClip id={clipId} />
+              <HoverBridge onChange={onHover} />
               <CartesianGrid
                 horizontal
                 vertical={false}
@@ -108,7 +143,7 @@ export function HeroChart({
               />
               <YAxis
                 orientation="right"
-                domain={[0, yTicks[yTicks.length - 1] ?? 100]}
+                domain={[0, yMax]}
                 ticks={yTicks}
                 tickFormatter={(p: number) => `${Math.round(p)}%`}
                 width={40}
@@ -129,12 +164,46 @@ export function HeroChart({
                     }
                   />
                 }
-                content={<ValuePills nameFor={nameFor} />}
+                content={<AnchoredPills nameFor={nameFor} yMax={yMax} />}
+                position={{ x: 0, y: 0 }}
                 isAnimationActive={false}
               />
+              {/* ghost layer: clipped to the right of the cursor while hovering */}
+              {markets.map((m, i) => (
+                <Line
+                  key={GHOST + m.id}
+                  className={`${clipId}-g`}
+                  dataKey={GHOST + m.id}
+                  type="stepAfter"
+                  stroke={colors[i]}
+                  strokeWidth={2.75}
+                  strokeOpacity={GHOST_OPACITY}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  isAnimationActive={false}
+                  activeDot={false}
+                  dot={(props: { index?: number; cx?: number; cy?: number }) =>
+                    props.index === markers[i].index ? (
+                      <TradeMarker
+                        key={`gmk-${m.id}`}
+                        cx={props.cx}
+                        cy={props.cy}
+                        color={colors[i]}
+                        amount={markers[i].amount}
+                        opacity={GHOST_OPACITY}
+                        clip={`url(#${clipId}-ghost)`}
+                      />
+                    ) : (
+                      <g key={`gd-${m.id}-${props.index}`} />
+                    )
+                  }
+                />
+              ))}
+              {/* solid layer: clipped to the left of the cursor while hovering */}
               {markets.map((m, i) => (
                 <Line
                   key={m.id}
+                  className={`${clipId}-s`}
                   dataKey={m.id}
                   type="stepAfter"
                   stroke={colors[i]}
@@ -142,19 +211,31 @@ export function HeroChart({
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   isAnimationActive={false}
-                  activeDot={{ r: 3, fill: colors[i], strokeWidth: 0 }}
-                  dot={(props: { index?: number; cx?: number; cy?: number }) =>
-                    props.index === lastIndex ? (
-                      <EndDot
-                        key={`end-${m.id}`}
-                        cx={props.cx}
-                        cy={props.cy}
-                        color={colors[i]}
-                      />
-                    ) : (
-                      <g key={`d-${m.id}-${props.index}`} />
-                    )
-                  }
+                  activeDot={{ r: 4, fill: colors[i], strokeWidth: 0 }}
+                  dot={(props: { index?: number; cx?: number; cy?: number }) => {
+                    if (props.index === lastIndex)
+                      return (
+                        <EndDot
+                          key={`end-${m.id}`}
+                          cx={props.cx}
+                          cy={props.cy}
+                          color={colors[i]}
+                          clip={`url(#${clipId}-solid)`}
+                        />
+                      );
+                    if (props.index === markers[i].index)
+                      return (
+                        <TradeMarker
+                          key={`mk-${m.id}`}
+                          cx={props.cx}
+                          cy={props.cy}
+                          color={colors[i]}
+                          amount={markers[i].amount}
+                          clip={`url(#${clipId}-solid)`}
+                        />
+                      );
+                    return <g key={`d-${m.id}-${props.index}`} />;
+                  }}
                 />
               ))}
             </LineChart>
@@ -168,14 +249,59 @@ export function HeroChart({
 /**
  * End-of-line marker, exactly the real structure: a persistent r=4 dot at
  * 0.6 opacity plus a second circle that pulses (theirs pings on live
- * price updates; ours pings on an idle cycle).
+ * price updates; ours pings on an idle cycle). Lives on the solid layer,
+ * so the clip hides it while hovering — the traveling activeDot takes
+ * over as the line's "live edge".
  */
-function EndDot({ cx, cy, color }: { cx?: number; cy?: number; color: string }) {
+function EndDot({
+  cx,
+  cy,
+  color,
+  clip,
+}: {
+  cx?: number;
+  cy?: number;
+  color: string;
+  clip?: string;
+}) {
   if (cx === undefined || cy === undefined) return <g />;
   return (
-    <g className="pointer-events-none">
+    <g className="pointer-events-none" clipPath={clip}>
       <circle cx={cx} cy={cy} r={4} fill={color} className="animate-hero-ping" />
       <circle cx={cx} cy={cy} r={4} fill={color} opacity={0.6} />
+    </g>
+  );
+}
+
+/** "+ $N" trade blip pinned to a point on the line, in the series color. */
+function TradeMarker({
+  cx,
+  cy,
+  color,
+  amount,
+  opacity = 1,
+  clip,
+}: {
+  cx?: number;
+  cy?: number;
+  color: string;
+  amount: number;
+  opacity?: number;
+  clip?: string;
+}) {
+  if (cx === undefined || cy === undefined) return <g />;
+  return (
+    <g className="pointer-events-none" clipPath={clip}>
+      <text
+        x={cx - 6}
+        y={cy + 20}
+        fill={color}
+        opacity={opacity}
+        fontSize={15}
+        fontWeight={600}
+      >
+        + ${amount}
+      </text>
     </g>
   );
 }
