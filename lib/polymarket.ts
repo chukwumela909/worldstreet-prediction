@@ -227,11 +227,17 @@ export function toMarketEvent(raw: GammaEvent): MarketEvent | null {
 
 async function gammaFetch<T>(
   path: string,
-  params: Record<string, string | number | boolean | undefined>,
+  params: Record<string, string | number | boolean | string[] | undefined>,
 ): Promise<T> {
   const url = new URL(path, GAMMA_BASE);
   for (const [key, value] of Object.entries(params)) {
-    if (value !== undefined) url.searchParams.set(key, String(value));
+    if (value === undefined) continue;
+    // Gamma takes repeated keys for multi-value filters (?slug=a&slug=b)
+    if (Array.isArray(value)) {
+      for (const item of value) url.searchParams.append(key, item);
+    } else {
+      url.searchParams.set(key, String(value));
+    }
   }
 
   let res: Response;
@@ -297,6 +303,21 @@ export const getEventBySlug = unstable_cache(
     return toMarketEvent(raw[0]);
   },
   ["polymarket-event-by-slug"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+/**
+ * Several events in one call, for clients holding a set of slugs (open
+ * positions, watchlist). Unknown slugs are omitted rather than erroring,
+ * so a mix of live and fixture slugs returns just the live ones.
+ */
+export const getEventsBySlugs = unstable_cache(
+  async (slugs: string[]): Promise<MarketEvent[]> => {
+    if (slugs.length === 0) return [];
+    const raw = await gammaFetch<GammaEvent[]>("/events", { slug: slugs });
+    return raw.map(toMarketEvent).filter((e): e is MarketEvent => e !== null);
+  },
+  ["polymarket-events-by-slugs"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );
 

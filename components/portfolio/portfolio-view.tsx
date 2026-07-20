@@ -6,7 +6,9 @@ import { RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-context";
 import { MarketCard } from "@/components/market/market-card";
 import { DepositModal } from "@/components/nav/deposit-modal";
-import { currentPrice, eventBySlug } from "@/lib/market-lookup";
+import { positionPrice, resolveEvent } from "@/lib/market-lookup";
+import { useLiveEvents } from "@/lib/use-live-events";
+import type { MarketEvent } from "@/types/market";
 import {
   resetPortfolio,
   usePortfolio,
@@ -27,18 +29,35 @@ export function PortfolioView() {
   const [tab, setTab] = useState<Tab>("Positions");
   const [depositOpen, setDepositOpen] = useState(false);
 
+  // positions and the watchlist both reference events by slug; fetch the
+  // live ones once for the whole page
+  const slugs = useMemo(
+    () => [
+      ...new Set([
+        ...portfolio.positions.map((p) => p.eventSlug),
+        ...portfolio.watchlist,
+      ]),
+    ],
+    [portfolio.positions, portfolio.watchlist],
+  );
+  const { bySlug, loading } = useLiveEvents(slugs);
+
   const rows = useMemo(
     () =>
       portfolio.positions.map((p) => {
-        const price = currentPrice(p.marketId, p.side);
-        const value = p.shares * price;
+        const price = positionPrice(p, bySlug);
+        // fall back to entry price while live prices load, so the totals
+        // read as "no change yet" rather than a spurious 100% loss
+        const marked = price ?? p.avgPrice;
+        const value = p.shares * marked;
         const cost = p.shares * p.avgPrice;
-        return { p, price, value, pnl: value - cost, cost };
+        return { p, price, value, pnl: value - cost, cost, pending: price === null };
       }),
-    [portfolio.positions],
+    [portfolio.positions, bySlug],
   );
   const positionsValue = rows.reduce((s, r) => s + r.value, 0);
   const totalPnl = rows.reduce((s, r) => s + r.pnl, 0);
+  const pricesPending = loading && rows.some((r) => r.pending);
 
   if (!user) {
     return (
@@ -86,11 +105,18 @@ export function PortfolioView() {
 
       {/* balance cards */}
       <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <StatCard label="Positions value" value={usd(positionsValue)} />
+        <StatCard
+          label="Positions value"
+          value={pricesPending ? "—" : usd(positionsValue)}
+        />
         <StatCard label="Cash" value={usd(portfolio.cash)} />
         <StatCard
           label="Profit/Loss"
-          value={`${totalPnl >= 0 ? "+" : "−"}${usd(Math.abs(totalPnl))}`}
+          value={
+            pricesPending
+              ? "—"
+              : `${totalPnl >= 0 ? "+" : "−"}${usd(Math.abs(totalPnl))}`
+          }
           tone={totalPnl >= 0 ? "text-yes" : "text-no"}
           icon={
             totalPnl >= 0 ? (
@@ -125,7 +151,13 @@ export function PortfolioView() {
       <div className="py-4">
         {tab === "Positions" && <Positions rows={rows} />}
         {tab === "History" && <History activity={portfolio.activity} />}
-        {tab === "Watchlist" && <Watchlist slugs={portfolio.watchlist} />}
+        {tab === "Watchlist" && (
+          <Watchlist
+            slugs={portfolio.watchlist}
+            bySlug={bySlug}
+            loading={loading}
+          />
+        )}
       </div>
 
       {depositOpen && <DepositModal onClose={() => setDepositOpen(false)} />}
@@ -158,10 +190,12 @@ function StatCard({
 
 interface Row {
   p: Position;
-  price: number;
+  /** null while the live price is still loading */
+  price: number | null;
   value: number;
   pnl: number;
   cost: number;
+  pending: boolean;
 }
 
 function Positions({ rows }: { rows: Row[] }) {
@@ -175,7 +209,7 @@ function Positions({ rows }: { rows: Row[] }) {
   }
   return (
     <ul className="flex flex-col">
-      {rows.map(({ p, price, value, pnl, cost }) => (
+      {rows.map(({ p, price, value, pnl, cost, pending }) => (
         <li
           key={`${p.marketId}-${p.side}`}
           className="flex items-center gap-3 border-b border-border py-3.5 last:border-0"
@@ -197,17 +231,22 @@ function Positions({ rows }: { rows: Row[] }) {
                 {p.side === "yes" ? "Yes" : "No"}
               </span>{" "}
               · {p.shares.toFixed(1)} shares @ {(p.avgPrice * 100).toFixed(1)}¢
-              · now {(price * 100).toFixed(1)}¢
+              {pending ? "" : ` · now ${((price ?? 0) * 100).toFixed(1)}¢`}
             </p>
           </div>
           <div className="text-right">
-            <p className="text-sm font-semibold">{usd(value)}</p>
-            <p
-              className={`text-[13px] font-semibold ${pnl >= 0 ? "text-yes" : "text-no"}`}
-            >
-              {pnl >= 0 ? "+" : "−"}
-              {usd(Math.abs(pnl))} ({cost > 0 ? ((pnl / cost) * 100).toFixed(1) : "0.0"}%)
+            <p className="text-sm font-semibold">
+              {pending ? "—" : usd(value)}
             </p>
+            {!pending && (
+              <p
+                className={`text-[13px] font-semibold ${pnl >= 0 ? "text-yes" : "text-no"}`}
+              >
+                {pnl >= 0 ? "+" : "−"}
+                {usd(Math.abs(pnl))} (
+                {cost > 0 ? ((pnl / cost) * 100).toFixed(1) : "0.0"}%)
+              </p>
+            )}
           </div>
           <Link
             href={`/event/${p.eventSlug}`}
@@ -286,10 +325,23 @@ function timeAgo(ts: number): string {
 
 /* ---------- watchlist ---------- */
 
-function Watchlist({ slugs }: { slugs: string[] }) {
+function Watchlist({
+  slugs,
+  bySlug,
+  loading,
+}: {
+  slugs: string[];
+  bySlug: Record<string, MarketEvent>;
+  loading: boolean;
+}) {
   const events = slugs
-    .map((s) => eventBySlug(s))
-    .filter((e): e is NonNullable<typeof e> => Boolean(e));
+    .map((s) => resolveEvent(s, bySlug))
+    .filter((e): e is MarketEvent => Boolean(e));
+  // a saved live market resolves only once its event arrives — don't
+  // flash "nothing saved" at someone who has bookmarks
+  if (events.length === 0 && loading && slugs.length > 0) {
+    return <div className="py-10 text-center text-sm text-secondary">Loading…</div>;
+  }
   if (events.length === 0) {
     return (
       <Empty

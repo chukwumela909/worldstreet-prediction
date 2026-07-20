@@ -15,7 +15,8 @@ import {
 import { useAuth } from "@/components/auth/auth-context";
 import { toggleTheme, useTheme } from "@/lib/theme-store";
 import { usePortfolio } from "@/lib/portfolio-store";
-import { currentPrice } from "@/lib/market-lookup";
+import { positionPrice } from "@/lib/market-lookup";
+import { useLiveEvents } from "@/lib/use-live-events";
 import { DepositModal } from "./deposit-modal";
 
 /**
@@ -55,13 +56,21 @@ function SignedInActions() {
   const portfolio = usePortfolio();
   const [depositOpen, setDepositOpen] = useState(false);
 
+  const slugs = useMemo(
+    () => [...new Set(portfolio.positions.map((p) => p.eventSlug))],
+    [portfolio.positions],
+  );
+  const { bySlug } = useLiveEvents(slugs);
+
   const positionsValue = useMemo(
     () =>
-      portfolio.positions.reduce(
-        (sum, p) => sum + p.shares * currentPrice(p.marketId, p.side),
-        0,
-      ),
-    [portfolio.positions],
+      portfolio.positions.reduce((sum, p) => {
+        // mark at entry price until the live one lands, so the header
+        // doesn't dip to $0 on every page load
+        const price = positionPrice(p, bySlug) ?? p.avgPrice;
+        return sum + p.shares * price;
+      }, 0),
+    [portfolio.positions, bySlug],
   );
 
   return (
