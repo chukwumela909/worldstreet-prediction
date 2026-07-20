@@ -9,6 +9,7 @@ import { DepositModal } from "@/components/nav/deposit-modal";
 import { positionPrice, resolveEvent } from "@/lib/market-lookup";
 import { useLiveEvents } from "@/lib/use-live-events";
 import type { MarketEvent } from "@/types/market";
+import { EventIcon } from "@/components/market/event-icon";
 import {
   resetPortfolio,
   usePortfolio,
@@ -29,16 +30,20 @@ export function PortfolioView() {
   const [tab, setTab] = useState<Tab>("Positions");
   const [depositOpen, setDepositOpen] = useState(false);
 
-  // positions and the watchlist both reference events by slug; fetch the
-  // live ones once for the whole page
+  // Every tab references events by slug; fetch the live ones once for the
+  // whole page. Ordered by need — the route caps the list, so history
+  // (icons only) yields to positions and watchlist (pricing and rendering).
   const slugs = useMemo(
     () => [
       ...new Set([
         ...portfolio.positions.map((p) => p.eventSlug),
         ...portfolio.watchlist,
+        ...portfolio.activity
+          .map((a) => a.eventSlug)
+          .filter((s): s is string => Boolean(s)),
       ]),
     ],
-    [portfolio.positions, portfolio.watchlist],
+    [portfolio.positions, portfolio.watchlist, portfolio.activity],
   );
   const { bySlug, loading } = useLiveEvents(slugs);
 
@@ -149,8 +154,10 @@ export function PortfolioView() {
       </div>
 
       <div className="py-4">
-        {tab === "Positions" && <Positions rows={rows} />}
-        {tab === "History" && <History activity={portfolio.activity} />}
+        {tab === "Positions" && <Positions rows={rows} bySlug={bySlug} />}
+        {tab === "History" && (
+          <History activity={portfolio.activity} bySlug={bySlug} />
+        )}
         {tab === "Watchlist" && (
           <Watchlist
             slugs={portfolio.watchlist}
@@ -186,6 +193,32 @@ function StatCard({
   );
 }
 
+/* ---------- shared ---------- */
+
+/**
+ * Row icon for stored records (positions, activity). Positions capture an
+ * emoji at trade time; prefer the event's real image once it resolves, and
+ * keep the stored emoji as the fallback for events that no longer resolve.
+ */
+function RowIcon({
+  slug,
+  fallback,
+  bySlug,
+}: {
+  slug?: string;
+  fallback: string;
+  bySlug: Record<string, MarketEvent>;
+}) {
+  const event = slug ? resolveEvent(slug, bySlug) : undefined;
+  return (
+    <EventIcon
+      event={{ icon: fallback, iconUrl: event?.iconUrl }}
+      className="size-10 rounded-md text-xl"
+      px={40}
+    />
+  );
+}
+
 /* ---------- positions ---------- */
 
 interface Row {
@@ -198,7 +231,13 @@ interface Row {
   pending: boolean;
 }
 
-function Positions({ rows }: { rows: Row[] }) {
+function Positions({
+  rows,
+  bySlug,
+}: {
+  rows: Row[];
+  bySlug: Record<string, MarketEvent>;
+}) {
   if (rows.length === 0) {
     return (
       <Empty
@@ -214,9 +253,7 @@ function Positions({ rows }: { rows: Row[] }) {
           key={`${p.marketId}-${p.side}`}
           className="flex items-center gap-3 border-b border-border py-3.5 last:border-0"
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-element-2 text-xl">
-            {p.eventIcon}
-          </span>
+          <RowIcon slug={p.eventSlug} fallback={p.eventIcon} bySlug={bySlug} />
           <div className="min-w-0 flex-1">
             <Link
               href={`/event/${p.eventSlug}`}
@@ -262,7 +299,13 @@ function Positions({ rows }: { rows: Row[] }) {
 
 /* ---------- history ---------- */
 
-function History({ activity }: { activity: Activity[] }) {
+function History({
+  activity,
+  bySlug,
+}: {
+  activity: Activity[];
+  bySlug: Record<string, MarketEvent>;
+}) {
   if (activity.length === 0) return <Empty text="No activity yet." />;
   return (
     <ul className="flex flex-col">
@@ -271,9 +314,17 @@ function History({ activity }: { activity: Activity[] }) {
           key={a.id}
           className="flex items-center gap-3 border-b border-border py-3.5 last:border-0"
         >
-          <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-element-2 text-xl">
-            {a.type === "deposit" ? "💵" : a.eventIcon}
-          </span>
+          {a.type === "deposit" ? (
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-md bg-element-2 text-xl">
+              💵
+            </span>
+          ) : (
+            <RowIcon
+              slug={a.eventSlug}
+              fallback={a.eventIcon ?? "•"}
+              bySlug={bySlug}
+            />
+          )}
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold">
               {a.type === "deposit" ? (
