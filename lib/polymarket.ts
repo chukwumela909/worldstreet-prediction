@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache";
 import type { Category, Market, MarketEvent } from "@/types/market";
 import { CATEGORIES } from "@/types/market";
 import type { HistoryWindow, SeriesPoint } from "@/lib/series";
+import { deriveHotTopics, type HotTopic } from "@/lib/hot-topics";
 
 /**
  * Server-side data layer for Polymarket's public Gamma API
@@ -54,6 +55,8 @@ interface GammaTag {
   id: string;
   label: string;
   slug: string;
+  /** Polymarket's own "don't surface this tag" flag. */
+  forceHide?: boolean;
 }
 
 interface GammaMarket {
@@ -319,6 +322,31 @@ export const getEventsBySlugs = unstable_cache(
   },
   ["polymarket-events-by-slugs"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+/**
+ * Hot topics ranked by real 24h volume.
+ *
+ * Aggregates over a wider sample than the grid shows, since a topic's
+ * volume is spread across many events. Derived from the raw payload —
+ * `toMarketEvent` drops volume24hr and the tag flags the ranking needs.
+ */
+export const getHotTopics = unstable_cache(
+  async (limit = 5): Promise<HotTopic[]> => {
+    const raw = await gammaFetch<GammaEvent[]>("/events", {
+      limit: 100,
+      closed: false,
+      active: true,
+      archived: false,
+      order: "volume24hr",
+      ascending: false,
+    });
+    return deriveHotTopics(raw, limit);
+  },
+  ["polymarket-hot-topics"],
+  // a slower-moving aggregate than spot prices; also keeps this extra
+  // wide fetch well clear of Gamma's ~60 req/min ceiling
+  { revalidate: HISTORY_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );
 
 /* ------------------------------------------------------------------ */

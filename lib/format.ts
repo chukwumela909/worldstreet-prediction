@@ -1,11 +1,17 @@
+/** Compact USD amount: 4248952871 → "$4.2B", 970000 → "$970K". */
+export function formatUsdCompact(n: number): string {
+  if (!Number.isFinite(n)) return "$0";
+  if (n >= 1_000_000_000) return `$${trimZero(n / 1_000_000_000)}B`;
+  if (n >= 1_000_000) return `$${trimZero(n / 1_000_000)}M`;
+  if (n >= 1_000) return `$${trimZero(n / 1_000)}K`;
+  return `$${Math.round(n)}`;
+}
+
 /** Format a decimal-string USD volume like Polymarket: "$4,248,952,871 Vol." → "$4B Vol." on cards. */
 export function formatVolume(volume: string): string {
   const n = parseFloat(volume);
   if (Number.isNaN(n)) return "$0 Vol.";
-  if (n >= 1_000_000_000) return `$${trimZero(n / 1_000_000_000)}B Vol.`;
-  if (n >= 1_000_000) return `$${trimZero(n / 1_000_000)}M Vol.`;
-  if (n >= 1_000) return `$${trimZero(n / 1_000)}K Vol.`;
-  return `$${Math.round(n)} Vol.`;
+  return `${formatUsdCompact(n)} Vol.`;
 }
 
 function trimZero(n: number): string {

@@ -1,11 +1,15 @@
 import { ChevronRight, Flame } from "lucide-react";
 import { HOT_TOPICS } from "@/lib/mock-home";
+import type { HotTopic } from "@/lib/hot-topics";
 
 /**
  * Right rail (362px @1280): two promo cards (102px, radius 20, ink palette),
  * Hot topics ranked list, Explore all pill. Specs from homepage recon.
+ *
+ * `topics` carries live tag volume; the fixtures stand in when Gamma is
+ * unreachable.
  */
-export function PromoRail() {
+export function PromoRail({ topics = HOT_TOPICS }: { topics?: HotTopic[] }) {
   return (
     <aside className="hidden w-[362px] shrink-0 flex-col lg:flex">
       {/* Perps promo */}
@@ -36,8 +40,8 @@ export function PromoRail() {
           <ChevronRight className="size-4 text-secondary" strokeWidth={2.5} />
         </button>
         <ul>
-          {HOT_TOPICS.map((t) => (
-            <li key={t.rank}>
+          {topics.map((t) => (
+            <li key={t.slug ?? t.rank}>
               <button className="group flex h-[46px] w-full items-center gap-3 text-left">
                 <span className="w-4 text-sm font-semibold text-tertiary">
                   {t.rank}
