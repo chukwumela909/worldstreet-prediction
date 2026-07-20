@@ -324,6 +324,101 @@ export const getEventsBySlugs = unstable_cache(
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );
 
+/* ------------------------------------------------------------------ */
+/* Comments                                                            */
+/* ------------------------------------------------------------------ */
+
+interface GammaComment {
+  id: string;
+  body?: string;
+  reportCount?: number;
+  profile?: {
+    name?: string;
+    pseudonym?: string;
+    displayUsernamePublic?: boolean;
+    profileImage?: string;
+    baseAddress?: string;
+  };
+}
+
+/** A comment normalized for display (hero marquee, event tabs). */
+export interface EventComment {
+  id: string;
+  user: string;
+  text: string;
+  /** Real avatar when allowlisted; otherwise render the hue gradient. */
+  avatarUrl?: string;
+  /** Deterministic per-user hue for the gradient avatar fallback. */
+  hue: number;
+}
+
+/**
+ * Accounts without a chosen username get "0x<40 hex>-<timestamp>" as
+ * their name; display it truncated the way Polymarket does (0xEfF3…1c83).
+ */
+function shortenAddressName(name: string): string {
+  const m = name.match(/^(0x[0-9a-fA-F]{40})/);
+  if (!m) return name;
+  const addr = m[1];
+  return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+/** Small stable hash → hue, so a user's fallback avatar color sticks. */
+function hueFor(seed: string): number {
+  let h = 0;
+  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) | 0;
+  return ((h % 360) + 360) % 360;
+}
+
+/**
+ * Filter + normalize raw comments. Drops anything reported (Gamma leaves
+ * spam like "passive income via copy trading" flagged but published),
+ * near-empty bodies, and repeat commenters; honors displayUsernamePublic
+ * by falling back to Polymarket's anonymous pseudonym.
+ */
+export function toEventComments(raw: GammaComment[], limit = 8): EventComment[] {
+  const seen = new Set<string>();
+  const out: EventComment[] = [];
+  for (const c of raw) {
+    if (out.length >= limit) break;
+    const text = (c.body ?? "").trim();
+    if ((c.reportCount ?? 0) > 0 || text.length < 20) continue;
+    const p = c.profile ?? {};
+    const user = shortenAddressName(
+      (p.displayUsernamePublic ? p.name : p.pseudonym) ||
+        p.pseudonym ||
+        "anonymous",
+    );
+    const dedupeKey = p.baseAddress ?? user;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    out.push({
+      id: c.id,
+      user,
+      text,
+      avatarUrl: safeIconUrl(p.profileImage),
+      hue: hueFor(dedupeKey),
+    });
+  }
+  return out;
+}
+
+/** Recent comments on an event, filtered for display. */
+export const getComments = unstable_cache(
+  async (eventId: string): Promise<EventComment[]> => {
+    const raw = await gammaFetch<GammaComment[]>("/comments", {
+      parent_entity_type: "Event",
+      parent_entity_id: eventId,
+      limit: 40,
+      order: "createdAt",
+      ascending: false,
+    });
+    return toEventComments(raw);
+  },
+  ["polymarket-comments"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
 /**
  * Hot topics ranked by real 24h volume.
  *
