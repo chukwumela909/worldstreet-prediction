@@ -13,7 +13,6 @@ import {
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
-import { getSeries } from "@/lib/mock-series";
 import { mergeSeries, TIMEFRAMES, type Timeframe } from "@/lib/series";
 import { usePriceHistory } from "@/lib/use-price-history";
 import { usePageNow } from "@/lib/use-now";
@@ -52,16 +51,9 @@ export function PriceChart({ event }: { event: MarketEvent }) {
   const { data, deltas } = useMemo(() => {
     if (endTime === null) return { data: [] as ChartRow[], deltas: [] as number[] };
 
-    // Real CLOB history where available. A market with a clobTokenId has
-    // real history coming, so render nothing while it loads rather than
-    // flashing a synthetic curve that looks like market data; fall back to
-    // the synthetic series only for fixtures, or once a fetch has failed.
-    const series = markets.map((m) => {
-      const real = history.byMarket[m.id];
-      if (real) return real;
-      if (m.clobTokenId && history.loading) return [];
-      return getSeries(m, tf, endTime);
-    });
+    // Real CLOB history only — while it loads (or if the fetch fails)
+    // the chart stays empty rather than plotting an invented curve.
+    const series = markets.map((m) => history.byMarket[m.id] ?? []);
 
     // merge on a shared timestamp grid — real series are not index-aligned
     // across markets, so zipping by index would mismatch prices and times
@@ -83,7 +75,7 @@ export function PriceChart({ event }: { event: MarketEvent }) {
       s.length > 0 ? Math.round(s[s.length - 1].p - s[0].p) : 0,
     );
     return { data: merged, deltas: ds };
-  }, [markets, tf, endTime, history.byMarket, history.loading]);
+  }, [markets, endTime, history.byMarket]);
 
   // explicit ticks: first point of each distinct label, thinned to ≤7
   const ticks = useMemo(() => {

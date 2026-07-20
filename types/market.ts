@@ -18,9 +18,10 @@ export interface Market {
   volume: string;
   /**
    * CLOB token id for the Yes outcome — the key for real price history.
-   * Absent on mock fixtures, which fall back to the synthetic series.
    */
   clobTokenId?: string;
+  /** On-chain condition id — the key for holders/trades lookups. */
+  conditionId?: string;
   /** Real 24h price change as a decimal (e.g. -0.0025 = -0.25pp). */
   oneDayPriceChange?: number;
 }

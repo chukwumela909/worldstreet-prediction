@@ -1,17 +1,17 @@
 "use client";
 
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import { HERO_GAME } from "@/lib/mock-home";
+import type { FeaturedGame, GameLineGroup } from "@/lib/polymarket";
 import { useAuth } from "@/components/auth/auth-context";
 import { HeroFooter } from "./shared";
 
 /**
- * Sports game hero slide (Spain vs. Argentina): team buttons, spread and
- * total pickers left; flags + kickoff center-right. Layout from the
- * game-card hero observed on the live homepage.
+ * Sports game hero slide: three-way moneyline buttons, spread and total
+ * pickers left; team badges + kickoff center-right. Layout from the
+ * game-card hero observed on the live homepage; data is a live soccer
+ * game picked server-side (see getFeaturedGame).
  */
-export function GameSlide() {
-  const g = HERO_GAME;
+export function GameSlide({ game }: { game: FeaturedGame }) {
   const { user, openAuth } = useAuth();
   const gate = () => {
     if (!user) openAuth();
@@ -19,8 +19,8 @@ export function GameSlide() {
   return (
     <div className="flex h-full flex-col px-[21px] pb-[18px] pt-[23px]">
       <div>
-        <p className="text-sm font-medium text-secondary">{g.breadcrumb}</p>
-        <h2 className="mt-1 text-2xl font-semibold leading-8">{g.title}</h2>
+        <p className="text-sm font-medium text-secondary">{game.breadcrumb}</p>
+        <h2 className="mt-1 text-2xl font-semibold leading-8">{game.title}</h2>
       </div>
 
       <div className="mt-4 flex min-h-0 flex-1 gap-10">
@@ -30,54 +30,56 @@ export function GameSlide() {
           <div className="flex gap-2">
             <button
               onClick={gate}
-              className="h-11 flex-1 rounded-sm bg-red-100 text-sm font-semibold text-red-700 transition-colors duration-[120ms] ease-out hover:bg-red-200"
+              className="h-11 min-w-0 flex-1 truncate rounded-sm bg-red-100 px-2 text-sm font-semibold text-red-700 transition-colors duration-[120ms] ease-out hover:bg-red-200"
             >
-              {g.home.name}
+              {game.home.name} {game.home.pct}%
             </button>
+            {game.draw && (
+              <button
+                onClick={gate}
+                className="h-11 w-24 shrink-0 rounded-sm border border-border text-sm font-semibold text-secondary transition-colors duration-[120ms] ease-out hover:border-border-hover"
+              >
+                DRAW {game.draw.pct}%
+              </button>
+            )}
             <button
               onClick={gate}
-              className="h-11 w-20 rounded-sm border border-border text-sm font-semibold text-secondary transition-colors duration-[120ms] ease-out hover:border-border-hover"
+              className="h-11 min-w-0 flex-1 truncate rounded-sm bg-blue-100 px-2 text-sm font-semibold text-blue-700 transition-colors duration-[120ms] ease-out hover:bg-blue-200"
             >
-              DRAW
-            </button>
-            <button
-              onClick={gate}
-              className="h-11 flex-1 rounded-sm bg-blue-100 text-sm font-semibold text-blue-700 transition-colors duration-[120ms] ease-out hover:bg-blue-200"
-            >
-              {g.away.name}
+              {game.away.name} {game.away.pct}%
             </button>
           </div>
 
-          <PickerRow label="Spread" lines={[...g.spread.lines]} active={g.spread.active} options={[...g.spread.options]} />
-          <PickerRow label="Total" lines={[...g.total.lines]} active={g.total.active} options={[...g.total.options]} />
+          {game.spread && (
+            <PickerRow label="Spread" group={game.spread} onPick={gate} />
+          )}
+          {game.total && <PickerRow label="Total" group={game.total} onPick={gate} />}
         </div>
 
-        {/* center: flags + kickoff */}
+        {/* center: badges + kickoff */}
         <div className="hidden flex-1 items-start justify-center gap-12 pt-4 md:flex">
-          <TeamBadge flag={g.home.flag} name={g.home.name} />
+          <TeamBadge name={game.home.name} />
           <div className="pt-3 text-center">
-            <p className="text-xl font-semibold">{g.kickoff}</p>
-            <p className="mt-0.5 text-sm font-medium text-secondary">{g.date}</p>
+            <p className="text-xl font-semibold">{game.kickoff}</p>
+            <p className="mt-0.5 text-sm font-medium text-secondary">{game.date}</p>
           </div>
-          <TeamBadge flag={g.away.flag} name={g.away.name} />
+          <TeamBadge name={game.away.name} />
         </div>
       </div>
 
-      <HeroFooter volumeLabel={g.volume} />
+      <HeroFooter volume={game.volume} />
     </div>
   );
 }
 
 function PickerRow({
   label,
-  lines,
-  active,
-  options,
+  group,
+  onPick,
 }: {
   label: string;
-  lines: string[];
-  active: string;
-  options: string[];
+  group: GameLineGroup;
+  onPick: () => void;
 }) {
   return (
     <div className="mt-4">
@@ -85,8 +87,11 @@ function PickerRow({
         <span className="text-sm font-semibold">{label}</span>
         <span className="flex items-center gap-2 text-sm font-semibold">
           <ChevronLeft className="size-4 cursor-pointer text-tertiary hover:text-secondary" />
-          {lines.map((l) => (
-            <span key={l} className={l === active ? "text-primary" : "text-tertiary"}>
+          {group.lines.map((l) => (
+            <span
+              key={l}
+              className={l === group.active ? "text-primary" : "text-tertiary"}
+            >
               {l}
             </span>
           ))}
@@ -94,12 +99,13 @@ function PickerRow({
         </span>
       </div>
       <div className="mt-2 flex gap-2">
-        {options.map((o) => (
+        {group.options.map((o) => (
           <button
-            key={o}
-            className="h-10 flex-1 rounded-sm bg-element-2 text-sm font-semibold text-primary transition-colors duration-[120ms] ease-out hover:bg-element-3"
+            key={o.label}
+            onClick={onPick}
+            className="h-10 min-w-0 flex-1 truncate rounded-sm bg-element-2 px-2 text-sm font-semibold text-primary transition-colors duration-[120ms] ease-out hover:bg-element-3"
           >
-            {o}
+            {o.label} · {Math.round(o.price * 100)}¢
           </button>
         ))}
       </div>
@@ -107,11 +113,26 @@ function PickerRow({
   );
 }
 
-function TeamBadge({ flag, name }: { flag: string; name: string }) {
+function TeamBadge({ name }: { name: string }) {
+  const initials = name
+    .split(/\s+/)
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) % 360;
   return (
     <div className="flex flex-col items-center gap-2">
-      <span className="text-5xl leading-none">{flag}</span>
-      <span className="text-base font-semibold">{name}</span>
+      <span
+        className="flex size-12 items-center justify-center rounded-full text-sm font-bold text-white"
+        style={{
+          background: `linear-gradient(135deg, hsl(${h} 60% 50%), hsl(${(h + 80) % 360} 60% 40%))`,
+        }}
+      >
+        {initials}
+      </span>
+      <span className="max-w-28 truncate text-base font-semibold">{name}</span>
     </div>
   );
 }

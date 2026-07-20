@@ -11,7 +11,6 @@ import {
   YAxis,
 } from "recharts";
 import type { Market } from "@/types/market";
-import { getStepSeries } from "@/lib/mock-series";
 import { mergeSeries } from "@/lib/series";
 import { usePriceHistory } from "@/lib/use-price-history";
 import { usePageNow } from "@/lib/use-now";
@@ -31,12 +30,9 @@ import {
  * dots with a pulse. Hovering rewinds the chart — solid lines clip at
  * the cursor with the future ghosted underneath, the dots travel to the
  * hover point, pills anchor to the lines, and the legend switches from
- * one-decimal (rest) to whole-percent (hover) values. Seeded "+$N"
- * trade markers sit on the lines like the live site's trade blips.
+ * one-decimal (rest) to whole-percent (hover) values.
  */
-const POINTS = 448; // ≈ one sample per horizontal pixel, like the real chart
 const GHOST_OPACITY = 0.14;
-const MARKER_AMOUNTS = [2, 5, 10, 25, 52, 100, 250];
 
 export function HeroChart({
   markets,
@@ -56,14 +52,9 @@ export function HeroChart({
     if (now === null)
       return { data: [] as ChartRow[], xTicks: [], yTicks: [] as number[] };
 
-    // real CLOB history where available; see PriceChart for why loading
-    // renders empty rather than falling back to the synthetic walk
-    const series = markets.map((m) => {
-      const real = history.byMarket[m.id];
-      if (real) return real;
-      if (m.clobTokenId && history.loading) return [];
-      return getStepSeries(m, POINTS, now);
-    });
+    // real CLOB history only — while it loads (or if the fetch fails)
+    // the chart stays empty rather than plotting an invented curve
+    const series = markets.map((m) => history.byMarket[m.id] ?? []);
 
     const merged: ChartRow[] = mergeSeries(
       markets.map((m, i) => ({ id: m.id, points: series[i] })),
@@ -97,29 +88,10 @@ export function HeroChart({
     const yMax = Math.ceil(peak / step) * step;
     const ySteps = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
     return { data: merged, xTicks: ticks, yTicks: ySteps };
-  }, [markets, now, history.byMarket, history.loading]);
+  }, [markets, now, history.byMarket]);
 
   const lastIndex = data.length - 1;
   const yMax = yTicks[yTicks.length - 1] ?? 100;
-
-  /**
-   * Seeded "+$N" trade blips, drawn only over the synthetic series.
-   * They're invented trades — showing them on real CLOB history would
-   * present fabricated activity as market data. `index: -1` disables.
-   */
-  const markers = useMemo(
-    () =>
-      markets.map((m, i) => {
-        if (history.real) return { index: -1, amount: 0 };
-        let h = 0;
-        for (let c = 0; c < m.id.length; c++) h = (h * 31 + m.id.charCodeAt(c)) % 99991;
-        return {
-          index: Math.floor(POINTS * (0.08 + ((h % 47) / 47) * 0.45)) + i * 9,
-          amount: MARKER_AMOUNTS[(h + i * 3) % MARKER_AMOUNTS.length],
-        };
-      }),
-    [markets, history.real],
-  );
 
   const nameFor = (id: string) =>
     markets.find((m) => m.id === id)?.groupItemTitle ?? "Yes";
@@ -208,21 +180,7 @@ export function HeroChart({
                   strokeLinejoin="round"
                   isAnimationActive={false}
                   activeDot={false}
-                  dot={(props: { index?: number; cx?: number; cy?: number }) =>
-                    props.index === markers[i].index ? (
-                      <TradeMarker
-                        key={`gmk-${m.id}`}
-                        cx={props.cx}
-                        cy={props.cy}
-                        color={colors[i]}
-                        amount={markers[i].amount}
-                        opacity={GHOST_OPACITY}
-                        clip={`url(#${clipId}-ghost)`}
-                      />
-                    ) : (
-                      <g key={`gd-${m.id}-${props.index}`} />
-                    )
-                  }
+                  dot={false}
                 />
               ))}
               {/* solid layer: clipped to the left of the cursor while hovering */}
@@ -238,30 +196,19 @@ export function HeroChart({
                   strokeLinejoin="round"
                   isAnimationActive={false}
                   activeDot={{ r: 4, fill: colors[i], strokeWidth: 0 }}
-                  dot={(props: { index?: number; cx?: number; cy?: number }) => {
-                    if (props.index === lastIndex)
-                      return (
-                        <EndDot
-                          key={`end-${m.id}`}
-                          cx={props.cx}
-                          cy={props.cy}
-                          color={colors[i]}
-                          clip={`url(#${clipId}-solid)`}
-                        />
-                      );
-                    if (props.index === markers[i].index)
-                      return (
-                        <TradeMarker
-                          key={`mk-${m.id}`}
-                          cx={props.cx}
-                          cy={props.cy}
-                          color={colors[i]}
-                          amount={markers[i].amount}
-                          clip={`url(#${clipId}-solid)`}
-                        />
-                      );
-                    return <g key={`d-${m.id}-${props.index}`} />;
-                  }}
+                  dot={(props: { index?: number; cx?: number; cy?: number }) =>
+                    props.index === lastIndex ? (
+                      <EndDot
+                        key={`end-${m.id}`}
+                        cx={props.cx}
+                        cy={props.cy}
+                        color={colors[i]}
+                        clip={`url(#${clipId}-solid)`}
+                      />
+                    ) : (
+                      <g key={`d-${m.id}-${props.index}`} />
+                    )
+                  }
                 />
               ))}
             </LineChart>
@@ -295,39 +242,6 @@ function EndDot({
     <g className="pointer-events-none" clipPath={clip}>
       <circle cx={cx} cy={cy} r={4} fill={color} className="animate-hero-ping" />
       <circle cx={cx} cy={cy} r={4} fill={color} opacity={0.6} />
-    </g>
-  );
-}
-
-/** "+ $N" trade blip pinned to a point on the line, in the series color. */
-function TradeMarker({
-  cx,
-  cy,
-  color,
-  amount,
-  opacity = 1,
-  clip,
-}: {
-  cx?: number;
-  cy?: number;
-  color: string;
-  amount: number;
-  opacity?: number;
-  clip?: string;
-}) {
-  if (cx === undefined || cy === undefined) return <g />;
-  return (
-    <g className="pointer-events-none" clipPath={clip}>
-      <text
-        x={cx - 6}
-        y={cy + 20}
-        fill={color}
-        opacity={opacity}
-        fontSize={15}
-        fontWeight={600}
-      >
-        + ${amount}
-      </text>
     </g>
   );
 }

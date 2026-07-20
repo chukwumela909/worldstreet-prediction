@@ -3,7 +3,7 @@
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toCents, toPercent } from "@/lib/format";
-import { dayDelta } from "@/lib/mock-series";
+import { dayDelta } from "@/lib/series";
 import { useAuth } from "@/components/auth/auth-context";
 import { useTradeSelection } from "./trade-context";
 

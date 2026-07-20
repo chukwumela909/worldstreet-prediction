@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import type { MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
-import { dayDelta } from "@/lib/mock-series";
+import { dayDelta } from "@/lib/series";
 import { useAuth } from "@/components/auth/auth-context";
 import { HeroChart } from "./hero-chart";
 import { HeroFooter, HeroHeader } from "./shared";

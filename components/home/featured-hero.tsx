@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
+import type { FeaturedGame } from "@/lib/polymarket";
 import { BinarySlide } from "./hero/binary-slide";
 import { GameSlide } from "./hero/game-slide";
 import { MarketSlide } from "./hero/market-slide";
@@ -29,13 +30,17 @@ interface Slide {
   render: () => React.ReactNode;
 }
 
-export function FeaturedHero({ events }: { events: MarketEvent[] }) {
+export function FeaturedHero({
+  events,
+  game,
+}: {
+  events: MarketEvent[];
+  game: FeaturedGame | null;
+}) {
   const slides = useMemo<Slide[]>(() => {
     const multi = events.find((e) => !isBinary(e));
     // Longest-horizon binary event, so the slide has real price history
-    // and doesn't go stale the moment a daily market settles. Picking
-    // from `events` means this follows whatever the page loaded — live
-    // data normally, fixtures when the API is unreachable.
+    // and doesn't go stale the moment a daily market settles.
     const binary = events
       .filter(isBinary)
       .sort((a, b) => (b.endDate ?? "").localeCompare(a.endDate ?? ""))[0];
@@ -48,7 +53,13 @@ export function FeaturedHero({ events }: { events: MarketEvent[] }) {
         render: () => <MarketSlide event={multi} />,
       });
     }
-    list.push({ key: "game", label: "Spain vs. Argentina", render: () => <GameSlide /> });
+    if (game) {
+      list.push({
+        key: "game",
+        label: shortLabel(game.title),
+        render: () => <GameSlide game={game} />,
+      });
+    }
     if (binary) {
       list.push({
         key: "binary",
@@ -57,10 +68,11 @@ export function FeaturedHero({ events }: { events: MarketEvent[] }) {
       });
     }
     return list;
-  }, [events]);
+  }, [events, game]);
 
   const [index, setIndex] = useState(0);
   const n = slides.length;
+  if (n === 0) return null;
   const prev = (index - 1 + n) % n;
   const next = (index + 1) % n;
 

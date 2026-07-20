@@ -17,12 +17,14 @@ import { deriveHotTopics, type HotTopic } from "@/lib/hot-topics";
  *
  * Call from Server Components only — responses are cached via
  * `next: { revalidate }` (~60 req/min unauthenticated rate limit).
- * Note: Gamma is geoblocked in some regions; callers should catch
- * `PolymarketApiError` and fall back to fixtures.
+ * Note: Gamma is geoblocked in some regions; there is deliberately no
+ * fixture fallback — callers surface an error/empty state instead, so
+ * the UI never presents fabricated data as market data.
  */
 
 const GAMMA_BASE = "https://gamma-api.polymarket.com";
 const CLOB_BASE = "https://clob.polymarket.com";
+const DATA_API_BASE = "https://data-api.polymarket.com";
 const DEFAULT_REVALIDATE_SECONDS = 60;
 /** History moves slower than spot prices, and payloads are larger. */
 const HISTORY_REVALIDATE_SECONDS = 300;
@@ -73,8 +75,16 @@ interface GammaMarket {
   closed?: boolean;
   /** JSON-encoded [yesTokenId, noTokenId] — keys for CLOB price history. */
   clobTokenIds?: string;
+  /** On-chain condition id — the key for data-api holders/trades. */
+  conditionId?: string;
   /** 24h price change as a decimal, e.g. -0.0025. Missing on thin markets. */
   oneDayPriceChange?: number;
+  /** "moneyline" | "spreads" | "totals" | ... on sports game markets. */
+  sportsMarketType?: string;
+  /** Spread/total line, e.g. 2.5. */
+  line?: number;
+  /** "2026-07-20 17:00:00+00" on sports game markets. */
+  gameStartTime?: string;
 }
 
 interface GammaEvent {
@@ -88,6 +98,7 @@ interface GammaEvent {
   endDate?: string;
   tags?: GammaTag[];
   markets?: GammaMarket[];
+  series?: { title?: string }[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -183,6 +194,7 @@ function toMarket(raw: GammaMarket): Market | null {
     outcomePrices: [prices[0], prices[1]],
     volume: raw.volume ?? String(raw.volumeNum ?? 0),
     clobTokenId: tokenIds?.[0],
+    conditionId: raw.conditionId,
     oneDayPriceChange:
       typeof raw.oneDayPriceChange === "number"
         ? raw.oneDayPriceChange
@@ -331,6 +343,7 @@ export const getEventsBySlugs = unstable_cache(
 interface GammaComment {
   id: string;
   body?: string;
+  createdAt?: string;
   reportCount?: number;
   profile?: {
     name?: string;
@@ -350,6 +363,8 @@ export interface EventComment {
   avatarUrl?: string;
   /** Deterministic per-user hue for the gradient avatar fallback. */
   hue: number;
+  /** ms epoch of the comment, for "2h ago" labels. */
+  createdAt?: number;
 }
 
 /**
@@ -392,12 +407,14 @@ export function toEventComments(raw: GammaComment[], limit = 8): EventComment[] 
     const dedupeKey = p.baseAddress ?? user;
     if (seen.has(dedupeKey)) continue;
     seen.add(dedupeKey);
+    const created = c.createdAt ? Date.parse(c.createdAt) : NaN;
     out.push({
       id: c.id,
       user,
       text,
       avatarUrl: safeIconUrl(p.profileImage),
       hue: hueFor(dedupeKey),
+      createdAt: Number.isNaN(created) ? undefined : created,
     });
   }
   return out;
@@ -508,4 +525,362 @@ export const getPriceHistory = unstable_cache(
   },
   ["polymarket-price-history"],
   { revalidate: HISTORY_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+/* ------------------------------------------------------------------ */
+/* Data API (holders, trades, leaderboard)                             */
+/* ------------------------------------------------------------------ */
+
+async function dataApiFetch<T>(
+  path: string,
+  params: Record<string, string | number | undefined>,
+): Promise<T> {
+  const url = new URL(path, DATA_API_BASE);
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== undefined) url.searchParams.set(key, String(value));
+  }
+  let res: Response;
+  try {
+    res = await fetch(url, { cache: "no-store" });
+  } catch {
+    throw new PolymarketApiError(
+      `Data API request failed: ${url.pathname} (network error — Polymarket may be geoblocked in this region)`,
+    );
+  }
+  if (!res.ok) {
+    throw new PolymarketApiError(
+      `Data API request failed: ${url.pathname} → HTTP ${res.status}`,
+      res.status,
+    );
+  }
+  return res.json();
+}
+
+/** Display identity shared by holders / trades / leaderboard rows. */
+export interface TraderIdentity {
+  name: string;
+  avatarUrl?: string;
+  hue: number;
+}
+
+interface DataApiProfileFields {
+  name?: string;
+  pseudonym?: string;
+  displayUsernamePublic?: boolean;
+  profileImage?: string;
+  proxyWallet?: string;
+}
+
+function toIdentity(p: DataApiProfileFields): TraderIdentity {
+  const name = shortenAddressName(
+    (p.displayUsernamePublic === false ? p.pseudonym : p.name) ||
+      p.pseudonym ||
+      p.proxyWallet ||
+      "anonymous",
+  );
+  return {
+    name,
+    avatarUrl: safeIconUrl(p.profileImage),
+    hue: hueFor(p.proxyWallet ?? name),
+  };
+}
+
+interface DataApiHolder extends DataApiProfileFields {
+  amount: number;
+  outcomeIndex: number;
+}
+
+export interface MarketHolder extends TraderIdentity {
+  /** shares held */
+  amount: number;
+}
+
+/**
+ * Top holders per side of one market (by condition id):
+ * `{ yes: [...], no: [...] }`, largest first.
+ */
+export const getTopHolders = unstable_cache(
+  async (
+    conditionId: string,
+    limit = 5,
+  ): Promise<{ yes: MarketHolder[]; no: MarketHolder[] }> => {
+    const raw = await dataApiFetch<{ holders?: DataApiHolder[] }[]>("/holders", {
+      market: conditionId,
+      limit,
+    });
+    const sides: [MarketHolder[], MarketHolder[]] = [[], []];
+    for (const token of raw ?? []) {
+      for (const h of token.holders ?? []) {
+        const side = h.outcomeIndex === 0 ? 0 : 1;
+        if (sides[side].length >= limit) continue;
+        sides[side].push({ ...toIdentity(h), amount: h.amount });
+      }
+    }
+    for (const side of sides) side.sort((a, b) => b.amount - a.amount);
+    return { yes: sides[0], no: sides[1] };
+  },
+  ["polymarket-holders"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+interface DataApiTrade extends DataApiProfileFields {
+  side: "BUY" | "SELL";
+  size: number;
+  price: number;
+  timestamp: number;
+  outcome?: string;
+  outcomeIndex?: number;
+  transactionHash?: string;
+}
+
+export interface EventTrade extends TraderIdentity {
+  side: "BUY" | "SELL";
+  /** shares traded */
+  size: number;
+  /** price in [0, 1] */
+  price: number;
+  /** ms epoch */
+  timestamp: number;
+  /** outcome label, e.g. "Yes" or a team name */
+  outcome: string;
+  outcomeIndex: number;
+  id: string;
+}
+
+/** Recent trades across an event's markets, newest first. */
+export const getEventTrades = unstable_cache(
+  async (eventId: string, limit = 15): Promise<EventTrade[]> => {
+    // NB: the filter param is `eventId` — a bare `event` param is
+    // silently ignored and returns the global trade feed
+    const raw = await dataApiFetch<DataApiTrade[]>("/trades", {
+      eventId,
+      limit,
+    });
+    return (raw ?? []).map((t, i) => ({
+      ...toIdentity(t),
+      side: t.side,
+      size: t.size,
+      price: t.price,
+      timestamp: t.timestamp * 1000,
+      outcome: t.outcome ?? "Yes",
+      outcomeIndex: t.outcomeIndex ?? 0,
+      id: t.transactionHash ?? `${t.timestamp}-${i}`,
+    }));
+  },
+  ["polymarket-trades"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+export const LEADERBOARD_WINDOWS = ["1d", "1w", "30d", "all"] as const;
+export type LeaderboardWindow = (typeof LEADERBOARD_WINDOWS)[number];
+export type LeaderboardRankType = "pnl" | "vol";
+
+interface DataApiLeaderboardRow {
+  rank: string;
+  proxyWallet?: string;
+  userName?: string;
+  pseudonym?: string;
+  profileImage?: string;
+  vol?: number;
+  pnl?: number;
+}
+
+export interface LeaderboardTrader extends TraderIdentity {
+  rank: number;
+  profit: number;
+  volume: number;
+}
+
+/** Ranked traders by profit or volume over a window. */
+export const getLeaderboard = unstable_cache(
+  async (
+    window: LeaderboardWindow,
+    rankType: LeaderboardRankType,
+    limit = 30,
+  ): Promise<LeaderboardTrader[]> => {
+    const raw = await dataApiFetch<DataApiLeaderboardRow[]>("/v1/leaderboard", {
+      window,
+      rankType,
+      limit,
+    });
+    return (raw ?? []).map((r, i) => ({
+      ...toIdentity({
+        name: r.userName,
+        pseudonym: r.pseudonym,
+        profileImage: r.profileImage,
+        proxyWallet: r.proxyWallet,
+      }),
+      rank: Number(r.rank) || i + 1,
+      profit: r.pnl ?? 0,
+      volume: r.vol ?? 0,
+    }));
+  },
+  ["polymarket-leaderboard"],
+  // rankings move slowly; also keeps the 8 window×sort combos cheap
+  { revalidate: HISTORY_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+/* ------------------------------------------------------------------ */
+/* Featured game (hero slide)                                          */
+/* ------------------------------------------------------------------ */
+
+export interface GamePick {
+  label: string;
+  /** price in [0, 1] */
+  price: number;
+}
+
+export interface GameLineGroup {
+  /** all lines available, e.g. ["1.5", "2.5"] */
+  lines: string[];
+  /** the line the options below belong to */
+  active: string;
+  options: [GamePick, GamePick];
+}
+
+export interface FeaturedGame {
+  breadcrumb: string;
+  title: string;
+  slug: string;
+  /** preformatted in ET, e.g. "1:00 PM" / "July 20" — formatted
+   * server-side so SSR and hydration agree regardless of viewer TZ */
+  kickoff: string;
+  date: string;
+  home: { name: string; pct: number };
+  draw?: { pct: number };
+  away: { name: string; pct: number };
+  spread?: GameLineGroup;
+  total?: GameLineGroup;
+  /** USD volume as a decimal string */
+  volume: string;
+  iconUrl?: string;
+}
+
+const yesPrice = (m: GammaMarket): number => {
+  const prices = parseStringArray(m.outcomePrices);
+  return prices ? parseFloat(prices[0]) : NaN;
+};
+
+/** Group spreads/totals markets into the picker-row shape. */
+function toLineGroup(markets: GammaMarket[], suffix: (line: number, i: number) => string): GameLineGroup | undefined {
+  const byLine = new Map<number, GammaMarket>();
+  for (const m of markets) {
+    if (typeof m.line !== "number") continue;
+    if (!byLine.has(m.line)) byLine.set(m.line, m);
+  }
+  if (byLine.size === 0) return undefined;
+  const lines = [...byLine.keys()].sort((a, b) => Math.abs(a) - Math.abs(b));
+  // the most competitive line — outcome prices closest to a coin flip
+  const active = lines.reduce((best, l) =>
+    Math.abs(yesPrice(byLine.get(l)!) - 0.5) < Math.abs(yesPrice(byLine.get(best)!) - 0.5) ? l : best,
+  );
+  const market = byLine.get(active)!;
+  const outcomes = parseStringArray(market.outcomes) ?? ["", ""];
+  const prices = parseStringArray(market.outcomePrices) ?? ["0", "0"];
+  return {
+    lines: lines.map((l) => String(Math.abs(l))),
+    active: String(Math.abs(active)),
+    options: [
+      { label: `${outcomes[0]} ${suffix(active, 0)}`.trim(), price: parseFloat(prices[0]) },
+      { label: `${outcomes[1]} ${suffix(active, 1)}`.trim(), price: parseFloat(prices[1]) },
+    ],
+  };
+}
+
+/**
+ * Highest-volume upcoming soccer game for the hero slide. Soccer, because
+ * the slide's layout is a three-way moneyline (home/draw/away); spread and
+ * total rows come from the sibling "<slug>-more-markets" event when it
+ * exists. Returns null when no game qualifies.
+ */
+export const getFeaturedGame = unstable_cache(
+  async (): Promise<FeaturedGame | null> => {
+    const raw = await gammaFetch<GammaEvent[]>("/events", {
+      limit: 25,
+      closed: false,
+      active: true,
+      archived: false,
+      order: "volume24hr",
+      ascending: false,
+      tag_slug: "soccer",
+    });
+
+    const now = Date.now();
+    for (const event of raw) {
+      const moneylines = (event.markets ?? []).filter(
+        (m) => m.sportsMarketType === "moneyline" && m.active !== false && m.closed !== true,
+      );
+      if (moneylines.length !== 3) continue; // home / draw / away
+      const draw = moneylines.find((m) => m.groupItemTitle?.startsWith("Draw"));
+      const teams = moneylines.filter((m) => m !== draw);
+      if (!draw || teams.length !== 2) continue;
+
+      // Gamma sends "2026-07-20 17:00:00+00" — not quite ISO; normalize
+      // the space and the truncated offset before parsing
+      const start = teams[0].gameStartTime
+        ? Date.parse(
+            teams[0].gameStartTime.replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00"),
+          )
+        : NaN;
+      if (Number.isNaN(start) || start < now) continue; // kickoff still ahead
+
+      // match button order to the title ("Home vs. Away")
+      const [homeName] = event.title.split(/ vs\.? /i);
+      const home =
+        teams.find((m) => m.groupItemTitle === homeName?.trim()) ?? teams[0];
+      const away = teams.find((m) => m !== home)!;
+
+      // spreads/totals live in a sibling event; absent for smaller games
+      let spread: GameLineGroup | undefined;
+      let total: GameLineGroup | undefined;
+      try {
+        const more = await gammaFetch<GammaEvent[]>("/events", {
+          slug: `${event.slug}-more-markets`,
+        });
+        const moreMarkets = (more[0]?.markets ?? []).filter(
+          (m) => m.active !== false && m.closed !== true,
+        );
+        spread = toLineGroup(
+          moreMarkets.filter((m) => m.sportsMarketType === "spreads"),
+          (line, i) => (i === 0 ? `${line}` : `+${Math.abs(line)}`),
+        );
+        total = toLineGroup(
+          moreMarkets.filter((m) => m.sportsMarketType === "totals"),
+          () => "",
+        );
+      } catch {
+        // no sibling event — render the moneyline row alone
+      }
+
+      const league = event.series?.[0]?.title;
+      const kickoffFmt = new Intl.DateTimeFormat("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "America/New_York",
+      });
+      const dateFmt = new Intl.DateTimeFormat("en-US", {
+        month: "long",
+        day: "numeric",
+        timeZone: "America/New_York",
+      });
+
+      return {
+        breadcrumb: ["Sports", "Soccer", league].filter(Boolean).join(" · "),
+        title: event.title,
+        slug: event.slug,
+        kickoff: `${kickoffFmt.format(start)} ET`,
+        date: dateFmt.format(start),
+        home: { name: home.groupItemTitle ?? "Home", pct: Math.round(yesPrice(home) * 100) },
+        draw: { pct: Math.round(yesPrice(draw) * 100) },
+        away: { name: away.groupItemTitle ?? "Away", pct: Math.round(yesPrice(away) * 100) },
+        spread,
+        total,
+        volume: String(event.volume ?? 0),
+        iconUrl: safeIconUrl(event.icon, event.image),
+      };
+    }
+    return null;
+  },
+  ["polymarket-featured-game"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );

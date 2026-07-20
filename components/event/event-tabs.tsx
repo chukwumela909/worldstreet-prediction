@@ -1,30 +1,28 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useState } from "react";
+import Image from "next/image";
 import type { MarketEvent } from "@/types/market";
+import type { EventComment, EventTrade, MarketHolder } from "@/lib/polymarket";
+import { timeAgo } from "@/lib/format";
 import { useAuth } from "@/components/auth/auth-context";
 import { usePortfolio } from "@/lib/portfolio-store";
-import { avatarGradient } from "@/lib/mock-leaderboard";
 
 const TABS = ["Rules", "Comments", "Top Holders", "Activity"] as const;
 type Tab = (typeof TABS)[number];
 
-interface Comment {
-  user: string;
-  time: string;
-  text: string;
-}
-
-const MOCK_COMMENTS: Comment[] = [
-  { user: "market-maven", time: "2h ago", text: "Volume picking up fast on this one. The order book depth looks very one-sided." },
-  { user: "0xtrader", time: "5h ago", text: "Priced about right imo. I don't see a catalyst before the deadline." },
-  { user: "longshot-larry", time: "1d ago", text: "Buying the dip here. Historically these resolve Yes more often than the market thinks." },
-];
-
 /** Rules / Comments / Top Holders / Activity tab strip + panels. */
 export function EventTabs({ event }: { event: MarketEvent }) {
   const [tab, setTab] = useState<Tab>("Rules");
-  const [comments, setComments] = useState<Comment[]>(MOCK_COMMENTS);
+  const comments = useFetched<EventComment[]>(
+    `/api/comments?eventId=${encodeURIComponent(event.id)}`,
+    (body: { comments?: EventComment[] }) => body.comments ?? [],
+  );
+  // local, unsent comments the signed-in demo user posted this session
+  const [posted, setPosted] = useState<{ user: string; text: string }[]>([]);
+
+  const commentCount =
+    comments.data === null ? null : comments.data.length + posted.length;
 
   return (
     <section>
@@ -40,8 +38,8 @@ export function EventTabs({ event }: { event: MarketEvent }) {
             }`}
           >
             {t}
-            {t === "Comments" && (
-              <span className="ml-1 text-secondary">({comments.length})</span>
+            {t === "Comments" && commentCount !== null && (
+              <span className="ml-1 text-secondary">({commentCount})</span>
             )}
           </button>
         ))}
@@ -51,8 +49,9 @@ export function EventTabs({ event }: { event: MarketEvent }) {
         {tab === "Rules" && <Rules event={event} />}
         {tab === "Comments" && (
           <Comments
-            comments={comments}
-            onPost={(c) => setComments((prev) => [c, ...prev])}
+            state={comments}
+            posted={posted}
+            onPost={(c) => setPosted((prev) => [c, ...prev])}
           />
         )}
         {tab === "Top Holders" && <TopHolders event={event} />}
@@ -61,6 +60,90 @@ export function EventTabs({ event }: { event: MarketEvent }) {
     </section>
   );
 }
+
+/* ---------- shared fetch state ---------- */
+
+interface Fetched<T> {
+  /** null while loading */
+  data: T | null;
+  failed: boolean;
+}
+
+function useFetched<T>(
+  url: string,
+  pick: (body: never) => T,
+): Fetched<T> {
+  // the url is part of the stored state, so a changed url reads as
+  // "loading" on the very next render — no synchronous reset needed
+  const [state, setState] = useState<Fetched<T> & { url: string }>({
+    url,
+    data: null,
+    failed: false,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(url)
+      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
+      .then((body) => {
+        if (!cancelled) setState({ url, data: pick(body as never), failed: false });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ url, data: null, failed: true });
+      });
+    return () => {
+      cancelled = true;
+    };
+    // pick is a stable inline mapper; url captures everything that matters
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [url]);
+
+  return state.url === url ? state : { data: null, failed: false };
+}
+
+function PanelNote({ children }: { children: React.ReactNode }) {
+  return <p className="py-6 text-center text-sm text-secondary">{children}</p>;
+}
+
+/* ---------- avatars ---------- */
+
+function TraderAvatar({
+  name,
+  avatarUrl,
+  hue,
+  className,
+  px,
+}: {
+  name: string;
+  avatarUrl?: string;
+  hue: number;
+  className: string;
+  px: number;
+}) {
+  if (avatarUrl) {
+    return (
+      <Image
+        src={avatarUrl}
+        alt=""
+        width={px}
+        height={px}
+        className={`shrink-0 rounded-full object-cover ${className}`}
+      />
+    );
+  }
+  return (
+    <span
+      className={`shrink-0 rounded-full ${className}`}
+      style={{
+        background: `linear-gradient(135deg, hsl(${hue} 60% 55%), hsl(${hue + 60} 60% 45%))`,
+      }}
+      aria-hidden
+      title={name}
+    />
+  );
+}
+
+/* ---------- rules ---------- */
 
 function Rules({ event }: { event: MarketEvent }) {
   return (
@@ -87,11 +170,13 @@ function Rules({ event }: { event: MarketEvent }) {
 /* ---------- comments ---------- */
 
 function Comments({
-  comments,
+  state,
+  posted,
   onPost,
 }: {
-  comments: Comment[];
-  onPost: (c: Comment) => void;
+  state: Fetched<EventComment[]>;
+  posted: { user: string; text: string }[];
+  onPost: (c: { user: string; text: string }) => void;
 }) {
   const { user, openAuth } = useAuth();
   const [draft, setDraft] = useState("");
@@ -99,7 +184,7 @@ function Comments({
   const post = () => {
     const text = draft.trim();
     if (!text || !user) return;
-    onPost({ user: user.name, time: "just now", text });
+    onPost({ user: user.name, text });
     setDraft("");
   };
 
@@ -144,80 +229,119 @@ function Comments({
         </button>
       )}
 
-      <ul className="flex flex-col gap-4">
-        {comments.map((c, i) => (
-          <li key={`${c.user}-${i}`} className="flex gap-3">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-element-2 text-xs font-bold uppercase text-secondary">
-              {c.user[0]}
-            </span>
-            <div>
-              <p className="text-sm">
-                <span className="font-semibold">{c.user}</span>{" "}
-                <span className="text-xs text-tertiary">{c.time}</span>
-              </p>
-              <p className="mt-0.5 text-sm text-secondary">{c.text}</p>
-            </div>
-          </li>
-        ))}
-      </ul>
+      {state.failed ? (
+        <PanelNote>Comments are unavailable right now.</PanelNote>
+      ) : state.data === null ? (
+        <PanelNote>Loading comments…</PanelNote>
+      ) : state.data.length + posted.length === 0 ? (
+        <PanelNote>No comments yet.</PanelNote>
+      ) : (
+        <ul className="flex flex-col gap-4">
+          {posted.map((c, i) => (
+            <CommentRow
+              key={`own-${i}`}
+              user={c.user}
+              time="just now"
+              text={c.text}
+              hue={200}
+            />
+          ))}
+          {state.data.map((c) => (
+            <CommentRow
+              key={c.id}
+              user={c.user}
+              time={c.createdAt ? timeAgo(c.createdAt) : ""}
+              text={c.text}
+              hue={c.hue}
+              avatarUrl={c.avatarUrl}
+            />
+          ))}
+        </ul>
+      )}
     </div>
+  );
+}
+
+function CommentRow({
+  user,
+  time,
+  text,
+  hue,
+  avatarUrl,
+}: {
+  user: string;
+  time: string;
+  text: string;
+  hue: number;
+  avatarUrl?: string;
+}) {
+  return (
+    <li className="flex gap-3">
+      <TraderAvatar name={user} avatarUrl={avatarUrl} hue={hue} className="mt-0.5 size-8" px={32} />
+      <div>
+        <p className="text-sm">
+          <span className="font-semibold">{user}</span>{" "}
+          {time && <span className="text-xs text-tertiary">{time}</span>}
+        </p>
+        <p className="mt-0.5 text-sm text-secondary">{text}</p>
+      </div>
+    </li>
   );
 }
 
 /* ---------- top holders ---------- */
 
-const HOLDER_NAMES = [
-  "deepvalue", "swisstony", "candlehammer", "maz26", "sparkling8899",
-  "muchobliged", "weatherman12", "palegrit", "hot2trot", "cnyek",
-];
-
-/** Deterministic pseudo-random holders per event so the list is stable. */
-function holdersFor(eventId: string, side: "yes" | "no") {
-  let h = side === "yes" ? 7 : 13;
-  for (let i = 0; i < eventId.length; i++) h = (h * 31 + eventId.charCodeAt(i)) % 9973;
-  const start = h % HOLDER_NAMES.length;
-  return Array.from({ length: 5 }, (_, i) => {
-    h = (h * 48271) % 2147483647;
-    // step 3 is coprime to the name-list length, so 5 picks stay distinct
-    const name = HOLDER_NAMES[(start + i * 3) % HOLDER_NAMES.length];
-    const shares = 12000 + (h % 880000);
-    return { name, shares };
-  }).sort((a, b) => b.shares - a.shares);
-}
-
 function TopHolders({ event }: { event: MarketEvent }) {
-  const yes = useMemo(() => holdersFor(event.id, "yes"), [event.id]);
-  const no = useMemo(() => holdersFor(event.id, "no"), [event.id]);
+  const conditionId = event.markets[0]?.conditionId;
+  const state = useFetched<{ yes: MarketHolder[]; no: MarketHolder[] }>(
+    `/api/holders?market=${encodeURIComponent(conditionId ?? "")}`,
+    (body: { yes?: MarketHolder[]; no?: MarketHolder[] }) => ({
+      yes: body.yes ?? [],
+      no: body.no ?? [],
+    }),
+  );
+
+  if (!conditionId || state.failed)
+    return <PanelNote>Holder data is unavailable right now.</PanelNote>;
+  if (state.data === null) return <PanelNote>Loading holders…</PanelNote>;
+
+  const sides = [
+    { label: "Yes holders", tone: "text-yes", rows: state.data.yes },
+    { label: "No holders", tone: "text-no", rows: state.data.no },
+  ];
 
   return (
     <div className="grid grid-cols-1 gap-8 sm:grid-cols-2">
-      {[
-        { label: "Yes holders", tone: "text-yes", rows: yes },
-        { label: "No holders", tone: "text-no", rows: no },
-      ].map(({ label, tone, rows }) => (
+      {sides.map(({ label, tone, rows }) => (
         <div key={label}>
           <h3 className={`text-sm font-semibold ${tone}`}>{label}</h3>
-          <ul className="mt-2">
-            {rows.map((r, i) => (
-              <li
-                key={r.name + i}
-                className="flex items-center gap-3 border-b border-border py-2.5 last:border-0"
-              >
-                <span className="w-4 text-xs font-medium text-tertiary">{i + 1}</span>
-                <span
-                  className="size-7 shrink-0 rounded-full"
-                  style={{ background: avatarGradient(r.name) }}
-                  aria-hidden
-                />
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                  {r.name}
-                </span>
-                <span className="text-sm font-medium text-secondary">
-                  {r.shares.toLocaleString("en-US")} shares
-                </span>
-              </li>
-            ))}
-          </ul>
+          {rows.length === 0 ? (
+            <PanelNote>No holders yet.</PanelNote>
+          ) : (
+            <ul className="mt-2">
+              {rows.map((r, i) => (
+                <li
+                  key={r.name + i}
+                  className="flex items-center gap-3 border-b border-border py-2.5 last:border-0"
+                >
+                  <span className="w-4 text-xs font-medium text-tertiary">{i + 1}</span>
+                  <TraderAvatar
+                    name={r.name}
+                    avatarUrl={r.avatarUrl}
+                    hue={r.hue}
+                    className="size-7"
+                    px={28}
+                  />
+                  <span className="min-w-0 flex-1 truncate text-sm font-semibold">
+                    {r.name}
+                  </span>
+                  <span className="text-sm font-medium text-secondary">
+                    {Math.round(r.amount).toLocaleString("en-US")} shares
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       ))}
     </div>
@@ -226,26 +350,20 @@ function TopHolders({ event }: { event: MarketEvent }) {
 
 /* ---------- activity ---------- */
 
-const FEED_SEED = [
-  { user: "tankjack", side: "yes" as const, amount: 2480 },
-  { user: "jsram", side: "no" as const, amount: 310 },
-  { user: "myzbsq", side: "yes" as const, amount: 5900 },
-  { user: "allezpapa", side: "yes" as const, amount: 120 },
-  { user: "latetotheparty", side: "no" as const, amount: 1750 },
-];
-const FEED_TIMES = ["2m ago", "9m ago", "24m ago", "1h ago", "3h ago"];
-
 function ActivityFeed({ event }: { event: MarketEvent }) {
   const { user } = useAuth();
   const portfolio = usePortfolio();
+  const state = useFetched<EventTrade[]>(
+    `/api/trades?event=${encodeURIComponent(event.id)}`,
+    (body: { trades?: EventTrade[] }) => body.trades ?? [],
+  );
 
+  // the user's own demo trades on this event, newest first
   const own = portfolio.activity
     .filter((a) => a.eventSlug === event.slug && a.type !== "deposit")
-    .slice(0, 10);
-
-  const market = event.markets[0];
-  const rows = [
-    ...own.map((a) => ({
+    .slice(0, 10)
+    .map((a) => ({
+      id: `own-${a.id}`,
       user: user?.name ?? "you",
       you: true,
       verb: a.type === "buy" ? "bought" : "sold",
@@ -253,31 +371,49 @@ function ActivityFeed({ event }: { event: MarketEvent }) {
       amount: a.amount,
       price: a.price!,
       time: "just now",
-      outcome: a.outcomeLabel,
-    })),
-    ...FEED_SEED.map((f, i) => ({
-      user: f.user,
-      you: false,
-      verb: "bought",
-      side: f.side,
-      amount: f.amount,
-      price: parseFloat(market.outcomePrices[f.side === "yes" ? 0 : 1]),
-      time: FEED_TIMES[i],
-      outcome: market.groupItemTitle ?? event.title,
-    })),
+      avatarUrl: undefined as string | undefined,
+      hue: 200,
+    }));
+
+  if (state.failed && own.length === 0)
+    return <PanelNote>Activity is unavailable right now.</PanelNote>;
+  if (state.data === null && own.length === 0)
+    return <PanelNote>Loading activity…</PanelNote>;
+
+  const live = (state.data ?? []).map((t) => ({
+    id: t.id,
+    user: t.name,
+    you: false,
+    verb: t.side === "BUY" ? "bought" : "sold",
+    side: (t.outcomeIndex === 1 ? "no" : "yes") as "yes" | "no",
+    sideLabel: t.outcome,
+    amount: t.size * t.price,
+    price: t.price,
+    time: timeAgo(t.timestamp),
+    avatarUrl: t.avatarUrl,
+    hue: t.hue,
+  }));
+
+  const rows = [
+    ...own.map((o) => ({ ...o, sideLabel: o.side === "yes" ? "Yes" : "No" })),
+    ...live,
   ];
+
+  if (rows.length === 0) return <PanelNote>No recent activity.</PanelNote>;
 
   return (
     <ul className="flex flex-col">
-      {rows.map((r, i) => (
+      {rows.map((r) => (
         <li
-          key={i}
+          key={r.id}
           className="flex items-center gap-3 border-b border-border py-3 last:border-0"
         >
-          <span
-            className="size-8 shrink-0 rounded-full"
-            style={{ background: avatarGradient(r.user) }}
-            aria-hidden
+          <TraderAvatar
+            name={r.user}
+            avatarUrl={r.avatarUrl}
+            hue={r.hue}
+            className="size-8"
+            px={32}
           />
           <p className="min-w-0 flex-1 truncate text-sm">
             <span className="font-semibold">{r.user}</span>
@@ -288,7 +424,7 @@ function ActivityFeed({ event }: { event: MarketEvent }) {
             )}{" "}
             <span className="text-secondary">{r.verb}</span>{" "}
             <span className={r.side === "yes" ? "text-yes" : "text-no"}>
-              {r.side === "yes" ? "Yes" : "No"}
+              {r.sideLabel}
             </span>{" "}
             <span className="text-secondary">
               at {(r.price * 100).toFixed(0)}¢ ($

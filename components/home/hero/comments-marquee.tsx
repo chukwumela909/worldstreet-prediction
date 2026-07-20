@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import Image from "next/image";
-import { HERO_COMMENTS } from "@/lib/mock-home";
 import type { EventComment } from "@/lib/polymarket";
 
 /**
@@ -10,28 +9,15 @@ import type { EventComment } from "@/lib/polymarket";
  * content rendered 3x inside an overflow-hidden window, animated
  * translateY(0 -> -33.333%) over 25s linear infinite; paused on hover.
  *
- * With an `eventId` (live Gamma events) it shows that event's real
- * comments — and shows nothing while they load or if none survive
- * filtering, rather than attributing invented chatter to a real market.
- * Without one (fixture events) the mock comments remain, since fake
- * comments under a fake market are consistent.
+ * Shows the event's real comments — and shows nothing while they load
+ * or if none survive filtering, rather than attributing invented
+ * chatter to a real market.
  */
 
-interface MarqueeComment {
-  user: string;
-  text: string;
-  hue: number;
-  avatarUrl?: string;
-  id?: string;
-}
-
-export function CommentsMarquee({ eventId }: { eventId?: string }) {
-  const [comments, setComments] = useState<MarqueeComment[] | null>(
-    eventId ? null : HERO_COMMENTS,
-  );
+export function CommentsMarquee({ eventId }: { eventId: string }) {
+  const [comments, setComments] = useState<EventComment[] | null>(null);
 
   useEffect(() => {
-    if (!eventId) return;
     let cancelled = false;
     fetch(`/api/comments?eventId=${encodeURIComponent(eventId)}`)
       .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))

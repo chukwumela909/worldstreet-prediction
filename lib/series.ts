@@ -1,7 +1,6 @@
-/**
- * Shared price-series vocabulary for both real (CLOB) and synthetic
- * (mock-series) history, so charts can consume either interchangeably.
- */
+/** Shared price-series vocabulary for real (CLOB) price history. */
+
+import type { Market } from "@/types/market";
 
 export interface SeriesPoint {
   /** ms epoch */
@@ -19,6 +18,19 @@ export const TIMEFRAMES: Timeframe[] = ["1H", "6H", "1D", "1W", "1M", "ALL"];
  * "HERO", the dense ~1-month window the hero chart draws.
  */
 export type HistoryWindow = Timeframe | "HERO";
+
+/**
+ * Percentage-point change over 24h, for the row delta chips — Gamma's
+ * real `oneDayPriceChange`, or 0 when the field is missing (thin
+ * markets). Real moves are often under a point, so this rounds to 0
+ * frequently; callers hide the chip at 0.
+ */
+export function dayDelta(market: Market): number {
+  if (typeof market.oneDayPriceChange === "number") {
+    return Math.round(market.oneDayPriceChange * 100);
+  }
+  return 0;
+}
 
 /**
  * Merge per-market series onto one timestamp grid keyed by market id.

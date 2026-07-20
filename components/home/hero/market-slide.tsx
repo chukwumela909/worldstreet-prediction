@@ -48,12 +48,7 @@ export function MarketSlide({ event }: { event: MarketEvent }) {
                 </span>
               </div>
             ))}
-            {/* live events carry clobTokenIds; fixtures keep mock chatter */}
-            <CommentsMarquee
-              eventId={
-                event.markets.some((m) => m.clobTokenId) ? event.id : undefined
-              }
-            />
+            <CommentsMarquee eventId={event.id} />
           </div>
           <div className="hidden min-w-0 flex-1 md:block">
             <HeroChart markets={top2} colors={LINE_COLORS} />
