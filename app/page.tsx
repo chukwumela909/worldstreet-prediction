@@ -4,7 +4,7 @@ import { MarketBrowser } from "@/components/home/market-browser";
 import { PromoRail } from "@/components/home/promo-rail";
 import { MOCK_EVENTS } from "@/lib/mock-events";
 import { getEvents } from "@/lib/polymarket";
-import { isBinary, type MarketEvent } from "@/types/market";
+import type { MarketEvent } from "@/types/market";
 
 /** Live Gamma events, or the mock fixtures when the API is unreachable. */
 async function loadEvents(): Promise<MarketEvent[]> {
@@ -19,9 +19,6 @@ async function loadEvents(): Promise<MarketEvent[]> {
 
 export default async function Home() {
   const events = await loadEvents();
-  // hero slide 1 is a multi-outcome composition — feed it the top
-  // multi-outcome event by volume
-  const heroEvent = events.find((e) => !isBinary(e)) ?? events[0];
 
   return (
     <>
@@ -29,7 +26,7 @@ export default async function Home() {
       <main className="mx-auto w-full max-w-[1280px] px-6 pb-16">
         {/* hero + promo rail */}
         <div className="flex gap-8 pt-1.5">
-          <FeaturedHero event={heroEvent} />
+          <FeaturedHero events={events} />
           <PromoRail />
         </div>
 

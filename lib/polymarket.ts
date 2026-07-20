@@ -1,6 +1,7 @@
 import { unstable_cache } from "next/cache";
 import type { Category, Market, MarketEvent } from "@/types/market";
 import { CATEGORIES } from "@/types/market";
+import type { HistoryWindow, SeriesPoint } from "@/lib/series";
 
 /**
  * Server-side data layer for Polymarket's public Gamma API
@@ -20,7 +21,10 @@ import { CATEGORIES } from "@/types/market";
  */
 
 const GAMMA_BASE = "https://gamma-api.polymarket.com";
+const CLOB_BASE = "https://clob.polymarket.com";
 const DEFAULT_REVALIDATE_SECONDS = 60;
+/** History moves slower than spot prices, and payloads are larger. */
+const HISTORY_REVALIDATE_SECONDS = 300;
 
 /**
  * Hosts allowed for `iconUrl`. Must stay in sync with
@@ -64,6 +68,10 @@ interface GammaMarket {
   volumeNum?: number;
   active?: boolean;
   closed?: boolean;
+  /** JSON-encoded [yesTokenId, noTokenId] — keys for CLOB price history. */
+  clobTokenIds?: string;
+  /** 24h price change as a decimal, e.g. -0.0025. Missing on thin markets. */
+  oneDayPriceChange?: number;
 }
 
 interface GammaEvent {
@@ -164,12 +172,18 @@ function parseStringArray(raw: string | undefined): string[] | null {
 function toMarket(raw: GammaMarket): Market | null {
   const prices = parseStringArray(raw.outcomePrices);
   if (!prices || prices.length < 2) return null;
+  const tokenIds = parseStringArray(raw.clobTokenIds);
   return {
     id: raw.id,
     question: raw.question,
     groupItemTitle: raw.groupItemTitle || undefined,
     outcomePrices: [prices[0], prices[1]],
     volume: raw.volume ?? String(raw.volumeNum ?? 0),
+    clobTokenId: tokenIds?.[0],
+    oneDayPriceChange:
+      typeof raw.oneDayPriceChange === "number"
+        ? raw.oneDayPriceChange
+        : undefined,
   };
 }
 
@@ -284,4 +298,70 @@ export const getEventBySlug = unstable_cache(
   },
   ["polymarket-event-by-slug"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+);
+
+/* ------------------------------------------------------------------ */
+/* Price history (CLOB)                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Timeframe → CLOB `interval` + `fidelity` (minutes per point). Fidelities
+ * are picked so each window returns roughly the point count the charts
+ * were designed around; the CLOB rejects fidelities too fine for a long
+ * interval (1w/fidelity=1 returns nothing), so these are not arbitrary.
+ */
+const CLOB_INTERVALS: Record<HistoryWindow, { interval: string; fidelity: number }> = {
+  "1H": { interval: "1h", fidelity: 1 },   // ~61 pts
+  "6H": { interval: "6h", fidelity: 5 },   // ~73 pts
+  "1D": { interval: "1d", fidelity: 15 },  // ~97 pts
+  "1W": { interval: "1w", fidelity: 60 },  // ~169 pts
+  "1M": { interval: "1m", fidelity: 360 }, // ~121 pts
+  ALL: { interval: "max", fidelity: 1440 },// ~1 pt/day
+  /** dense window used by the hero chart */
+  HERO: { interval: "1m", fidelity: 60 },  // ~720 pts
+};
+
+interface ClobHistoryPoint {
+  /** unix seconds */
+  t: number;
+  /** probability 0–1 */
+  p: number;
+}
+
+/**
+ * Real price history for one Yes-token, as {t: ms epoch, p: percent}
+ * — the same shape the synthetic series produces, so charts can swap
+ * between them. Returns [] when the CLOB has no history for the token.
+ */
+export const getPriceHistory = unstable_cache(
+  async (clobTokenId: string, tf: HistoryWindow): Promise<SeriesPoint[]> => {
+    const { interval, fidelity } = CLOB_INTERVALS[tf];
+    const url = new URL("/prices-history", CLOB_BASE);
+    url.searchParams.set("market", clobTokenId);
+    url.searchParams.set("interval", interval);
+    url.searchParams.set("fidelity", String(fidelity));
+
+    let res: Response;
+    try {
+      res = await fetch(url, { cache: "no-store" });
+    } catch {
+      throw new PolymarketApiError(
+        "CLOB request failed (network error — Polymarket may be geoblocked in this region)",
+      );
+    }
+    if (!res.ok) {
+      throw new PolymarketApiError(
+        `CLOB prices-history failed → HTTP ${res.status}`,
+        res.status,
+      );
+    }
+
+    const body = (await res.json()) as { history?: ClobHistoryPoint[] };
+    return (body.history ?? []).map((pt) => ({
+      t: pt.t * 1000, // CLOB sends unix seconds; charts use ms
+      p: pt.p * 100, // and probabilities 0–1; charts use percent
+    }));
+  },
+  ["polymarket-price-history"],
+  { revalidate: HISTORY_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );

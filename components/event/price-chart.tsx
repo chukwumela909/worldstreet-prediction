@@ -13,7 +13,9 @@ import {
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
-import { getSeries, TIMEFRAMES, type Timeframe } from "@/lib/mock-series";
+import { getSeries } from "@/lib/mock-series";
+import { mergeSeries, TIMEFRAMES, type Timeframe } from "@/lib/series";
+import { usePriceHistory } from "@/lib/use-price-history";
 import { usePageNow } from "@/lib/use-now";
 import {
   AnchoredPills,
@@ -45,21 +47,43 @@ export function PriceChart({ event }: { event: MarketEvent }) {
   const markets = useMemo(() => event.markets.slice(0, MAX_LINES), [event]);
   const binary = isBinary(event);
 
+  const history = usePriceHistory(markets, tf);
+
   const { data, deltas } = useMemo(() => {
     if (endTime === null) return { data: [] as ChartRow[], deltas: [] as number[] };
-    const series = markets.map((m) => getSeries(m, tf, endTime));
-    const merged: ChartRow[] = series[0].map((pt, i) => {
-      const row: ChartRow = { t: pt.t };
-      markets.forEach((m, mi) => {
-        const v = Math.round(series[mi][i].p * 10) / 10;
-        row[m.id] = v;
-        row[GHOST + m.id] = v; // ghost copy under the solid line
-      });
-      return row;
+
+    // Real CLOB history where available. A market with a clobTokenId has
+    // real history coming, so render nothing while it loads rather than
+    // flashing a synthetic curve that looks like market data; fall back to
+    // the synthetic series only for fixtures, or once a fetch has failed.
+    const series = markets.map((m) => {
+      const real = history.byMarket[m.id];
+      if (real) return real;
+      if (m.clobTokenId && history.loading) return [];
+      return getSeries(m, tf, endTime);
     });
-    const ds = series.map((s) => Math.round(s[s.length - 1].p - s[0].p));
+
+    // merge on a shared timestamp grid — real series are not index-aligned
+    // across markets, so zipping by index would mismatch prices and times
+    const merged: ChartRow[] = mergeSeries(
+      markets.map((m, i) => ({ id: m.id, points: series[i] })),
+    ).map((row) => {
+      const out: ChartRow = { t: row.t };
+      for (const m of markets) {
+        const v = row[m.id];
+        if (typeof v !== "number") continue;
+        const rounded = Math.round(v * 10) / 10;
+        out[m.id] = rounded;
+        out[GHOST + m.id] = rounded; // ghost copy under the solid line
+      }
+      return out;
+    });
+
+    const ds = series.map((s) =>
+      s.length > 0 ? Math.round(s[s.length - 1].p - s[0].p) : 0,
+    );
     return { data: merged, deltas: ds };
-  }, [markets, tf, endTime]);
+  }, [markets, tf, endTime, history.byMarket, history.loading]);
 
   // explicit ticks: first point of each distinct label, thinned to ≤7
   const ticks = useMemo(() => {
@@ -74,10 +98,33 @@ export function PriceChart({ event }: { event: MarketEvent }) {
         last = label;
       }
     }
+    // Real series start mid-period (a market listed Apr 27 yields an
+    // "Apr" tick 4 days before "May"), so drop labels that would crowd
+    // their neighbour. The synthetic series never hit this — it always
+    // spanned whole uniform periods.
+    const span = (data[data.length - 1].t as number) - (data[0].t as number);
+    const minGap = span / 12;
+    const spaced: number[] = [];
+    for (let i = 0; i < firsts.length; i++) {
+      const t = firsts[i];
+      if (spaced.length === 0) {
+        spaced.push(t);
+        continue;
+      }
+      // compare against the last *kept* tick, not the previous candidate —
+      // otherwise closely-sampled windows drop every tick after the first
+      if (t - spaced[spaced.length - 1] >= minGap) {
+        spaced.push(t);
+      } else if (i === 1) {
+        // the series began mid-period (e.g. Apr 27), so the leading label
+        // is a stub crowding the first whole period — prefer the whole one
+        spaced[0] = t;
+      }
+    }
     const MAX_TICKS = 7;
-    if (firsts.length <= MAX_TICKS) return firsts;
-    const step = Math.ceil(firsts.length / MAX_TICKS);
-    return firsts.filter((_, i) => i % step === 0);
+    if (spaced.length <= MAX_TICKS) return spaced;
+    const step = Math.ceil(spaced.length / MAX_TICKS);
+    return spaced.filter((_, i) => i % step === 0);
   }, [data, tf]);
 
   const nameFor = (id: string) =>

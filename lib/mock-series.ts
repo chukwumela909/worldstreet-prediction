@@ -1,22 +1,19 @@
 import type { Market } from "@/types/market";
 import { yesProbability } from "@/types/market";
+import type { SeriesPoint, Timeframe } from "@/lib/series";
 
 /**
  * Deterministic mock price history: a seeded random walk that ends exactly
  * at the market's current Yes price. Same market + timeframe → same series,
  * so server and client renders always agree.
+ *
+ * Used only as a fallback now — markets carrying a `clobTokenId` get real
+ * history from the CLOB (see lib/polymarket.ts). Fixtures have no token id,
+ * so they keep these synthetic curves.
  */
 
-export type Timeframe = "1H" | "6H" | "1D" | "1W" | "1M" | "ALL";
-
-export const TIMEFRAMES: Timeframe[] = ["1H", "6H", "1D", "1W", "1M", "ALL"];
-
-export interface SeriesPoint {
-  /** ms epoch */
-  t: number;
-  /** probability in percent, 0–100 */
-  p: number;
-}
+export type { SeriesPoint, Timeframe } from "@/lib/series";
+export { TIMEFRAMES } from "@/lib/series";
 
 /** points per window and step duration */
 const TF_CONFIG: Record<Timeframe, { points: number; stepMs: number; drift: number }> = {
@@ -73,8 +70,20 @@ export function getSeries(
   return out;
 }
 
-/** Percentage-point change across the 1D window (for row delta chips). */
+/**
+ * Percentage-point change over 24h, for the row delta chips.
+ *
+ * Uses Gamma's real `oneDayPriceChange` when the market has one; only
+ * fixtures (and thin live markets Gamma omits the field for) fall back
+ * to the synthetic walk. Real moves are usually well under a point, so
+ * this rounds to 0 far more often than the mock did — callers already
+ * hide the chip at 0.
+ */
 export function dayDelta(market: Market): number {
+  if (typeof market.oneDayPriceChange === "number") {
+    return Math.round(market.oneDayPriceChange * 100);
+  }
+  if (market.clobTokenId) return 0; // live market, genuinely no 24h move
   const s = getSeries(market, "1D");
   return Math.round(s[s.length - 1].p - s[0].p);
 }

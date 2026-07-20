@@ -12,6 +12,8 @@ import {
 } from "recharts";
 import type { Market } from "@/types/market";
 import { getStepSeries } from "@/lib/mock-series";
+import { mergeSeries } from "@/lib/series";
+import { usePriceHistory } from "@/lib/use-price-history";
 import { usePageNow } from "@/lib/use-now";
 import {
   AnchoredPills,
@@ -48,26 +50,45 @@ export function HeroChart({
   const onHover = useCallback((row: ChartRow | null) => setHoverRow(row), []);
   const clipId = "hc" + useId().replace(/[^a-zA-Z0-9]/g, "");
 
+  const history = usePriceHistory(markets, "HERO");
+
   const { data, xTicks, yTicks } = useMemo(() => {
     if (now === null)
       return { data: [] as ChartRow[], xTicks: [], yTicks: [] as number[] };
-    const series = markets.map((m) => getStepSeries(m, POINTS, now));
-    const merged: ChartRow[] = series[0].map((pt, i) => {
-      const row: ChartRow = { t: pt.t };
-      markets.forEach((m, mi) => {
-        row[m.id] = series[mi][i].p;
-        row[GHOST + m.id] = series[mi][i].p; // ghost copy under the solid line
-      });
-      return row;
+
+    // real CLOB history where available; see PriceChart for why loading
+    // renders empty rather than falling back to the synthetic walk
+    const series = markets.map((m) => {
+      const real = history.byMarket[m.id];
+      if (real) return real;
+      if (m.clobTokenId && history.loading) return [];
+      return getStepSeries(m, POINTS, now);
     });
-    // weekly labels ~5 days in, snapped to real data points (a category
-    // axis drops tick values that don't exist in the data)
-    const stepMs = (merged[1].t as number) - (merged[0].t as number);
-    const day = 86_400_000;
+
+    const merged: ChartRow[] = mergeSeries(
+      markets.map((m, i) => ({ id: m.id, points: series[i] })),
+    ).map((row) => {
+      const out: ChartRow = { t: row.t };
+      for (const m of markets) {
+        const v = row[m.id];
+        if (typeof v !== "number") continue;
+        out[m.id] = v;
+        out[GHOST + m.id] = v; // ghost copy under the solid line
+      }
+      return out;
+    });
+    if (merged.length === 0)
+      return { data: [] as ChartRow[], xTicks: [], yTicks: [] as number[] };
+
+    // four labels evenly spaced across the actual time span, snapped to
+    // real rows (a category axis drops ticks that aren't in the data).
+    // Derived from the span rather than a fixed step, since real series
+    // are not uniformly sampled.
     const ticks: number[] = [];
-    for (let k = 0; k < 4; k++) {
-      const idx = Math.round(((5 + 7 * k) * day) / stepMs);
-      if (merged[idx]) ticks.push(merged[idx].t as number);
+    for (let k = 1; k <= 4; k++) {
+      const idx = Math.round((merged.length - 1) * (k / 5));
+      const t = merged[idx]?.t as number | undefined;
+      if (t !== undefined && !ticks.includes(t)) ticks.push(t);
     }
     // y ticks: pick the step (multiple of 5) that lands ≤5 ticks —
     // matches the real axis (peak 58 → step 15, 0–60; peak 64 → step 20, 0–80)
@@ -76,15 +97,20 @@ export function HeroChart({
     const yMax = Math.ceil(peak / step) * step;
     const ySteps = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
     return { data: merged, xTicks: ticks, yTicks: ySteps };
-  }, [markets, now]);
+  }, [markets, now, history.byMarket, history.loading]);
 
   const lastIndex = data.length - 1;
   const yMax = yTicks[yTicks.length - 1] ?? 100;
 
-  // one seeded "+$N" trade marker per series, like the live trade blips
+  /**
+   * Seeded "+$N" trade blips, drawn only over the synthetic series.
+   * They're invented trades — showing them on real CLOB history would
+   * present fabricated activity as market data. `index: -1` disables.
+   */
   const markers = useMemo(
     () =>
       markets.map((m, i) => {
+        if (history.real) return { index: -1, amount: 0 };
         let h = 0;
         for (let c = 0; c < m.id.length; c++) h = (h * 31 + m.id.charCodeAt(c)) % 99991;
         return {
@@ -92,7 +118,7 @@ export function HeroChart({
           amount: MARKER_AMOUNTS[(h + i * 3) % MARKER_AMOUNTS.length],
         };
       }),
-    [markets],
+    [markets, history.real],
   );
 
   const nameFor = (id: string) =>

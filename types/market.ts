@@ -16,6 +16,13 @@ export interface Market {
   outcomePrices: [string, string];
   /** Lifetime volume in USD as a decimal string. */
   volume: string;
+  /**
+   * CLOB token id for the Yes outcome — the key for real price history.
+   * Absent on mock fixtures, which fall back to the synthetic series.
+   */
+  clobTokenId?: string;
+  /** Real 24h price change as a decimal (e.g. -0.0025 = -0.25pp). */
+  oneDayPriceChange?: number;
 }
 
 /** An event groups one or more markets under a single card/page. */

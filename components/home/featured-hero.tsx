@@ -2,8 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
-import type { MarketEvent } from "@/types/market";
-import { MOCK_EVENTS } from "@/lib/mock-events";
+import { isBinary, type MarketEvent } from "@/types/market";
 import { BinarySlide } from "./hero/binary-slide";
 import { GameSlide } from "./hero/game-slide";
 import { MarketSlide } from "./hero/market-slide";
@@ -18,24 +17,47 @@ import { MarketSlide } from "./hero/market-slide";
  */
 const HERO_HEIGHT = "h-[471px]";
 
+/** Pager pills are narrow — trim long market questions to fit. */
+function shortLabel(title: string): string {
+  const trimmed = title.replace(/\?$/, "");
+  return trimmed.length > 28 ? `${trimmed.slice(0, 27).trimEnd()}…` : trimmed;
+}
+
 interface Slide {
   key: string;
   label: string;
   render: () => React.ReactNode;
 }
 
-export function FeaturedHero({ event }: { event: MarketEvent }) {
+export function FeaturedHero({ events }: { events: MarketEvent[] }) {
   const slides = useMemo<Slide[]>(() => {
-    const btc = MOCK_EVENTS.find((e) => e.slug === "btc-150k-2026");
-    const list: Slide[] = [
-      { key: "market", label: event.title, render: () => <MarketSlide event={event} /> },
-      { key: "game", label: "Spain vs. Argentina", render: () => <GameSlide /> },
-    ];
-    if (btc) {
-      list.push({ key: "btc", label: "Bitcoin $150k", render: () => <BinarySlide event={btc} /> });
+    const multi = events.find((e) => !isBinary(e));
+    // Longest-horizon binary event, so the slide has real price history
+    // and doesn't go stale the moment a daily market settles. Picking
+    // from `events` means this follows whatever the page loaded — live
+    // data normally, fixtures when the API is unreachable.
+    const binary = events
+      .filter(isBinary)
+      .sort((a, b) => (b.endDate ?? "").localeCompare(a.endDate ?? ""))[0];
+
+    const list: Slide[] = [];
+    if (multi) {
+      list.push({
+        key: "market",
+        label: multi.title,
+        render: () => <MarketSlide event={multi} />,
+      });
+    }
+    list.push({ key: "game", label: "Spain vs. Argentina", render: () => <GameSlide /> });
+    if (binary) {
+      list.push({
+        key: "binary",
+        label: shortLabel(binary.title),
+        render: () => <BinarySlide event={binary} />,
+      });
     }
     return list;
-  }, [event]);
+  }, [events]);
 
   const [index, setIndex] = useState(0);
   const n = slides.length;
