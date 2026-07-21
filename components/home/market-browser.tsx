@@ -6,6 +6,7 @@ import type { MarketEvent } from "@/types/market";
 import { MarketFilters } from "@/components/home/market-filters";
 import { MarketCard } from "@/components/market/market-card";
 import { setSearchTerm, useSearchTerm } from "@/lib/search-store";
+import { useLivePrices } from "@/lib/use-live-prices";
 
 /**
  * "All markets" section: heading, filter chips, and the card grid.
@@ -13,12 +14,13 @@ import { setSearchTerm, useSearchTerm } from "@/lib/search-store";
  * (title, outcome names, category).
  */
 export function MarketBrowser({
-  events,
+  events: initialEvents,
   heading = "All markets",
 }: {
   events: MarketEvent[];
   heading?: string;
 }) {
+  const events = useLivePrices(initialEvents);
   const [filter, setFilter] = useState("All");
   const term = useSearchTerm().trim().toLowerCase();
 

@@ -28,6 +28,13 @@ const DATA_API_BASE = "https://data-api.polymarket.com";
 const DEFAULT_REVALIDATE_SECONDS = 60;
 /** History moves slower than spot prices, and payloads are larger. */
 const HISTORY_REVALIDATE_SECONDS = 300;
+/**
+ * Spot prices for markets clients poll (use-live-prices ticks every
+ * 10s) — a longer cache would make every poll a no-op. One Gamma call
+ * per unique slug set per window keeps polling well inside the ~60
+ * req/min unauthenticated ceiling.
+ */
+const SPOT_REVALIDATE_SECONDS = 10;
 
 /**
  * Hosts allowed for `iconUrl`. Must stay in sync with
@@ -333,7 +340,7 @@ export const getEventsBySlugs = unstable_cache(
     return raw.map(toMarketEvent).filter((e): e is MarketEvent => e !== null);
   },
   ["polymarket-events-by-slugs"],
-  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
+  { revalidate: SPOT_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );
 
 /* ------------------------------------------------------------------ */

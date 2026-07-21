@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
 import type { FeaturedGame } from "@/lib/polymarket";
+import { useLivePrices } from "@/lib/use-live-prices";
 import { BinarySlide } from "./hero/binary-slide";
 import { GameSlide } from "./hero/game-slide";
 import { MarketSlide } from "./hero/market-slide";
@@ -31,12 +32,14 @@ interface Slide {
 }
 
 export function FeaturedHero({
-  events,
+  events: initialEvents,
   game,
 }: {
   events: MarketEvent[];
   game: FeaturedGame | null;
 }) {
+  // slide prices tick with the poll; slide *selection* follows along
+  const events = useLivePrices(initialEvents);
   const slides = useMemo<Slide[]>(() => {
     const multi = events.find((e) => !isBinary(e));
     // Longest-horizon binary event, so the slide has real price history

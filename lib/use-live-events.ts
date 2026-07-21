@@ -11,9 +11,12 @@ import type { MarketEvent } from "@/types/market";
  * The nav bar and the portfolio page both need this on the same render,
  * so in-flight requests are shared and results memoised briefly at module
  * scope — otherwise every mount would re-hit the route for the same slugs.
+ *
+ * The TTL sits just under the polling interval (use-live-prices), so
+ * pollers sharing a slug set coalesce into one request per tick.
  */
 
-const TTL_MS = 30_000;
+const TTL_MS = 8_000;
 
 interface CacheEntry {
   at: number;
@@ -22,7 +25,7 @@ interface CacheEntry {
 
 const cache = new Map<string, CacheEntry>();
 
-function fetchEvents(slugs: string[]): Promise<MarketEvent[]> {
+export function fetchEvents(slugs: string[]): Promise<MarketEvent[]> {
   const key = [...slugs].sort().join(",");
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < TTL_MS) return hit.promise;
