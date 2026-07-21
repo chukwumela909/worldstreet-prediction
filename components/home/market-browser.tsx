@@ -12,7 +12,13 @@ import { setSearchTerm, useSearchTerm } from "@/lib/search-store";
  * Chips filter by event tag; the top-nav search term narrows further
  * (title, outcome names, category).
  */
-export function MarketBrowser({ events }: { events: MarketEvent[] }) {
+export function MarketBrowser({
+  events,
+  heading = "All markets",
+}: {
+  events: MarketEvent[];
+  heading?: string;
+}) {
   const [filter, setFilter] = useState("All");
   const term = useSearchTerm().trim().toLowerCase();
 
@@ -48,7 +54,7 @@ export function MarketBrowser({ events }: { events: MarketEvent[] }) {
   return (
     <>
       <div className="mt-7 flex items-center justify-between">
-        <h2 className="text-xl font-semibold tracking-tight">All markets</h2>
+        <h2 className="text-xl font-semibold tracking-tight">{heading}</h2>
         <div className="flex items-center gap-4 text-primary">
           <button
             aria-label="Search markets"
