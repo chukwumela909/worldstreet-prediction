@@ -22,14 +22,20 @@ New resource → **Private/Public Repository** → this repo.
 | Branch             | `main`                                           |
 | Build Pack         | **Dockerfile**                                   |
 | Base Directory     | `/services/api`                                  |
-| Dockerfile Location| `Dockerfile` (relative to base directory)        |
+| Dockerfile Location| `/Dockerfile` (joined onto the base directory)   |
 | Ports Exposes      | `3001`                                           |
 | Health Check Path  | `/health/ready`                                  |
 | Domain             | e.g. `https://prediction-api.worldstreetgold.com`|
 
 Base Directory matters: it makes `services/api` the Docker build context, which
 is what the Dockerfile expects (it copies `package.json`, `src/`, `tsconfig.json`
-from the context root).
+from the context root). Dockerfile Location is resolved relative to it, so
+`/Dockerfile` is correct and `/services/api/Dockerfile` would double the path.
+
+Do not instead leave Base Directory at `/` and point Dockerfile Location at
+`/services/api/Dockerfile` — that builds with the repo root as context, so
+`npm ci` installs the Next.js app's dependencies and the build fails at
+`COPY src ./src` (there is no `src/` at the root).
 
 `/health/ready` returns 503 until Mongo connects, so a failing health check
 after deploy points at `MONGODB_URI`, not at the app.
