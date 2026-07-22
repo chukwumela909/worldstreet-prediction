@@ -1,7 +1,13 @@
 import type { Metadata } from "next";
 import { Geist_Mono, Inter } from "next/font/google";
+import { ClerkProvider } from "@clerk/nextjs";
 import { AuthProvider } from "@/components/auth/auth-context";
 import { SiteFooter } from "@/components/nav/site-footer";
+import {
+  CLERK_DOMAIN,
+  CLERK_ENABLED,
+  CLERK_SIGN_IN_URL,
+} from "@/lib/auth-config";
 import "./globals.css";
 
 /** Apply the persisted theme before first paint (inline, FOUC-safe). */
@@ -27,7 +33,7 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  return (
+  const page = (
     <html
       lang="en"
       data-theme="dark"
@@ -42,5 +48,19 @@ export default function RootLayout({
         </AuthProvider>
       </body>
     </html>
+  );
+
+  // Satellite of the central worldstreetgold.com Clerk app — one login shared
+  // across all WorldStreet platforms. Without keys (local dev) the tree renders
+  // bare and auth falls back to the mock provider.
+  if (!CLERK_ENABLED) return page;
+  return (
+    <ClerkProvider
+      domain={CLERK_DOMAIN}
+      isSatellite={true}
+      signInUrl={CLERK_SIGN_IN_URL}
+    >
+      {page}
+    </ClerkProvider>
   );
 }

@@ -17,6 +17,7 @@ import { toggleTheme, useTheme } from "@/lib/theme-store";
 import { usePortfolio } from "@/lib/portfolio-store";
 import { positionPrice } from "@/lib/market-lookup";
 import { useLiveEvents } from "@/lib/use-live-events";
+import { useWalletBalance } from "@/lib/use-wallet-balance";
 import { DepositModal } from "./deposit-modal";
 
 /**
@@ -54,6 +55,9 @@ export function NavActions() {
 
 function SignedInActions() {
   const portfolio = usePortfolio();
+  // Central wallet balance when the prediction API is wired up; the mock
+  // portfolio cash keeps the demo working until then.
+  const walletCash = useWalletBalance(true);
   const [depositOpen, setDepositOpen] = useState(false);
 
   const slugs = useMemo(
@@ -77,7 +81,11 @@ function SignedInActions() {
     <>
       <div className="hidden items-center sm:flex">
         <NavStat label="Portfolio" value={positionsValue} tone="text-yes" />
-        <NavStat label="Cash" value={portfolio.cash} tone="text-primary" />
+        <NavStat
+          label="Cash"
+          value={walletCash ?? portfolio.cash}
+          tone="text-primary"
+        />
       </div>
       <button
         onClick={() => setDepositOpen(true)}
