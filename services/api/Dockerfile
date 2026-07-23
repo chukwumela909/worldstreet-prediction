@@ -3,7 +3,10 @@ FROM node:22-alpine AS dependencies
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm ci
+# --include=dev forces devDependencies (typescript/tsc) even when the host
+# injects NODE_ENV=production as a build arg, which would otherwise omit them
+# and break `tsc` in the builder stage below.
+RUN npm ci --include=dev
 
 FROM dependencies AS builder
 COPY tsconfig.json ./

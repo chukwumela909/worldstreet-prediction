@@ -42,7 +42,17 @@ after deploy points at `MONGODB_URI`, not at the app.
 
 ## 2. Backend environment variables
 
-All are runtime variables (read at process start) — none need to be build-time.
+All are runtime variables (read at process start) — none are needed at build
+time. In Coolify, **uncheck "Available at Buildtime" for every variable** (keep
+them enabled at runtime). Two reasons:
+
+- Leaving them build-time injects `NODE_ENV=production` into `npm ci`, which
+  omits devDependencies — so `tsc` goes missing and the build dies with
+  `sh: tsc: not found` (exit 127). The Dockerfile now forces dev deps with
+  `npm ci --include=dev` as a backstop, but runtime-only is still correct.
+- It also stops secrets (`CLERK_SECRET_KEY`, `WALLET_SERVICE_TOKEN`, the Mongo
+  password) from being baked into image layers as build args — the source of
+  the `SecretsUsedInArgOrEnv` build warnings.
 
 ```
 NODE_ENV=production
