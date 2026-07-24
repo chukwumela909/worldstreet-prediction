@@ -26,6 +26,11 @@ export interface Market {
   oneDayPriceChange?: number;
   /** Outcome labels when they aren't Yes/No (Bayse, e.g. ["Portable", "Charles"]). */
   outcomeLabels?: [string, string];
+  /**
+   * Bayse outcome ids, [yes, no] — what POST /v1/trades names when
+   * staking naira on this market. Absent on Polymarket markets.
+   */
+  outcomeIds?: [string, string];
   /** Resolution criteria text (Bayse markets). */
   rules?: string;
 }
@@ -48,6 +53,11 @@ export interface MarketEvent {
   volume: string;
   /** ISO date the event resolves/ends. */
   endDate: string;
+  /**
+   * Full ISO timestamp trading closes (Bayse) — `endDate` is date-only,
+   * which is useless for the short-cycle countdown markets.
+   */
+  closesAt?: string;
   markets: Market[];
   /**
    * Where the event came from; absent = Polymarket. Bayse events are

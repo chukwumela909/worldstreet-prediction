@@ -95,7 +95,13 @@ export async function buildApp() {
         apiError?.code ||
         (fastifyError.validation ? "VALIDATION_ERROR" : "REQUEST_ERROR"),
       requestId: request.id,
-      ...(fastifyError.validation ? { details: fastifyError.validation } : {}),
+      // ApiError details are part of the contract, not debug spill — the
+      // client needs e.g. PRICE_MOVED's freshPriceKobo to re-confirm.
+      ...(apiError?.details !== undefined
+        ? { details: apiError.details }
+        : fastifyError.validation
+          ? { details: fastifyError.validation }
+          : {}),
     });
   });
 

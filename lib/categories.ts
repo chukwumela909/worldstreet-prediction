@@ -21,7 +21,8 @@ export interface CategoryTab {
 
 export const CATEGORY_TABS: CategoryTab[] = [
   { param: "trending", label: "Trending" },
-  // display-only Bayse (African/Nigerian) markets — see lib/bayse.ts
+  // Bayse-fed (African/Nigerian) markets, traded in naira against the
+  // house — see lib/bayse.ts and lib/local-trades.ts
   { param: "local", label: "Local", source: "bayse" },
   { param: "world-cup", label: "World Cup", tagSlug: "world-cup" },
   // newest listings first — where the visible day-to-day churn lives

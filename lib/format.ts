@@ -23,6 +23,19 @@ export function formatNairaCompact(n: number): string {
   return `₦${Math.round(n)}`;
 }
 
+/**
+ * Kobo → "₦12,500" / "₦12,500.75". Naira amounts in the Local book are
+ * integer kobo end to end; only show the decimals when there are any.
+ */
+export function formatNaira(kobo: number): string {
+  if (!Number.isFinite(kobo)) return "₦0";
+  const naira = kobo / 100;
+  return `₦${naira.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: kobo % 100 === 0 ? 0 : 2,
+  })}`;
+}
+
 function trimZero(n: number): string {
   const fixed = n >= 100 ? n.toFixed(0) : n.toFixed(1);
   return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;

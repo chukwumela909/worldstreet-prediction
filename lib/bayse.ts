@@ -56,8 +56,10 @@ interface BayseMarket {
   /** "Yes" on single-market events; the outcome label on combined/grouped. */
   title: string;
   status?: string;
+  outcome1Id?: string;
   outcome1Label?: string;
   outcome1Price?: number;
+  outcome2Id?: string;
   outcome2Label?: string;
   outcome2Price?: number;
   rules?: string;
@@ -143,6 +145,12 @@ function toMarket(raw: BayseMarket, single: boolean, eventTitle: string): Market
     // Relay reports volume per event, not per market
     volume: "0",
     outcomeLabels: labels[0] !== "Yes" || labels[1] !== "No" ? labels : undefined,
+    // both ids or neither — the trade panel treats a market without them
+    // as display-only rather than sending a half-formed order
+    outcomeIds:
+      raw.outcome1Id && raw.outcome2Id
+        ? [raw.outcome1Id, raw.outcome2Id]
+        : undefined,
     rules: raw.rules || undefined,
   };
 }
@@ -174,6 +182,7 @@ export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
     tags: tags.length > 0 ? tags.slice(0, 4) : undefined,
     volume: String(raw.totalVolume ?? 0),
     endDate: (raw.closingDate || raw.resolutionDate || "").slice(0, 10),
+    closesAt: raw.closingDate || raw.resolutionDate || undefined,
     markets,
     source: "bayse",
     trades: raw.totalOrders,

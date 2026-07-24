@@ -83,7 +83,8 @@ function OutcomeRow({ market }: { market: Market }) {
   );
 }
 
-function BuySideButton({
+/** Buy pill in the outcome rows — rest tint, selected solid (recon §7). */
+export function BuySideButton({
   label,
   side,
   selected,

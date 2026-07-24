@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo } from "react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { CLERK_ENABLED, CLERK_SIGN_IN_URL } from "@/lib/auth-config";
+import { clearNairaWallet } from "@/lib/naira-wallet";
 
 export interface SessionUser {
   email: string;
@@ -50,7 +51,11 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
 
     return {
       user,
-      signOut: () => void clerk.signOut(),
+      signOut: () => {
+        // the naira balance is per-user; drop it before the next one lands
+        clearNairaWallet();
+        void clerk.signOut();
+      },
       openAuth: redirectToCentralLogin,
     };
   }, [clerkUser, isLoaded, clerk]);

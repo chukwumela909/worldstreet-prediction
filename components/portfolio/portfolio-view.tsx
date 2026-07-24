@@ -9,6 +9,7 @@ import { positionPrice, resolveEvent } from "@/lib/market-lookup";
 import { useLiveEvents } from "@/lib/use-live-events";
 import type { MarketEvent } from "@/types/market";
 import { EventIcon } from "@/components/market/event-icon";
+import { LocalPositions } from "@/components/portfolio/local-positions";
 import {
   resetPortfolio,
   usePortfolio,
@@ -16,7 +17,7 @@ import {
   type Position,
 } from "@/lib/portfolio-store";
 
-const TABS = ["Positions", "History", "Watchlist"] as const;
+const TABS = ["Positions", "Local", "History", "Watchlist"] as const;
 type Tab = (typeof TABS)[number];
 
 const usd = (n: number) =>
@@ -147,6 +148,7 @@ export function PortfolioView() {
 
       <div className="py-4">
         {tab === "Positions" && <Positions rows={rows} bySlug={bySlug} />}
+        {tab === "Local" && <LocalPositions />}
         {tab === "History" && (
           <History activity={portfolio.activity} bySlug={bySlug} />
         )}

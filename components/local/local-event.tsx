@@ -1,33 +1,40 @@
+"use client";
+
 import { BarChart3, Clock, Droplets } from "lucide-react";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
-import { formatNairaCompact, toPercent } from "@/lib/format";
+import { formatNaira, formatNairaCompact, toPercent } from "@/lib/format";
+import { priceToKobo } from "@/lib/local-trades";
 import { EventIcon } from "@/components/market/event-icon";
-import { BuyButton } from "@/components/market/buy-button";
+import { BuySideButton } from "@/components/event/outcome-list";
+import { TradeProvider, useTradeSelection } from "@/components/event/trade-context";
 import { BaysePriceChart } from "@/components/local/bayse-price-chart";
+import { LocalTradePanel } from "@/components/local/local-trade-panel";
 
 /**
  * Detail page body for a Bayse (Local) event: header with naira stats,
- * price chart, outcome rows, and rules — display-only, so the buy
- * buttons are the same auth-modal stubs the cards use and the side
- * panel says trading is coming.
+ * price chart, outcome rows, and rules, with the naira trade panel on
+ * the right. Clicking a buy pill selects that market+side in the panel,
+ * same as the Polymarket event page.
  */
 export function LocalEvent({ event }: { event: MarketEvent }) {
   return (
-    <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-16 pt-4 lg:flex-row lg:items-start">
-      <div className="min-w-0 flex-1">
-        <LocalHeader event={event} />
-        <div className="mt-5">
-          <BaysePriceChart event={event} />
-        </div>
-        {!isBinary(event) && (
+    <TradeProvider event={event}>
+      <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-16 pt-4 lg:flex-row lg:items-start">
+        <div className="min-w-0 flex-1">
+          <LocalHeader event={event} />
           <div className="mt-5">
-            <LocalOutcomeList event={event} />
+            <BaysePriceChart event={event} />
           </div>
-        )}
-        <LocalRules event={event} />
-      </div>
-      <LocalPanel event={event} />
-    </main>
+          {!isBinary(event) && (
+            <div className="mt-5">
+              <LocalOutcomeList event={event} />
+            </div>
+          )}
+          <LocalRules event={event} />
+        </div>
+        <LocalTradePanel event={event} />
+      </main>
+    </TradeProvider>
   );
 }
 
@@ -80,6 +87,11 @@ function LocalHeader({ event }: { event: MarketEvent }) {
 
 /* ---------- outcomes (multi) ---------- */
 
+/** Outcome price as ₦ per ₦100 share, e.g. "₦58". */
+function nairaPrice(market: Market, side: 0 | 1): string {
+  return formatNaira(priceToKobo(market.outcomePrices[side]));
+}
+
 function LocalOutcomeList({ event }: { event: MarketEvent }) {
   return (
     <div className="divide-y divide-border border-t border-border">
@@ -91,15 +103,27 @@ function LocalOutcomeList({ event }: { event: MarketEvent }) {
 }
 
 function LocalOutcomeRow({ market }: { market: Market }) {
+  const { marketId, side, select } = useTradeSelection();
   const pct = toPercent(market.outcomePrices[0]);
   const name = market.groupItemTitle ?? market.question;
+  const labels = market.outcomeLabels ?? ["Yes", "No"];
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
       <p className="min-w-0 flex-1 truncate text-[15px] font-semibold">{name}</p>
       <span className="text-[26px] font-semibold leading-none">{pct}%</span>
-      <div className="flex w-full gap-2 sm:w-auto sm:[&>button]:w-[124px] sm:[&>button]:flex-none">
-        <BuyButton side="yes" label={`Buy Yes ${nairaPrice(market, 0)}`} outcome={name} />
-        <BuyButton side="no" label={`Buy No ${nairaPrice(market, 1)}`} outcome={name} />
+      <div className="flex w-full gap-2 sm:w-auto">
+        <BuySideButton
+          side="yes"
+          label={`Buy ${labels[0]} ${nairaPrice(market, 0)}`}
+          selected={marketId === market.id && side === "yes"}
+          onClick={() => select(market.id, "yes")}
+        />
+        <BuySideButton
+          side="no"
+          label={`Buy ${labels[1]} ${nairaPrice(market, 1)}`}
+          selected={marketId === market.id && side === "no"}
+          onClick={() => select(market.id, "no")}
+        />
       </div>
     </div>
   );
@@ -150,36 +174,5 @@ function LocalRules({ event }: { event: MarketEvent }) {
         </p>
       )}
     </div>
-  );
-}
-
-/* ---------- side panel ---------- */
-
-function nairaPrice(market: Market, side: 0 | 1): string {
-  return `₦${Math.round(parseFloat(market.outcomePrices[side]) * 100)}`;
-}
-
-function LocalPanel({ event }: { event: MarketEvent }) {
-  const market = event.markets[0];
-  const labels = market.outcomeLabels ?? ["Yes", "No"];
-  return (
-    <aside className="w-full lg:w-[306px] lg:shrink-0">
-      <div className="rounded-xl border border-border bg-surface p-4 shadow-card lg:sticky lg:top-[124px]">
-        <div className="flex items-center gap-2.5">
-          <EventIcon event={event} className="size-9 rounded-md text-lg" px={36} />
-          <div className="min-w-0 text-sm font-semibold leading-tight">
-            {event.title}
-          </div>
-        </div>
-        <div className="mt-4 flex gap-2">
-          <BuyButton side="yes" label={`Buy ${labels[0]} · ${nairaPrice(market, 0)}`} />
-          <BuyButton side="no" label={`Buy ${labels[1]} · ${nairaPrice(market, 1)}`} />
-        </div>
-        <p className="mt-3 text-center text-xs leading-5 text-tertiary">
-          Prices are ₦ per ₦100 share, live from Bayse. Trading local
-          markets on Worldstreet is coming soon.
-        </p>
-      </div>
-    </aside>
   );
 }

@@ -94,4 +94,35 @@ export class ApiError extends Error {
     this.status = status;
     this.data = data;
   }
+
+  /** Machine-readable code from the API envelope, e.g. "PRICE_MOVED". */
+  get code(): string | null {
+    return readField<string>(this.data, "code", "string");
+  }
+
+  /** Extra payload the API attached to the failure, e.g. the fresh price. */
+  get details(): Record<string, unknown> | null {
+    const details = readField<Record<string, unknown>>(
+      this.data,
+      "details",
+      "object",
+    );
+    return details ?? null;
+  }
+}
+
+function readField<T>(
+  data: unknown,
+  key: string,
+  type: "string" | "object",
+): T | null {
+  if (!data || typeof data !== "object" || !(key in data)) return null;
+  const value = (data as Record<string, unknown>)[key];
+  if (type === "string") return typeof value === "string" ? (value as T) : null;
+  return value && typeof value === "object" ? (value as T) : null;
+}
+
+/** Human-readable message for anything thrown out of `apiFetch`. */
+export function errorMessage(err: unknown, fallback: string): string {
+  return err instanceof Error && err.message ? err.message : fallback;
 }
