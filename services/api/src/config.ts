@@ -28,6 +28,26 @@ const envSchema = z.object({
   WALLET_SERVICE_TOKEN: z.string().default(""),
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(200),
   RATE_LIMIT_WINDOW: z.string().default("1 minute"),
+  // Local markets book (Bayse-fed, naira-denominated). Spread/caps are
+  // integer kobo / basis points; the FX mid rate itself is admin-set at
+  // runtime via POST /admin/fx-rate, deliberately not an env var.
+  FX_SPREAD_BPS: z.coerce.number().int().min(0).max(2_000).default(100),
+  /** Max single stake, kobo (default ₦50,000). */
+  TRADE_MAX_STAKE_KOBO: z.coerce.number().int().min(10_000).default(5_000_000),
+  /** Max house exposure (payouts beyond stakes) per market, kobo (default ₦2M). */
+  TRADE_MAX_MARKET_EXPOSURE_KOBO: z.coerce
+    .number()
+    .int()
+    .min(100_000)
+    .default(200_000_000),
+  /** No new trades this close to a countdown market's close (default 90s). */
+  TRADE_COUNTDOWN_CUTOFF_SECONDS: z.coerce.number().int().min(0).default(90),
+  /** Auto-settlement poll cadence; 0 disables the worker. */
+  SETTLEMENT_POLL_SECONDS: z.coerce.number().int().min(0).default(60),
+  /** Alert when a market is unresolved this long past its resolution date. */
+  SETTLEMENT_OVERDUE_HOURS: z.coerce.number().int().min(1).default(6),
+  /** Optional webhook for settlement alerts (email bridge plugs in here). */
+  ALERT_WEBHOOK_URL: z.string().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);
