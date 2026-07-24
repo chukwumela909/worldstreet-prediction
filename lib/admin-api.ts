@@ -8,9 +8,6 @@ import { ApiError, apiFetch, isApiConfigured } from "@/lib/api-client";
  * `/v1/admin/*`). Authorization is the central Clerk role — a non-admin
  * session gets 403 FORBIDDEN from every call here, which the desk
  * renders as a "not an admin" state rather than an error.
- *
- * Distinct from lib/admin-store.ts, which is the localStorage mock
- * behind the market-authoring pages and has no backend at all.
  */
 
 export interface FxQuote {

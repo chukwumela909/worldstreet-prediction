@@ -2,29 +2,16 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  ArrowLeft,
-  Coins,
-  Gavel,
-  LayoutDashboard,
-  LayoutTemplate,
-  ScrollText,
-  Table2,
-} from "lucide-react";
+import { ArrowLeft, Coins } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-context";
 
-const NAV = [
-  { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/admin/markets", label: "Markets", icon: Table2 },
-  { href: "/admin/resolution", label: "Resolution", icon: Gavel },
-  { href: "/admin/local", label: "Local book", icon: Coins },
-  { href: "/admin/content", label: "Content", icon: LayoutTemplate },
-  { href: "/admin/audit", label: "Audit log", icon: ScrollText },
-] as const;
+const NAV = [{ href: "/admin", label: "Local book", icon: Coins }] as const;
 
 /**
  * Admin chrome: sidebar on desktop, horizontal tab row on mobile.
- * Any signed-in user counts as an admin — mock auth, demo only.
+ * Signing in only gets you this far — every admin endpoint checks the
+ * central Clerk `admin` role itself, and the desk renders that refusal
+ * rather than pretending the page works.
  */
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { user, openAuth } = useAuth();
@@ -36,7 +23,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="w-full max-w-md rounded-xl border border-border bg-surface p-8 text-center shadow-card">
           <h1 className="text-xl font-semibold">Worldstreet Admin</h1>
           <p className="mt-2 text-sm text-secondary">
-            Log in to manage markets, resolutions, and site content.
+            Log in to manage the Local book&rsquo;s rate and settlements.
           </p>
           <button
             onClick={openAuth}
