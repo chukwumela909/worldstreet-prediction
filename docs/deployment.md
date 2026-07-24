@@ -142,6 +142,41 @@ Expected: the user's spendable USD balance in minor units. `503
 WALLET_UNAVAILABLE` means the wallet vars are unset or the token isn't
 registered on the wallet side yet.
 
+## 5b. Turn on the Local (naira) book
+
+Local markets are inert until an admin sets a USD/NGN mid rate: with no rate
+row `GET /v1/wallet/ngn` reports `fx: null`, conversions answer `503
+FX_UNAVAILABLE`, and nobody can fund a naira balance to trade with. The rate is
+deliberately not an env var — it's set at runtime and every change is kept for
+audit.
+
+The admin is any account with Clerk `publicMetadata.role = "admin"`.
+
+```bash
+curl -X POST https://prediction-api.worldstreetgold.com/v1/admin/fx-rate \
+  -H "Authorization: Bearer <admin token>" \
+  -H "Content-Type: application/json" \
+  -d '{"usdToNgn": 1500}'
+```
+
+`FX_SPREAD_BPS` (default 100 = 1%) is then applied against the user in both
+directions, so a round trip costs 2× the spread.
+
+To check the whole money path rather than just the rate, run the smoke test —
+it sets the rate, converts dollars to naira, stakes on a live Bayse market,
+proves a retried order can't stake twice, and reads the position back out of
+the portfolio, asserting the balances at each step:
+
+```bash
+API_BASE=https://prediction-api.worldstreetgold.com ADMIN_TOKEN=<admin token> npx tsx scripts/smoke-local-book.ts --fx 1500 --yes
+```
+
+Run it from `services/api`. Session tokens expire in about a minute, so grab
+one immediately before running. Without `--yes` it prints what it would do and
+sends nothing; `--settle` additionally settles the market, which pays out
+**every** user holding it — staging only. See the header of
+`services/api/scripts/smoke-local-book.ts` for the rest of the flags.
+
 ## 6. Deploying the web app (separate resource)
 
 The Next.js app is a second Coolify resource from the same repo with Base

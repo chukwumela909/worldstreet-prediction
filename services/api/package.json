@@ -10,7 +10,8 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "smoke:local": "tsx scripts/smoke-local-book.ts"
   },
   "dependencies": {
     "@clerk/fastify": "^3.1.48",
