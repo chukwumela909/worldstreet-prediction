@@ -9,7 +9,7 @@ import { getEventsBySlugs } from "@/lib/polymarket";
  *   → { events: MarketEvent[] }
  *
  * Slugs not found upstream are simply absent from the response; callers
- * fall back to the mock fixtures for those.
+ * render those as "price unknown" (see lib/market-lookup.ts).
  */
 
 /** Portfolio + watchlist are demo-scale; keeps one Gamma call bounded. */

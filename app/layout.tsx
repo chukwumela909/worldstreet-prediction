@@ -52,7 +52,7 @@ export default function RootLayout({
 
   // Satellite of the central worldstreetgold.com Clerk app — one login shared
   // across all WorldStreet platforms. Without keys (local dev) the tree renders
-  // bare and auth falls back to the mock provider.
+  // bare and the app is permanently signed out.
   if (!CLERK_ENABLED) return page;
   return (
     <ClerkProvider

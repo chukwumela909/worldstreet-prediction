@@ -8,8 +8,8 @@ import {
 
 /**
  * Next 16 proxy (the renamed middleware convention). With Clerk keys present
- * it resolves the satellite session on every request; without them it's a
- * pass-through so the mock-auth dev setup keeps working. No routes are
+ * it resolves the satellite session on every request; without them (keyless
+ * local dev, permanently signed out) it's a pass-through. No routes are
  * protected — the whole site browses publicly and only trading actions
  * require a session, which the API enforces.
  */

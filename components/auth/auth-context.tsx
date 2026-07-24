@@ -1,55 +1,23 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { CLERK_ENABLED, CLERK_SIGN_IN_URL } from "@/lib/auth-config";
-import {
-  signInAs,
-  signOutUser,
-  useSessionUser,
-  type SessionUser,
-} from "@/lib/session-store";
-import { AuthModal } from "./auth-modal";
+
+export interface SessionUser {
+  email: string;
+  /** Display name (Clerk full name / username, falling back to the email local part). */
+  name: string;
+}
 
 interface AuthState {
   user: SessionUser | null;
+  /** Sends the visitor to the central WorldStreet login. */
   openAuth: () => void;
-  closeAuth: () => void;
-  /** Mock mode: derives a username from the email. Clerk mode: redirects to the central login. */
-  signIn: (email: string) => void;
   signOut: () => void;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
-
-/**
- * Mock provider (no Clerk keys): the demo email modal + localStorage session.
- */
-function MockAuthProvider({ children }: { children: React.ReactNode }) {
-  const user = useSessionUser();
-  const [open, setOpen] = useState(false);
-
-  const value = useMemo<AuthState>(
-    () => ({
-      user,
-      signIn: (email: string) => {
-        signInAs(email);
-        setOpen(false);
-      },
-      signOut: signOutUser,
-      openAuth: () => setOpen(true),
-      closeAuth: () => setOpen(false),
-    }),
-    [user],
-  );
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-      {open && <AuthModal />}
-    </AuthContext.Provider>
-  );
-}
 
 /** Send the visitor to the central WorldStreet login and back here after. */
 function redirectToCentralLogin() {
@@ -60,8 +28,7 @@ function redirectToCentralLogin() {
 
 /**
  * Clerk provider: session comes from the central worldstreetgold.com Clerk
- * application (this app is a satellite domain). Same AuthState surface as
- * the mock, so consumers never know the difference.
+ * application (this app is a satellite domain).
  */
 function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
   const { user: clerkUser, isLoaded } = useUser();
@@ -83,19 +50,34 @@ function ClerkAuthProvider({ children }: { children: React.ReactNode }) {
 
     return {
       user,
-      signIn: redirectToCentralLogin,
       signOut: () => void clerk.signOut(),
       openAuth: redirectToCentralLogin,
-      closeAuth: () => {},
     };
   }, [clerkUser, isLoaded, clerk]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
+/**
+ * No Clerk keys (local dev): always signed out. Sign-in buttons still
+ * redirect to the central login, but without satellite keys the session
+ * can't come back — set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY to sign in.
+ */
+function SignedOutProvider({ children }: { children: React.ReactNode }) {
+  const value = useMemo<AuthState>(
+    () => ({
+      user: null,
+      signOut: () => {},
+      openAuth: redirectToCentralLogin,
+    }),
+    [],
+  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
 // CLERK_ENABLED is a build-time constant, so the choice is stable for the
 // lifetime of the bundle — each variant keeps its own hook order.
-export const AuthProvider = CLERK_ENABLED ? ClerkAuthProvider : MockAuthProvider;
+export const AuthProvider = CLERK_ENABLED ? ClerkAuthProvider : SignedOutProvider;
 
 export function useAuth(): AuthState {
   const ctx = useContext(AuthContext);

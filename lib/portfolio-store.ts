@@ -3,7 +3,7 @@
 import { useSyncExternalStore } from "react";
 
 /**
- * Mock portfolio store (no backend), same pattern as session-store:
+ * Mock portfolio store (until the trading endpoints land):
  * demo cash + positions + trade history + watchlist live in
  * localStorage and are shared app-wide via useSyncExternalStore.
  * SSR renders the empty default; the client snapshot takes over
@@ -28,9 +28,10 @@ export interface Position {
 
 export interface Activity {
   id: string;
+  /** "deposit" only appears in legacy stored history (the mock deposit flow is gone). */
   type: "buy" | "sell" | "deposit";
   ts: number;
-  /** Dollars moved (spent on buy, received on sell, credited on deposit). */
+  /** Dollars moved (spent on buy, received on sell). */
   amount: number;
   eventSlug?: string;
   eventTitle?: string;
@@ -86,19 +87,6 @@ function commit(next: PortfolioState) {
 }
 
 const newId = () => `act-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-
-export function deposit(amount: number) {
-  load();
-  if (amount <= 0) return;
-  commit({
-    ...state,
-    cash: state.cash + amount,
-    activity: [
-      { id: newId(), type: "deposit", ts: Date.now(), amount },
-      ...state.activity,
-    ],
-  });
-}
 
 export interface TradeIntent {
   marketId: string;

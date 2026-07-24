@@ -2,7 +2,7 @@
  * Central WorldStreet auth configuration (build-time constants).
  *
  * The whole Clerk integration is gated on NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY:
- * unset (local dev before keys exist) the app keeps the mock email sign-in,
+ * unset (local dev before keys exist) the app is permanently signed out,
  * set (staging/prod) it runs as a Clerk satellite of worldstreetgold.com so
  * one central login works across every WorldStreet platform.
  */

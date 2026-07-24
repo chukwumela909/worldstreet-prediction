@@ -8,10 +8,9 @@ import type { HistoryWindow, SeriesPoint } from "@/lib/series";
  * Real CLOB price history for a set of markets, keyed by market id.
  *
  * Markets carrying a `clobTokenId` (i.e. everything from the live Gamma
- * API) get real history; mock fixtures have no token id, so callers fall
- * back to the synthetic series for those. `real` reports whether the
- * returned data is genuine — charts use it to avoid presenting a
- * fabricated curve as if it were market data.
+ * API) get real history; markets without one fall back to the synthetic
+ * series. `real` reports whether the returned data is genuine — charts
+ * use it to avoid presenting a fabricated curve as if it were market data.
  */
 export interface PriceHistory {
   /** market id → points, only for markets with real history */

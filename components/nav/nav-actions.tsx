@@ -18,12 +18,11 @@ import { usePortfolio } from "@/lib/portfolio-store";
 import { positionPrice } from "@/lib/market-lookup";
 import { useLiveEvents } from "@/lib/use-live-events";
 import { useWalletBalance } from "@/lib/use-wallet-balance";
-import { DepositModal } from "./deposit-modal";
 
 /**
  * Right side of the top nav. Signed out: Log In / Sign Up pills.
  * Signed in (Polymarket-style): Portfolio + Cash value stats linking
- * to /portfolio, a Deposit button, and the avatar dropdown.
+ * to /portfolio and the avatar dropdown.
  * Both states end with the hamburger dropdown.
  */
 export function NavActions() {
@@ -55,10 +54,9 @@ export function NavActions() {
 
 function SignedInActions() {
   const portfolio = usePortfolio();
-  // Central wallet balance when the prediction API is wired up; the mock
-  // portfolio cash keeps the demo working until then.
+  // Central wallet balance; the local demo cash only shows when
+  // NEXT_PUBLIC_API_URL is unset (keyless local dev).
   const walletCash = useWalletBalance(true);
-  const [depositOpen, setDepositOpen] = useState(false);
 
   const slugs = useMemo(
     () => [...new Set(portfolio.positions.map((p) => p.eventSlug))],
@@ -87,14 +85,7 @@ function SignedInActions() {
           tone="text-primary"
         />
       </div>
-      <button
-        onClick={() => setDepositOpen(true)}
-        className="h-8 shrink-0 whitespace-nowrap rounded-full bg-blue-400 px-3.5 text-sm font-semibold text-white hover:bg-blue-500"
-      >
-        Deposit
-      </button>
       <AvatarDropdown />
-      {depositOpen && <DepositModal onClose={() => setDepositOpen(false)} />}
     </>
   );
 }

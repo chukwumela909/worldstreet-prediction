@@ -5,7 +5,6 @@ import Link from "next/link";
 import { RotateCcw, TrendingDown, TrendingUp } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-context";
 import { MarketCard } from "@/components/market/market-card";
-import { DepositModal } from "@/components/nav/deposit-modal";
 import { positionPrice, resolveEvent } from "@/lib/market-lookup";
 import { useLiveEvents } from "@/lib/use-live-events";
 import type { MarketEvent } from "@/types/market";
@@ -28,7 +27,6 @@ export function PortfolioView() {
   const { user, openAuth } = useAuth();
   const portfolio = usePortfolio();
   const [tab, setTab] = useState<Tab>("Positions");
-  const [depositOpen, setDepositOpen] = useState(false);
 
   // Every tab references events by slug; fetch the live ones once for the
   // whole page. Ordered by need — the route caps the list, so history
@@ -89,12 +87,6 @@ export function PortfolioView() {
           <p className="mt-1 text-sm text-secondary">{user.name}</p>
         </div>
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDepositOpen(true)}
-            className="h-9 rounded-full bg-blue-400 px-4 text-sm font-semibold text-white hover:bg-blue-500"
-          >
-            Deposit
-          </button>
           <button
             onClick={() => {
               if (window.confirm("Reset demo balance and clear all positions?"))
@@ -166,8 +158,6 @@ export function PortfolioView() {
           />
         )}
       </div>
-
-      {depositOpen && <DepositModal onClose={() => setDepositOpen(false)} />}
     </>
   );
 }
