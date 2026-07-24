@@ -3,7 +3,7 @@ import { Gift } from "lucide-react";
 import { WatchButton } from "./watch-button";
 import { EventIcon } from "./event-icon";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
-import { formatVolume, toPercent } from "@/lib/format";
+import { formatNairaCompact, formatVolume, toPercent } from "@/lib/format";
 import { BuyButton } from "./buy-button";
 
 /**
@@ -18,7 +18,16 @@ export function MarketCard({ event }: { event: MarketEvent }) {
       {isBinary(event) ? <BinaryBody event={event} /> : <MultiBody event={event} />}
       <footer className="mt-auto flex items-center justify-between pt-2">
         <span className="text-xs font-medium text-tertiary">
-          {formatVolume(event.volume)}
+          {/* Bayse reports pool liquidity (₦) + trades, not $ volume */}
+          {event.source === "bayse"
+            ? [
+                event.liquidityNgn &&
+                  formatNairaCompact(parseFloat(event.liquidityNgn)),
+                event.trades !== undefined && `${event.trades} Trades`,
+              ]
+                .filter(Boolean)
+                .join(" · ")
+            : formatVolume(event.volume)}
         </span>
         <span className="flex items-center gap-2 text-tertiary">
           <Gift className="size-3.5 cursor-pointer hover:text-secondary" />
@@ -35,6 +44,10 @@ export function MarketCard({ event }: { event: MarketEvent }) {
 function BinaryBody({ event }: { event: MarketEvent }) {
   const market = event.markets[0];
   const pct = toPercent(market.outcomePrices[0]);
+  // Bayse buttons carry the real outcome labels + ₦-per-₦100-share price,
+  // like Bayse's own cards ("Buy Portable - ₦65")
+  const bayse = event.source === "bayse";
+  const [yesLabel, noLabel] = market.outcomeLabels ?? ["Yes", "No"];
   return (
     <>
       <div className="flex items-start justify-between gap-2">
@@ -42,8 +55,14 @@ function BinaryBody({ event }: { event: MarketEvent }) {
         <Gauge pct={pct} />
       </div>
       <div className="mt-auto flex gap-2 pt-2">
-        <BuyButton side="yes" label="Buy Yes" />
-        <BuyButton side="no" label="Buy No" />
+        <BuyButton
+          side="yes"
+          label={bayse ? `Buy ${yesLabel} · ₦${pct}` : "Buy Yes"}
+        />
+        <BuyButton
+          side="no"
+          label={bayse ? `Buy ${noLabel} · ₦${100 - pct}` : "Buy No"}
+        />
       </div>
     </>
   );
@@ -166,24 +185,15 @@ function OutcomeRow({ market }: { market: Market }) {
 /* ---------- shared ---------- */
 
 function CardTitle({ event }: { event: MarketEvent }) {
-  const body = (
-    <>
+  // Bayse (Local) events live under /local, Polymarket under /event
+  const href =
+    event.source === "bayse" ? `/local/${event.slug}` : `/event/${event.slug}`;
+  return (
+    <Link href={href} className="flex min-w-0 items-center gap-2.5">
       <EventIcon event={event} className="size-10 rounded-md text-xl" px={40} />
       <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-primary">
         {isBinary(event) ? event.markets[0].question : event.title}
       </h3>
-    </>
-  );
-  // Bayse events have no event page yet (display-only) — plain title
-  if (event.source === "bayse") {
-    return <div className="flex min-w-0 items-center gap-2.5">{body}</div>;
-  }
-  return (
-    <Link
-      href={`/event/${event.slug}`}
-      className="flex min-w-0 items-center gap-2.5"
-    >
-      {body}
     </Link>
   );
 }

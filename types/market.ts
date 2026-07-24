@@ -24,6 +24,10 @@ export interface Market {
   conditionId?: string;
   /** Real 24h price change as a decimal (e.g. -0.0025 = -0.25pp). */
   oneDayPriceChange?: number;
+  /** Outcome labels when they aren't Yes/No (Bayse, e.g. ["Portable", "Charles"]). */
+  outcomeLabels?: [string, string];
+  /** Resolution criteria text (Bayse markets). */
+  rules?: string;
 }
 
 /** An event groups one or more markets under a single card/page. */
@@ -47,9 +51,18 @@ export interface MarketEvent {
   markets: Market[];
   /**
    * Where the event came from; absent = Polymarket. Bayse events are
-   * display-only — no event page, watchlist, or live price polling.
+   * display-only — their detail page lives at /local/[slug] and skips
+   * the watchlist and live price polling.
    */
   source?: "bayse";
+  /** Total trades across the event (Bayse `totalOrders`). */
+  trades?: number;
+  /** Pool liquidity in naira as a decimal string (Bayse events). */
+  liquidityNgn?: string;
+  /** What the event tracks (Bayse detail page). */
+  description?: string;
+  /** Where resolution is verified, e.g. a chart URL (Bayse). */
+  resolutionSource?: string;
 }
 
 export const CATEGORIES = [

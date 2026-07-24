@@ -1,5 +1,6 @@
 import { unstable_cache } from "next/cache";
 import type { Category, Market, MarketEvent } from "@/types/market";
+import type { SeriesPoint } from "@/lib/series";
 
 /**
  * Server-side data layer for the Bayse Relay API
@@ -8,9 +9,13 @@ import type { Category, Market, MarketEvent } from "@/types/market";
  * markets displayed alongside the Polymarket feed.
  *
  * Display-only for now — Bayse events carry `source: "bayse"` so the UI
- * can skip affordances that assume a Polymarket slug (event page link,
- * watchlist, live price polling). Trading comes later via the partner
- * API.
+ * can skip affordances that assume a Polymarket slug (watchlist, live
+ * price polling) and route their detail pages to /local/[slug].
+ * Trading comes later via the partner API.
+ *
+ * Money figures are requested in naira (`currency=NGN`) — Bayse's own
+ * UI leads with ₦, and the listing's `totalVolume` is 0 while
+ * `liquidity` carries the real pool size.
  *
  * Normalizes Relay responses into the app's `MarketEvent` shape. Relay
  * quirks handled here:
@@ -55,6 +60,7 @@ interface BayseMarket {
   outcome1Price?: number;
   outcome2Label?: string;
   outcome2Price?: number;
+  rules?: string;
 }
 
 interface BayseEvent {
@@ -74,6 +80,12 @@ interface BayseEvent {
   resolutionDate?: string;
   hashtags?: string[];
   markets?: BayseMarket[];
+  /** Trades across the event. */
+  totalOrders?: number;
+  /** Pool liquidity in the requested currency (₦ with currency=NGN). */
+  liquidity?: number;
+  description?: string;
+  resolutionSource?: string;
 }
 
 /* ------------------------------------------------------------------ */
@@ -119,6 +131,10 @@ function toMarket(raw: BayseMarket, single: boolean, eventTitle: string): Market
   const yes = raw.outcome1Price;
   const no = raw.outcome2Price;
   if (typeof yes !== "number" || typeof no !== "number") return null;
+  const labels: [string, string] = [
+    raw.outcome1Label || "Yes",
+    raw.outcome2Label || "No",
+  ];
   return {
     id: raw.id,
     question: single ? eventTitle : raw.title,
@@ -126,6 +142,8 @@ function toMarket(raw: BayseMarket, single: boolean, eventTitle: string): Market
     outcomePrices: [String(yes), String(no)],
     // Relay reports volume per event, not per market
     volume: "0",
+    outcomeLabels: labels[0] !== "Yes" || labels[1] !== "No" ? labels : undefined,
+    rules: raw.rules || undefined,
   };
 }
 
@@ -158,6 +176,13 @@ export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
     endDate: (raw.closingDate || raw.resolutionDate || "").slice(0, 10),
     markets,
     source: "bayse",
+    trades: raw.totalOrders,
+    liquidityNgn: raw.liquidity !== undefined ? String(raw.liquidity) : undefined,
+    description: raw.description?.trim() || undefined,
+    resolutionSource:
+      raw.resolutionSource && raw.resolutionSource !== "TBD"
+        ? raw.resolutionSource
+        : undefined,
   };
 }
 
@@ -202,6 +227,7 @@ export const getBayseEvents = unstable_cache(
           page,
           size: 20,
           status: "open",
+          currency: "NGN",
         }),
       ),
     );
@@ -211,5 +237,67 @@ export const getBayseEvents = unstable_cache(
       .filter((e): e is MarketEvent => e !== null);
   },
   ["bayse-events"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
+);
+
+/** Single Bayse event by its URL slug, or null when not found. */
+export const getBayseEventBySlug = unstable_cache(
+  async (slug: string): Promise<MarketEvent | null> => {
+    let raw: BayseEvent;
+    try {
+      raw = await relayFetch<BayseEvent>(
+        `/v1/pm/events/slug/${encodeURIComponent(slug)}`,
+        { currency: "NGN" },
+      );
+    } catch (err) {
+      if (err instanceof BayseApiError && err.status === 404) return null;
+      throw err;
+    }
+    return toBayseMarketEvent(raw);
+  },
+  ["bayse-event-by-slug"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
+);
+
+/* ------------------------------------------------------------------ */
+/* Price history                                                       */
+/* ------------------------------------------------------------------ */
+
+/** Relay's history windows — coarser than the CLOB's (no 1H/6H). */
+export const BAYSE_TIMEFRAMES = ["12H", "24H", "1W", "1M", "1Y"] as const;
+export type BayseTimeframe = (typeof BAYSE_TIMEFRAMES)[number];
+
+interface BayseHistoryResponse {
+  markets?: {
+    marketId: string;
+    priceHistory?: { e: number; p: number }[];
+  }[];
+}
+
+/**
+ * Yes-price history for every market of an event, keyed by market id,
+ * as {t: ms epoch, p: percent} — the shape the charts consume. Public
+ * endpoint, no auth.
+ */
+export const getBaysePriceHistory = unstable_cache(
+  async (
+    eventId: string,
+    timePeriod: BayseTimeframe,
+  ): Promise<Record<string, SeriesPoint[]>> => {
+    const raw = await relayFetch<BayseHistoryResponse>(
+      `/v1/pm/events/${encodeURIComponent(eventId)}/price-history`,
+      { timePeriod },
+    );
+    const out: Record<string, SeriesPoint[]> = {};
+    for (const m of raw.markets ?? []) {
+      const points = (m.priceHistory ?? []).map((pt) => ({
+        t: pt.e,
+        p: pt.p * 100, // probabilities 0–1 → percent, like the CLOB layer
+      }));
+      if (points.length > 0) out[m.marketId] = points;
+    }
+    return out;
+  },
+  ["bayse-price-history"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
 );

@@ -14,6 +14,15 @@ export function formatVolume(volume: string): string {
   return `${formatUsdCompact(n)} Vol.`;
 }
 
+/** Compact naira amount: 2779660 → "₦2.8M", 69491 → "₦69.5K". */
+export function formatNairaCompact(n: number): string {
+  if (!Number.isFinite(n)) return "₦0";
+  if (n >= 1_000_000_000) return `₦${trimZero(n / 1_000_000_000)}B`;
+  if (n >= 1_000_000) return `₦${trimZero(n / 1_000_000)}M`;
+  if (n >= 1_000) return `₦${trimZero(n / 1_000)}K`;
+  return `₦${Math.round(n)}`;
+}
+
 function trimZero(n: number): string {
   const fixed = n >= 100 ? n.toFixed(0) : n.toFixed(1);
   return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
