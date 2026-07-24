@@ -29,6 +29,8 @@ import type { SeriesPoint } from "@/lib/series";
 
 const RELAY_BASE = "https://relay.bayse.markets";
 const DEFAULT_REVALIDATE_SECONDS = 60;
+/** Detail-page price polling — see getBayseEventLive. */
+const LIVE_REVALIDATE_SECONDS = 10;
 
 /**
  * Hosts allowed for `iconUrl`. Must stay in sync with
@@ -80,6 +82,9 @@ interface BayseEvent {
   /** Often an empty string — resolutionDate is the reliable one. */
   closingDate?: string;
   resolutionDate?: string;
+  /** Either flag marks one of the automated short-cycle series. */
+  displayCountdown?: boolean;
+  countdownType?: string;
   hashtags?: string[];
   markets?: BayseMarket[];
   /** Trades across the event. */
@@ -183,6 +188,7 @@ export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
     volume: String(raw.totalVolume ?? 0),
     endDate: (raw.closingDate || raw.resolutionDate || "").slice(0, 10),
     closesAt: raw.closingDate || raw.resolutionDate || undefined,
+    countdown: Boolean(raw.displayCountdown || raw.countdownType) || undefined,
     markets,
     source: "bayse",
     trades: raw.totalOrders,
@@ -266,6 +272,30 @@ export const getBayseEventBySlug = unstable_cache(
   },
   ["bayse-event-by-slug"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
+);
+
+/**
+ * Same event, cached for a fraction of the time — what the /local page's
+ * price poller reads. The page's own render can afford minute-old
+ * prices; a panel someone is about to stake against cannot, and this
+ * still coalesces every viewer of an event into one Relay call per tick.
+ */
+export const getBayseEventLive = unstable_cache(
+  async (slug: string): Promise<MarketEvent | null> => {
+    let raw: BayseEvent;
+    try {
+      raw = await relayFetch<BayseEvent>(
+        `/v1/pm/events/slug/${encodeURIComponent(slug)}`,
+        { currency: "NGN" },
+      );
+    } catch (err) {
+      if (err instanceof BayseApiError && err.status === 404) return null;
+      throw err;
+    }
+    return toBayseMarketEvent(raw);
+  },
+  ["bayse-event-live"],
+  { revalidate: LIVE_REVALIDATE_SECONDS, tags: ["bayse"] },
 );
 
 /* ------------------------------------------------------------------ */

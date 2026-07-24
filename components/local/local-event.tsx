@@ -9,14 +9,20 @@ import { BuySideButton } from "@/components/event/outcome-list";
 import { TradeProvider, useTradeSelection } from "@/components/event/trade-context";
 import { BaysePriceChart } from "@/components/local/bayse-price-chart";
 import { LocalTradePanel } from "@/components/local/local-trade-panel";
+import { useLiveBayseEvent } from "@/lib/use-live-bayse";
 
 /**
  * Detail page body for a Bayse (Local) event: header with naira stats,
  * price chart, outcome rows, and rules, with the naira trade panel on
  * the right. Clicking a buy pill selects that market+side in the panel,
  * same as the Polymarket event page.
+ *
+ * Prices poll from the server-rendered snapshot, so what the panel
+ * stakes against stays close to what the API will re-price it at.
  */
-export function LocalEvent({ event }: { event: MarketEvent }) {
+export function LocalEvent({ event: initial }: { event: MarketEvent }) {
+  const event = useLiveBayseEvent(initial);
+
   return (
     <TradeProvider event={event}>
       <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-16 pt-4 lg:flex-row lg:items-start">

@@ -75,6 +75,10 @@ WALLET_SERVICE_TOKEN=<the token from step 3>
 
 RATE_LIMIT_MAX=200
 RATE_LIMIT_WINDOW=1 minute
+
+RESEND_API_KEY=re_...
+ALERT_EMAIL_FROM=alerts@worldstreetgold.com
+ALERT_EMAIL_TO=ops@worldstreetgold.com,risk@worldstreetgold.com
 ```
 
 Notes:
@@ -88,6 +92,14 @@ Notes:
   `www.worldstreetgold.com`), so it can stay empty if those cover you.
 - Leaving the two `WALLET_*` vars empty is safe: the service boots and every
   wallet route answers `503 WALLET_UNAVAILABLE` instead of failing to start.
+- The three alert vars are what mail settlement exceptions (a market Bayse
+  resolved to a label none of its outcomes match, one overdue past
+  `SETTLEMENT_OVERDUE_HOURS`) to a human. All three must be set or no mail
+  goes out, and `ALERT_EMAIL_FROM`'s domain has to be verified in Resend
+  first — an unverified sender fails with `domain not verified` in the logs
+  and nothing else. `ALERT_EMAIL_TO` is comma-separated.
+  Alerts always reach the log regardless; `ALERT_WEBHOOK_URL` still works
+  alongside mail if you'd rather also push them somewhere else.
 
 ## 3. Register the service token with the wallet
 

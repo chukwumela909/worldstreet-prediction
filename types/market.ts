@@ -58,6 +58,12 @@ export interface MarketEvent {
    * which is useless for the short-cycle countdown markets.
    */
   closesAt?: string;
+  /**
+   * True on Bayse's automated short-cycle series (15-minute crypto and
+   * friends). They stop accepting trades a cutoff before `closesAt`,
+   * since a nearly-decided market is pure adverse selection.
+   */
+  countdown?: boolean;
   markets: Market[];
   /**
    * Where the event came from; absent = Polymarket. Bayse events are

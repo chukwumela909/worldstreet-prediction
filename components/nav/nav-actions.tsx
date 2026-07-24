@@ -18,6 +18,8 @@ import { usePortfolio } from "@/lib/portfolio-store";
 import { positionPrice } from "@/lib/market-lookup";
 import { useLiveEvents } from "@/lib/use-live-events";
 import { useWalletBalance } from "@/lib/use-wallet-balance";
+import { useNairaWallet } from "@/lib/naira-wallet";
+import { formatNaira } from "@/lib/format";
 
 /**
  * Right side of the top nav. Signed out: Log In / Sign Up pills.
@@ -57,6 +59,9 @@ function SignedInActions() {
   // Central wallet balance; the local demo cash only shows when
   // NEXT_PUBLIC_API_URL is unset (keyless local dev).
   const walletCash = useWalletBalance(true);
+  // Naira is a separate balance, not a converted view of the dollar one,
+  // so it gets its own stat — and only once there's one to show.
+  const { balanceKobo } = useNairaWallet(true);
 
   const slugs = useMemo(
     () => [...new Set(portfolio.positions.map((p) => p.eventSlug))],
@@ -78,17 +83,31 @@ function SignedInActions() {
   return (
     <>
       <div className="hidden items-center sm:flex">
-        <NavStat label="Portfolio" value={positionsValue} tone="text-yes" />
+        <NavStat label="Portfolio" value={usd(positionsValue)} tone="text-yes" />
         <NavStat
           label="Cash"
-          value={walletCash ?? portfolio.cash}
+          value={usd(walletCash ?? portfolio.cash)}
           tone="text-primary"
         />
+        {balanceKobo !== null && (
+          <NavStat
+            label="Naira"
+            value={formatNaira(balanceKobo)}
+            tone="text-primary"
+          />
+        )}
       </div>
       <AvatarDropdown />
     </>
   );
 }
+
+/** Dollar amount with the cents the nav always shows. */
+const usd = (n: number) =>
+  `$${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
 
 function NavStat({
   label,
@@ -96,7 +115,8 @@ function NavStat({
   tone,
 }: {
   label: string;
-  value: number;
+  /** Pre-formatted — these stats aren't all the same currency. */
+  value: string;
   tone: string;
 }) {
   return (
@@ -104,13 +124,7 @@ function NavStat({
       href="/portfolio"
       className="flex flex-col items-end rounded-md px-2.5 py-1 leading-tight hover:bg-element-2"
     >
-      <span className={`text-sm font-semibold ${tone}`}>
-        $
-        {value.toLocaleString("en-US", {
-          minimumFractionDigits: 2,
-          maximumFractionDigits: 2,
-        })}
-      </span>
+      <span className={`text-sm font-semibold ${tone}`}>{value}</span>
       <span className="text-xs font-medium text-secondary">{label}</span>
     </Link>
   );

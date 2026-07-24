@@ -46,8 +46,14 @@ const envSchema = z.object({
   SETTLEMENT_POLL_SECONDS: z.coerce.number().int().min(0).default(60),
   /** Alert when a market is unresolved this long past its resolution date. */
   SETTLEMENT_OVERDUE_HOURS: z.coerce.number().int().min(1).default(6),
-  /** Optional webhook for settlement alerts (email bridge plugs in here). */
+  /** Optional generic webhook for settlement alerts. */
   ALERT_WEBHOOK_URL: z.string().default(""),
+  // Settlement alert email (Resend). All three must be set for mail to
+  // go out; the sender's domain has to be verified in Resend first.
+  RESEND_API_KEY: z.string().default(""),
+  ALERT_EMAIL_FROM: z.string().default(""),
+  /** Comma-separated recipients. */
+  ALERT_EMAIL_TO: z.string().default(""),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -69,6 +75,7 @@ export const config = {
   ...parsed.data,
   clerkAuthorizedParties: splitList(parsed.data.CLERK_AUTHORIZED_PARTIES),
   corsOrigins: splitList(parsed.data.CORS_ORIGINS),
+  alertEmailTo: splitList(parsed.data.ALERT_EMAIL_TO),
 };
 
 export type ApiConfig = typeof config;

@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 import { fetchBayseEvent, winningOutcome } from "./bayse.js";
 import { creditNaira } from "./ledger.js";
@@ -161,31 +162,6 @@ export function adminVoidMarket(params: {
 /* ------------------------------------------------------------------ */
 
 /**
- * Exception alert — a market that needs human eyes (resolved on Bayse
- * but our settlement failed, or resolution overdue). Logs always;
- * POSTs to ALERT_WEBHOOK_URL when configured, which is where an email
- * bridge (Zapier/n8n/own endpoint) plugs in.
- */
-async function alertAdmin(
-  log: FastifyBaseLogger,
-  subject: string,
-  detail: Record<string, unknown>,
-): Promise<void> {
-  log.warn({ alert: subject, ...detail }, "settlement alert");
-  if (!config.ALERT_WEBHOOK_URL) return;
-  try {
-    await fetch(config.ALERT_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ subject, detail, service: "worldstreet-prediction-api" }),
-      signal: AbortSignal.timeout(5_000),
-    });
-  } catch (err) {
-    log.error({ err }, "alert webhook failed");
-  }
-}
-
-/**
  * One pass: every event carrying open positions is re-checked against
  * Bayse; resolved markets settle with Bayse's own outcome as evidence,
  * cancelled events void, and anything unresolved long past its
@@ -220,7 +196,7 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
         if (market.status !== "resolved") continue;
         const winner = winningOutcome(market);
         if (!winner) {
-          await alertAdmin(log, "Resolved market with unmatchable outcome", {
+          await sendAlert(log, "Resolved market with unmatchable outcome", {
             eventId,
             marketId: market.id,
             resolvedOutcome: market.resolvedOutcome,
@@ -252,7 +228,7 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
         Date.now() - resolutionMs > config.SETTLEMENT_OVERDUE_HOURS * 3_600_000 &&
         event.markets.some((m) => m.status !== "resolved")
       ) {
-        await alertAdmin(log, "Market overdue for resolution", {
+        await sendAlert(log, "Market overdue for resolution", {
           eventId,
           eventTitle: event.title,
           resolutionDate: event.resolutionDate,
