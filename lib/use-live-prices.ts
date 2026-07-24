@@ -23,9 +23,17 @@ export function useLivePrices(
   initial: MarketEvent[],
   intervalMs = DEFAULT_INTERVAL_MS,
 ): MarketEvent[] {
-  // keyed off content, not array identity
+  // keyed off content, not array identity; Bayse events are display-only
+  // and can't be re-fetched by slug from /api/events, so skip them
   const slugsKey = useMemo(
-    () => [...new Set(initial.map((e) => e.slug))].sort().join(","),
+    () =>
+      [
+        ...new Set(
+          initial.filter((e) => e.source !== "bayse").map((e) => e.slug),
+        ),
+      ]
+        .sort()
+        .join(","),
     [initial],
   );
 

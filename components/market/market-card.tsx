@@ -22,7 +22,8 @@ export function MarketCard({ event }: { event: MarketEvent }) {
         </span>
         <span className="flex items-center gap-2 text-tertiary">
           <Gift className="size-3.5 cursor-pointer hover:text-secondary" />
-          <WatchButton slug={event.slug} />
+          {/* watchlist resolves slugs against Polymarket — skip for Bayse */}
+          {event.source !== "bayse" && <WatchButton slug={event.slug} />}
         </span>
       </footer>
     </article>
@@ -165,15 +166,24 @@ function OutcomeRow({ market }: { market: Market }) {
 /* ---------- shared ---------- */
 
 function CardTitle({ event }: { event: MarketEvent }) {
+  const body = (
+    <>
+      <EventIcon event={event} className="size-10 rounded-md text-xl" px={40} />
+      <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-primary">
+        {isBinary(event) ? event.markets[0].question : event.title}
+      </h3>
+    </>
+  );
+  // Bayse events have no event page yet (display-only) — plain title
+  if (event.source === "bayse") {
+    return <div className="flex min-w-0 items-center gap-2.5">{body}</div>;
+  }
   return (
     <Link
       href={`/event/${event.slug}`}
       className="flex min-w-0 items-center gap-2.5"
     >
-      <EventIcon event={event} className="size-10 rounded-md text-xl" px={40} />
-      <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-primary">
-        {isBinary(event) ? event.markets[0].question : event.title}
-      </h3>
+      {body}
     </Link>
   );
 }

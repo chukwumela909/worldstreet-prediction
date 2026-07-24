@@ -21,8 +21,10 @@ export function CategoryBar({ active = "trending" }: { active?: string }) {
     param === "trending" ? "/" : `/?category=${param}`;
 
   return (
-    <nav className="flex h-14 items-center px-4">
-      <ScrollStrip className="items-center gap-1">
+    <nav className="mx-auto flex h-14 w-full max-w-[1280px] items-center px-6">
+      {/* -ml pulls the first pill's padding back so its label lines up with
+          the logo and the page content, not the pill's hover box */}
+      <ScrollStrip className="-ml-2.5 items-center gap-1">
         <Link href={href(trending.param)} className={pill(active === trending.param)}>
           <TrendingUp className="size-4" strokeWidth={2.5} />
           {trending.label}

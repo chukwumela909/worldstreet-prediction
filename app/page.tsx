@@ -8,6 +8,7 @@ import {
   getHotTopics,
   type FeaturedGame,
 } from "@/lib/polymarket";
+import { getBayseEvents } from "@/lib/bayse";
 import { categoryTab } from "@/lib/categories";
 import type { HotTopic } from "@/lib/hot-topics";
 import type { MarketEvent } from "@/types/market";
@@ -52,9 +53,11 @@ export default async function Home({ searchParams }: Props) {
   const [trending, gridEvents, topics, game] = await Promise.all([
     getEvents({ limit: 24 }).catch(() => null),
     scoped
-      ? getEvents({ limit: 24, tagSlug: tab.tagSlug, order: tab.order }).catch(
-          () => null,
-        )
+      ? tab.source === "bayse"
+        ? getBayseEvents().catch(() => null)
+        : getEvents({ limit: 24, tagSlug: tab.tagSlug, order: tab.order }).catch(
+            () => null,
+          )
       : null,
     loadHotTopics(),
     loadFeaturedGame(),

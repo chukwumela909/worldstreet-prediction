@@ -10,7 +10,7 @@ import { SearchBox } from "@/components/nav/search-box";
  */
 export function TopNav() {
   return (
-    <div className="flex h-[60px] items-center gap-4 px-4">
+    <div className="mx-auto flex h-[60px] w-full max-w-[1280px] items-center gap-4 px-6">
       {/* Logo */}
       <Link href="/" className="flex shrink-0 items-center gap-2">
         <LogoMark />

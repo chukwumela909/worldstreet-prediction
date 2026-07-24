@@ -45,6 +45,11 @@ export interface MarketEvent {
   /** ISO date the event resolves/ends. */
   endDate: string;
   markets: Market[];
+  /**
+   * Where the event came from; absent = Polymarket. Bayse events are
+   * display-only — no event page, watchlist, or live price polling.
+   */
+  source?: "bayse";
 }
 
 export const CATEGORIES = [

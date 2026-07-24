@@ -15,10 +15,14 @@ export interface CategoryTab {
   tagSlug?: string;
   /** Gamma sort field; defaults to volume24hr */
   order?: string;
+  /** Data source for the tab; absent = Polymarket/Gamma */
+  source?: "bayse";
 }
 
 export const CATEGORY_TABS: CategoryTab[] = [
   { param: "trending", label: "Trending" },
+  // display-only Bayse (African/Nigerian) markets — see lib/bayse.ts
+  { param: "local", label: "Local", source: "bayse" },
   { param: "world-cup", label: "World Cup", tagSlug: "world-cup" },
   // newest listings first — where the visible day-to-day churn lives
   { param: "breaking", label: "Breaking", order: "startDate" },
