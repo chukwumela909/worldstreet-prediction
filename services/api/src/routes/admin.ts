@@ -10,6 +10,7 @@ import {
   adminVoidMarket,
 } from "../trading/settlement.js";
 import { fetchBayseEvent, winningOutcome } from "../trading/bayse.js";
+import { getSettlementQueue } from "../trading/exposure.js";
 
 /**
  * Admin surface for the Local markets book. Authorization is the
@@ -56,6 +57,12 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     });
     const fx = await getFxQuote();
     return { success: true, data: { fx } };
+  });
+
+  /** The settlement queue — see trading/exposure.ts. */
+  app.get("/admin/exposure", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getSettlementQueue() };
   });
 
   /**

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
+  Coins,
   Gavel,
   LayoutDashboard,
   LayoutTemplate,
@@ -16,6 +17,7 @@ const NAV = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/markets", label: "Markets", icon: Table2 },
   { href: "/admin/resolution", label: "Resolution", icon: Gavel },
+  { href: "/admin/local", label: "Local book", icon: Coins },
   { href: "/admin/content", label: "Content", icon: LayoutTemplate },
   { href: "/admin/audit", label: "Audit log", icon: ScrollText },
 ] as const;
