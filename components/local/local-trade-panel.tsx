@@ -1,11 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Clock, Loader2, Wallet } from "lucide-react";
+import { CheckCircle2, Loader2, Wallet } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { ApiError } from "@/lib/api-client";
 import { formatNaira } from "@/lib/format";
 import { useTickingNow } from "@/lib/use-now";
+import { tradingStopsAt } from "@/lib/countdown";
+import { CloseCountdown } from "@/components/local/close-countdown";
 import { useAuth } from "@/components/auth/auth-context";
 import { useTradeSelection } from "@/components/event/trade-context";
 import { EventIcon } from "@/components/market/event-icon";
@@ -32,15 +34,6 @@ import { payoutFor, placeLocalTrade, priceToKobo } from "@/lib/local-trades";
 /** Bayse's own floor, mirrored so the panel can explain it before submitting. */
 const MIN_STAKE_KOBO = 10_000; // ₦100
 const QUICK_ADD_KOBO = [50_000, 100_000, 500_000]; // ₦500 / ₦1,000 / ₦5,000
-/**
- * How long before a countdown market closes it stops taking trades.
- * Mirrors the server's TRADE_COUNTDOWN_CUTOFF_SECONDS default so the
- * panel can show the real deadline; the server still enforces it, so a
- * changed env var costs a rejected order, not money.
- */
-const COUNTDOWN_CUTOFF_MS = 90_000;
-/** Only show a countdown once it's near enough to mean something. */
-const SHOW_COUNTDOWN_WITHIN_MS = 24 * 3_600_000;
 
 export function LocalTradePanel({ event }: { event: MarketEvent }) {
   const { marketId, side, setSide } = useTradeSelection();
@@ -100,12 +93,8 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   const tradeable = Boolean(market.outcomeIds);
   // The automated series stop taking trades before they close, so the
   // deadline that matters here is earlier than the closing time.
-  const closesMs = event.closesAt ? Date.parse(event.closesAt) : NaN;
-  const stopsMs = Number.isNaN(closesMs)
-    ? NaN
-    : closesMs - (event.countdown ? COUNTDOWN_CUTOFF_MS : 0);
-  const msLeft =
-    Number.isNaN(stopsMs) || now === null ? null : stopsMs - now;
+  const stopsAt = tradingStopsAt(event);
+  const msLeft = stopsAt === null || now === null ? null : stopsAt - now;
   const closed = msLeft !== null && msLeft <= 0;
 
   useEffect(() => {
@@ -198,16 +187,8 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
         </div>
 
         {/* how long is left to trade */}
-        {msLeft !== null && msLeft > 0 && msLeft < SHOW_COUNTDOWN_WITHIN_MS && (
-          <p
-            className={`mt-3 flex items-center gap-1.5 text-[13px] font-semibold ${
-              msLeft < 5 * 60_000 ? "text-no" : "text-secondary"
-            }`}
-          >
-            <Clock className="size-3.5" />
-            {event.countdown ? "Trading stops in " : "Closes in "}
-            {formatCountdown(msLeft)}
-          </p>
+        {msLeft !== null && msLeft > 0 && (
+          <CloseCountdown event={event} className="mt-3 text-[13px]" />
         )}
 
         {/* side */}
@@ -350,19 +331,6 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
       />
     </aside>
   );
-}
-
-/** "2d 4h", "3h 12m", "4m 12s", "42s" — one step of precision below the lead unit. */
-function formatCountdown(ms: number): string {
-  const total = Math.floor(ms / 1000);
-  const days = Math.floor(total / 86_400);
-  const hours = Math.floor((total % 86_400) / 3_600);
-  const minutes = Math.floor((total % 3_600) / 60);
-  const seconds = total % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${minutes}m`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
 }
 
 function QuickChip({ label, onClick }: { label: string; onClick: () => void }) {

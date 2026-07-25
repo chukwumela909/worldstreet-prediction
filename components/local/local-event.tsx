@@ -9,6 +9,9 @@ import { BuySideButton } from "@/components/event/outcome-list";
 import { TradeProvider, useTradeSelection } from "@/components/event/trade-context";
 import { BaysePriceChart } from "@/components/local/bayse-price-chart";
 import { LocalTradePanel } from "@/components/local/local-trade-panel";
+import { CloseCountdown } from "@/components/local/close-countdown";
+import { showsCountdown, tradingStopsAt } from "@/lib/countdown";
+import { useTickingNow } from "@/lib/use-now";
 import { useLiveBayseEvent } from "@/lib/use-live-bayse";
 
 /**
@@ -47,6 +50,15 @@ export function LocalEvent({ event: initial }: { event: MarketEvent }) {
 /* ---------- header ---------- */
 
 function LocalHeader({ event }: { event: MarketEvent }) {
+  const now = useTickingNow();
+  const stopsAt = tradingStopsAt(event);
+  // decided here, not inside CloseCountdown, because the header has to
+  // know whether to fall back to the date
+  const countingDown =
+    stopsAt !== null &&
+    now !== null &&
+    (stopsAt <= now || showsCountdown(event, stopsAt - now));
+
   const endDate = event.endDate
     ? new Date(event.endDate + "T00:00:00Z").toLocaleDateString("en-US", {
         month: "short",
@@ -79,11 +91,17 @@ function LocalHeader({ event }: { event: MarketEvent }) {
               {formatNairaCompact(parseFloat(event.liquidityNgn))}
             </span>
           )}
-          {endDate && (
-            <span className="flex items-center gap-1">
-              <Clock className="size-3.5" />
-              Ends {endDate}
-            </span>
+          {/* the clock replaces the date once it's the useful one — a
+              15-minute market saying "Ends Jul 25" tells nobody anything */}
+          {countingDown ? (
+            <CloseCountdown event={event} className="text-[13px]" />
+          ) : (
+            endDate && (
+              <span className="flex items-center gap-1">
+                <Clock className="size-3.5" />
+                Ends {endDate}
+              </span>
+            )
           )}
         </div>
       </div>

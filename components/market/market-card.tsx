@@ -5,6 +5,7 @@ import { EventIcon } from "./event-icon";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
 import { formatNairaCompact, formatVolume, toPercent } from "@/lib/format";
 import { BuyButton } from "./buy-button";
+import { CloseCountdown } from "@/components/local/close-countdown";
 
 /**
  * Market card — the atomic unit of the home grid (~299×180 on desktop).
@@ -30,6 +31,8 @@ export function MarketCard({ event }: { event: MarketEvent }) {
             : formatVolume(event.volume)}
         </span>
         <span className="flex items-center gap-2 text-tertiary">
+          {/* renders only when a Local market is closing — see CloseCountdown */}
+          <CloseCountdown event={event} className="text-xs" />
           <Gift className="size-3.5 cursor-pointer hover:text-secondary" />
           {/* watchlist resolves slugs against Polymarket — skip for Bayse */}
           {event.source !== "bayse" && <WatchButton slug={event.slug} />}
