@@ -275,9 +275,12 @@ function FundDialog({
             </button>
           </>
         ) : (
-          <p className="mt-5 text-center text-sm text-secondary">
+          // No quote means one of two very different things, and "try
+          // again shortly" is wrong for the common one: a missing rate
+          // stays missing until an admin sets it.
+          <p className="mt-5 text-center text-sm leading-6 text-secondary">
             {walletError ??
-              "Currency conversion is not available right now. Try again shortly."}
+              "Naira conversion isn’t switched on yet — the exchange rate hasn’t been set. An admin sets it on the Local book desk."}
           </p>
         )}
 
