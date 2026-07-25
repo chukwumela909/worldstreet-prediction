@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   Braces,
@@ -14,17 +14,21 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-context";
 import { toggleTheme, useTheme } from "@/lib/theme-store";
-import { usePortfolio } from "@/lib/portfolio-store";
-import { positionPrice } from "@/lib/market-lookup";
-import { useLiveEvents } from "@/lib/use-live-events";
 import { useWalletBalance } from "@/lib/use-wallet-balance";
 import { useNairaWallet } from "@/lib/naira-wallet";
 import { formatNaira } from "@/lib/format";
 
+/** Dollars with the cents the nav always shows. */
+const usd = (n: number) =>
+  `$${n.toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+
 /**
  * Right side of the top nav. Signed out: Log In / Sign Up pills.
- * Signed in (Polymarket-style): Portfolio + Cash value stats linking
- * to /portfolio and the avatar dropdown.
+ * Signed in: the two real balances (Cash in dollars, Naira) linking to
+ * /portfolio, then the avatar dropdown.
  * Both states end with the hamburger dropdown.
  */
 export function NavActions() {
@@ -55,40 +59,20 @@ export function NavActions() {
 }
 
 function SignedInActions() {
-  const portfolio = usePortfolio();
-  // Central wallet balance; the local demo cash only shows when
-  // NEXT_PUBLIC_API_URL is unset (keyless local dev).
+  // Both balances are real: dollars from the central wallet, naira from
+  // this platform's ledger. There is no positions figure here because
+  // Local positions are held to settlement — "value" would have to be
+  // either their cost or their potential payout, and the portfolio page
+  // is where that distinction has room to be explained.
   const walletCash = useWalletBalance(true);
-  // Naira is a separate balance, not a converted view of the dollar one,
-  // so it gets its own stat — and only once there's one to show.
   const { balanceKobo } = useNairaWallet(true);
-
-  const slugs = useMemo(
-    () => [...new Set(portfolio.positions.map((p) => p.eventSlug))],
-    [portfolio.positions],
-  );
-  const { bySlug } = useLiveEvents(slugs);
-
-  const positionsValue = useMemo(
-    () =>
-      portfolio.positions.reduce((sum, p) => {
-        // mark at entry price until the live one lands, so the header
-        // doesn't dip to $0 on every page load
-        const price = positionPrice(p, bySlug) ?? p.avgPrice;
-        return sum + p.shares * price;
-      }, 0),
-    [portfolio.positions, bySlug],
-  );
 
   return (
     <>
       <div className="hidden items-center sm:flex">
-        <NavStat label="Portfolio" value={usd(positionsValue)} tone="text-yes" />
-        <NavStat
-          label="Cash"
-          value={usd(walletCash ?? portfolio.cash)}
-          tone="text-primary"
-        />
+        {walletCash !== null && (
+          <NavStat label="Cash" value={usd(walletCash)} tone="text-primary" />
+        )}
         {balanceKobo !== null && (
           <NavStat
             label="Naira"
@@ -101,13 +85,6 @@ function SignedInActions() {
     </>
   );
 }
-
-/** Dollar amount with the cents the nav always shows. */
-const usd = (n: number) =>
-  `$${n.toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  })}`;
 
 function NavStat({
   label,

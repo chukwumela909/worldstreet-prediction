@@ -1,23 +1,17 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { Wallet } from "lucide-react";
 import { formatNaira } from "@/lib/format";
 import { useLocalPortfolio, type LocalPosition } from "@/lib/local-trades";
-import { FundNairaModal } from "@/components/local/fund-naira-modal";
 
 /**
- * Local (naira) book inside the portfolio: the naira balance and every
- * position taken against Worldstreet on a Bayse market. Positions are
- * held to settlement, so there is no live mark here — an open row shows
- * what it cost and what it pays if it wins, and a settled row shows
- * what actually landed.
+ * Local (naira) book inside the portfolio: every position taken against
+ * Worldstreet on a Bayse market. Positions are held to settlement, so
+ * there is no live mark here — an open row shows what it cost and what
+ * it pays if it wins, and a settled row shows what actually landed.
  */
 export function LocalPositions() {
-  const { positions, balanceKobo, loading, error, refresh } =
-    useLocalPortfolio(true);
-  const [funding, setFunding] = useState(false);
+  const { positions, loading, error } = useLocalPortfolio(true);
 
   const open = positions.filter((p) => p.status === "open");
   const settled = positions.filter((p) => p.status !== "open");
@@ -26,11 +20,9 @@ export function LocalPositions() {
 
   return (
     <>
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <Stat
-          label="Naira balance"
-          value={balanceKobo === null ? "—" : formatNaira(balanceKobo)}
-        />
+      {/* the naira balance itself is a page-level card — these are what
+          the open stakes represent */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Stat label="Staked (open)" value={formatNaira(stakedKobo)} />
         <Stat
           label="Pays if all win"
@@ -38,14 +30,6 @@ export function LocalPositions() {
           tone="text-yes"
         />
       </div>
-
-      <button
-        onClick={() => setFunding(true)}
-        className="mt-3 flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
-      >
-        <Wallet className="size-3.5" />
-        Manage naira
-      </button>
 
       {error && (
         <p className="mt-4 text-sm font-semibold text-no">{error}</p>
@@ -69,14 +53,6 @@ export function LocalPositions() {
           {settled.length > 0 && <Section title="Settled" rows={settled} />}
         </>
       )}
-
-      <FundNairaModal
-        open={funding}
-        onClose={() => {
-          setFunding(false);
-          refresh();
-        }}
-      />
     </>
   );
 }

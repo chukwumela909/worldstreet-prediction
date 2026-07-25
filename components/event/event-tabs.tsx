@@ -6,7 +6,6 @@ import type { MarketEvent } from "@/types/market";
 import type { EventComment, EventTrade, MarketHolder } from "@/lib/polymarket";
 import { timeAgo } from "@/lib/format";
 import { useAuth } from "@/components/auth/auth-context";
-import { usePortfolio } from "@/lib/portfolio-store";
 
 const TABS = ["Rules", "Comments", "Top Holders", "Activity"] as const;
 type Tab = (typeof TABS)[number];
@@ -351,39 +350,17 @@ function TopHolders({ event }: { event: MarketEvent }) {
 /* ---------- activity ---------- */
 
 function ActivityFeed({ event }: { event: MarketEvent }) {
-  const { user } = useAuth();
-  const portfolio = usePortfolio();
   const state = useFetched<EventTrade[]>(
     `/api/trades?event=${encodeURIComponent(event.id)}`,
     (body: { trades?: EventTrade[] }) => body.trades ?? [],
   );
 
-  // the user's own demo trades on this event, newest first
-  const own = portfolio.activity
-    .filter((a) => a.eventSlug === event.slug && a.type !== "deposit")
-    .slice(0, 10)
-    .map((a) => ({
-      id: `own-${a.id}`,
-      user: user?.name ?? "you",
-      you: true,
-      verb: a.type === "buy" ? "bought" : "sold",
-      side: a.side!,
-      amount: a.amount,
-      price: a.price!,
-      time: "just now",
-      avatarUrl: undefined as string | undefined,
-      hue: 200,
-    }));
-
-  if (state.failed && own.length === 0)
-    return <PanelNote>Activity is unavailable right now.</PanelNote>;
-  if (state.data === null && own.length === 0)
-    return <PanelNote>Loading activity…</PanelNote>;
+  if (state.failed) return <PanelNote>Activity is unavailable right now.</PanelNote>;
+  if (state.data === null) return <PanelNote>Loading activity…</PanelNote>;
 
   const live = (state.data ?? []).map((t) => ({
     id: t.id,
     user: t.name,
-    you: false,
     verb: t.side === "BUY" ? "bought" : "sold",
     side: (t.outcomeIndex === 1 ? "no" : "yes") as "yes" | "no",
     sideLabel: t.outcome,
@@ -394,10 +371,7 @@ function ActivityFeed({ event }: { event: MarketEvent }) {
     hue: t.hue,
   }));
 
-  const rows = [
-    ...own.map((o) => ({ ...o, sideLabel: o.side === "yes" ? "Yes" : "No" })),
-    ...live,
-  ];
+  const rows = live;
 
   if (rows.length === 0) return <PanelNote>No recent activity.</PanelNote>;
 
@@ -416,12 +390,7 @@ function ActivityFeed({ event }: { event: MarketEvent }) {
             px={32}
           />
           <p className="min-w-0 flex-1 truncate text-sm">
-            <span className="font-semibold">{r.user}</span>
-            {r.you && (
-              <span className="ml-1 rounded-sm bg-accent/20 px-1.5 py-0.5 text-xs font-semibold text-accent">
-                You
-              </span>
-            )}{" "}
+            <span className="font-semibold">{r.user}</span>{" "}
             <span className="text-secondary">{r.verb}</span>{" "}
             <span className={r.side === "yes" ? "text-yes" : "text-no"}>
               {r.sideLabel}

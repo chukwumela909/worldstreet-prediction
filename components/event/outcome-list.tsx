@@ -4,13 +4,16 @@ import { ChevronDown, ChevronUp } from "lucide-react";
 import { type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toCents, toPercent } from "@/lib/format";
 import { dayDelta } from "@/lib/series";
-import { useAuth } from "@/components/auth/auth-context";
 import { useTradeSelection } from "./trade-context";
 
 /**
  * Outcome rows for multi-outcome events: name/vol · % + delta ·
- * Buy Yes n¢ / Buy No n¢. Clicking a buy button selects that
- * market+side in the trade panel (selected = solid button).
+ * Yes n¢ / No n¢. Clicking a price selects that market+side, which the
+ * panel and chart follow (selected = solid).
+ *
+ * The pills read "Yes 58¢" rather than "Buy Yes 58¢" because these
+ * mirrored markets aren't tradeable here — see trade-panel.tsx. The
+ * Local rows keep "Buy", since those orders are real.
  */
 export function OutcomeList({ event }: { event: MarketEvent }) {
   return (
@@ -24,17 +27,8 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
 
 function OutcomeRow({ market }: { market: Market }) {
   const { marketId, side, select } = useTradeSelection();
-  const { user, openAuth } = useAuth();
   const pct = toPercent(market.outcomePrices[0]);
   const delta = dayDelta(market);
-
-  const pick = (s: "yes" | "no") => {
-    if (!user) {
-      openAuth();
-      return;
-    }
-    select(market.id, s);
-  };
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
@@ -67,16 +61,16 @@ function OutcomeRow({ market }: { market: Market }) {
 
       <div className="flex w-full gap-2 sm:w-auto">
         <BuySideButton
-          label={`Buy Yes ${toCents(market.outcomePrices[0])}`}
+          label={`Yes ${toCents(market.outcomePrices[0])}`}
           side="yes"
           selected={marketId === market.id && side === "yes"}
-          onClick={() => pick("yes")}
+          onClick={() => select(market.id, "yes")}
         />
         <BuySideButton
-          label={`Buy No ${toCents(market.outcomePrices[1])}`}
+          label={`No ${toCents(market.outcomePrices[1])}`}
           side="no"
           selected={marketId === market.id && side === "no"}
-          onClick={() => pick("no")}
+          onClick={() => select(market.id, "no")}
         />
       </div>
     </div>

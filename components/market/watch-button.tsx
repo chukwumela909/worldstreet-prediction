@@ -1,7 +1,7 @@
 "use client";
 
 import { Bookmark } from "lucide-react";
-import { toggleWatchlist, usePortfolio } from "@/lib/portfolio-store";
+import { toggleWatchlist, useWatchlist } from "@/lib/watchlist-store";
 
 /**
  * Watchlist bookmark toggle — filled accent when the event is saved.
@@ -14,8 +14,7 @@ export function WatchButton({
   slug: string;
   size?: "sm" | "md";
 }) {
-  const { watchlist } = usePortfolio();
-  const saved = watchlist.includes(slug);
+  const saved = useWatchlist().includes(slug);
 
   return (
     <button
