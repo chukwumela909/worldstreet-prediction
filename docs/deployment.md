@@ -77,8 +77,9 @@ RATE_LIMIT_MAX=200
 RATE_LIMIT_WINDOW=1 minute
 
 RESEND_API_KEY=re_...
-ALERT_EMAIL_FROM=alerts@worldstreetgold.com
-ALERT_EMAIL_TO=ops@worldstreetgold.com,risk@worldstreetgold.com
+ALERT_EMAIL_FROM=Worldstreet Alerts <alerts@notifications.worldstreetgold.com>
+ALERT_EMAIL_TO=settlement@worldstreetgold.com,ops@worldstreetgold.com
+ALERT_REPEAT_HOURS=6
 ```
 
 Notes:
@@ -92,13 +93,22 @@ Notes:
   `www.worldstreetgold.com`), so it can stay empty if those cover you.
 - Leaving the two `WALLET_*` vars empty is safe: the service boots and every
   wallet route answers `503 WALLET_UNAVAILABLE` instead of failing to start.
-- The three alert vars are what mail settlement exceptions (a market Bayse
-  resolved to a label none of its outcomes match, one overdue past
-  `SETTLEMENT_OVERDUE_HOURS`) to a human. All three must be set or no mail
-  goes out, and `ALERT_EMAIL_FROM`'s domain has to be verified in Resend
-  first — an unverified sender fails with `domain not verified` in the logs
-  and nothing else. `ALERT_EMAIL_TO` is comma-separated.
-  Alerts always reach the log regardless; `ALERT_WEBHOOK_URL` still works
+- The alert vars mail settlement exceptions (a market Bayse resolved to a
+  label none of its outcomes match, one overdue past
+  `SETTLEMENT_OVERDUE_HOURS`) to a human. The first three must all be set or
+  no mail goes out, and `ALERT_EMAIL_FROM`'s domain has to be verified in
+  Resend first — an unverified sender fails with `domain not verified` in
+  the logs and nothing else. Prefer a subdomain (`notifications.`) so
+  automated mail can't damage the root domain's reputation or collide with
+  an existing SPF record. `ALERT_EMAIL_TO` is comma-separated; make the
+  first a role address that outlives whoever set this up.
+- `ALERT_REPEAT_HOURS` is how long one condition stays quiet after alerting.
+  It matters more than it looks: the settlement poller re-detects a stuck
+  market every `SETTLEMENT_POLL_SECONDS`, so without it a single overdue
+  market mails once a minute until someone clears it. The next alert for
+  that condition says how many times it recurred meanwhile. Set `0` to send
+  on every detection.
+- Alerts always reach the log regardless; `ALERT_WEBHOOK_URL` still works
   alongside mail if you'd rather also push them somewhere else.
 
 ## 3. Register the service token with the wallet

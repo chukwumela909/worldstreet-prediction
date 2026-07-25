@@ -54,6 +54,12 @@ const envSchema = z.object({
   ALERT_EMAIL_FROM: z.string().default(""),
   /** Comma-separated recipients. */
   ALERT_EMAIL_TO: z.string().default(""),
+  /**
+   * How long the same alert condition stays quiet after being sent. The
+   * poller re-detects a stuck market every pass; without this it would
+   * mail on every one. 0 sends every time.
+   */
+  ALERT_REPEAT_HOURS: z.coerce.number().min(0).default(6),
 });
 
 const parsed = envSchema.safeParse(process.env);

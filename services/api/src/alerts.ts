@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import { config } from "./config.js";
+import { AlertState } from "./models.js";
 
 /**
  * Operational alerts for things the automated paths couldn't finish —
@@ -12,6 +13,11 @@ import { config } from "./config.js";
  * that predates it. A failing channel is logged and swallowed — an
  * alert that can't be delivered must not take down the settlement pass
  * that raised it.
+ *
+ * Delivery is throttled per condition. The poller re-detects a stuck
+ * market on every pass — once a minute by default — and mailing that
+ * would bury the one alert that matters and get the sending domain
+ * marked as spam. The log still records every occurrence.
  */
 
 const DELIVERY_TIMEOUT_MS = 5_000;
@@ -21,13 +27,76 @@ export async function sendAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
+  /**
+   * Identifies the ongoing condition, not this occurrence — e.g.
+   * `overdue:<eventId>`. Omit to deliver unconditionally.
+   */
+  throttleKey?: string,
 ): Promise<void> {
   log.warn({ alert: subject, ...detail }, "settlement alert");
 
+  const decision = throttleKey
+    ? await claimAlert(log, throttleKey, subject)
+    : { send: true, suppressedSinceLast: 0 };
+  if (!decision.send) return;
+
+  const body =
+    decision.suppressedSinceLast > 0
+      ? {
+          ...detail,
+          alsoSeen: `${decision.suppressedSinceLast} more times since the last alert`,
+        }
+      : detail;
+
   await Promise.all([
-    emailAlert(log, subject, detail),
-    webhookAlert(log, subject, detail),
+    emailAlert(log, subject, body),
+    webhookAlert(log, subject, body),
   ]);
+}
+
+/**
+ * Win the right to deliver this condition, or count the occurrence and
+ * stay quiet. Both paths are single conditional writes, so two instances
+ * polling at once still produce exactly one alert per window.
+ */
+async function claimAlert(
+  log: FastifyBaseLogger,
+  key: string,
+  subject: string,
+): Promise<{ send: boolean; suppressedSinceLast: number }> {
+  const windowMs = config.ALERT_REPEAT_HOURS * 3_600_000;
+  if (windowMs === 0) return { send: true, suppressedSinceLast: 0 };
+
+  try {
+    // claim it if the quiet window has passed, taking the suppressed
+    // count with us (the pre-update doc still carries it)
+    const claimed = await AlertState.findOneAndUpdate(
+      { key, lastSentAt: { $lte: new Date(Date.now() - windowMs) } },
+      { $set: { lastSentAt: new Date(), subject, suppressedCount: 0 } },
+      { returnDocument: "before" },
+    );
+    if (claimed) {
+      return { send: true, suppressedSinceLast: claimed.suppressedCount ?? 0 };
+    }
+
+    // no row yet? first sighting: insert and deliver
+    try {
+      await AlertState.create({ key, subject, lastSentAt: new Date() });
+      return { send: true, suppressedSinceLast: 0 };
+    } catch (err) {
+      const duplicate =
+        err && typeof err === "object" && "code" in err && err.code === 11000;
+      if (!duplicate) throw err;
+    }
+
+    // inside the window — record that it's still happening
+    await AlertState.updateOne({ key }, { $inc: { suppressedCount: 1 } });
+    return { send: false, suppressedSinceLast: 0 };
+  } catch (err) {
+    // never let bookkeeping swallow an alert
+    log.error({ err, key }, "alert throttle failed; delivering anyway");
+    return { send: true, suppressedSinceLast: 0 };
+  }
 }
 
 function isEmailConfigured(): boolean {

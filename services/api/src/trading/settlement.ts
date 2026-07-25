@@ -196,12 +196,17 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
         if (market.status !== "resolved") continue;
         const winner = winningOutcome(market);
         if (!winner) {
-          await sendAlert(log, "Resolved market with unmatchable outcome", {
-            eventId,
-            marketId: market.id,
-            resolvedOutcome: market.resolvedOutcome,
-            eventTitle: event.title,
-          });
+          await sendAlert(
+            log,
+            "Resolved market with unmatchable outcome",
+            {
+              eventId,
+              marketId: market.id,
+              resolvedOutcome: market.resolvedOutcome,
+              eventTitle: event.title,
+            },
+            `unmatched:${market.id}`,
+          );
           continue;
         }
         await settlePositions({
@@ -228,11 +233,16 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
         Date.now() - resolutionMs > config.SETTLEMENT_OVERDUE_HOURS * 3_600_000 &&
         event.markets.some((m) => m.status !== "resolved")
       ) {
-        await sendAlert(log, "Market overdue for resolution", {
-          eventId,
-          eventTitle: event.title,
-          resolutionDate: event.resolutionDate,
-        });
+        await sendAlert(
+          log,
+          "Market overdue for resolution",
+          {
+            eventId,
+            eventTitle: event.title,
+            resolutionDate: event.resolutionDate,
+          },
+          `overdue:${eventId}`,
+        );
       }
     } catch (err) {
       // one broken event must not stall the rest of the pass
