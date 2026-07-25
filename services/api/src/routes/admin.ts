@@ -11,6 +11,8 @@ import {
 } from "../trading/settlement.js";
 import { fetchBayseEvent, winningOutcome } from "../trading/bayse.js";
 import { getSettlementQueue } from "../trading/exposure.js";
+import { sendAlert } from "../alerts.js";
+import { config } from "../config.js";
 
 /**
  * Admin surface for the Local markets book. Authorization is the
@@ -58,6 +60,37 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const fx = await getFxQuote();
     return { success: true, data: { fx } };
   });
+
+  /**
+   * Send one alert through the real delivery path and report what
+   * happened. Alerts only fire when a market is stuck, so without this
+   * the first test of the mail configuration is an incident — and a
+   * wrong key or an unverified sender fails silently into the logs.
+   * Unthrottled deliberately: this is someone asking, not the poller.
+   */
+  app.post(
+    "/admin/test-alert",
+    { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    async (request) => {
+      const user = await requireAdmin(request);
+      const result = await sendAlert(
+        request.log,
+        "Test alert",
+        {
+          note: "Triggered from the admin desk to check alert delivery.",
+          triggeredBy: user.email,
+        },
+      );
+      return {
+        success: true,
+        data: {
+          ...result,
+          recipients: config.alertEmailTo.length,
+          from: config.ALERT_EMAIL_FROM || null,
+        },
+      };
+    },
+  );
 
   /** The settlement queue — see trading/exposure.ts. */
   app.get("/admin/exposure", async (request) => {

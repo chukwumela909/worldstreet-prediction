@@ -90,6 +90,23 @@ export async function fetchSettlementQueue(): Promise<SettlementQueue> {
   return res.data;
 }
 
+export interface AlertTestResult {
+  throttled: boolean;
+  email: "sent" | "failed" | "not_configured";
+  emailError?: string;
+  webhook: "sent" | "failed" | "not_configured";
+  recipients: number;
+  from: string | null;
+}
+
+/** Fire one alert through the real path to prove the config works. */
+export async function sendTestAlert(): Promise<AlertTestResult> {
+  const res = await apiFetch<{ data: AlertTestResult }>("/v1/admin/test-alert", {
+    method: "POST",
+  });
+  return res.data;
+}
+
 export async function fetchSettlements(): Promise<SettlementRecord[]> {
   const res = await apiFetch<{ data: { settlements: SettlementRecord[] } }>(
     "/v1/admin/settlements",

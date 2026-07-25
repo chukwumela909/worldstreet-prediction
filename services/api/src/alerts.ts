@@ -23,6 +23,20 @@ import { AlertState } from "./models.js";
 const DELIVERY_TIMEOUT_MS = 5_000;
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
 
+/**
+ * What became of one alert. The settlement pass ignores this — it can't
+ * do anything about a failed send — but the admin test endpoint reports
+ * it, which is the only way to find out whether the mail configuration
+ * on a deployed instance actually works before an incident needs it.
+ */
+export interface AlertDelivery {
+  /** True when the quiet window swallowed it; nothing was delivered. */
+  throttled: boolean;
+  email: "sent" | "failed" | "not_configured";
+  emailError?: string;
+  webhook: "sent" | "failed" | "not_configured";
+}
+
 export async function sendAlert(
   log: FastifyBaseLogger,
   subject: string,
@@ -32,13 +46,15 @@ export async function sendAlert(
    * `overdue:<eventId>`. Omit to deliver unconditionally.
    */
   throttleKey?: string,
-): Promise<void> {
+): Promise<AlertDelivery> {
   log.warn({ alert: subject, ...detail }, "settlement alert");
 
   const decision = throttleKey
     ? await claimAlert(log, throttleKey, subject)
     : { send: true, suppressedSinceLast: 0 };
-  if (!decision.send) return;
+  if (!decision.send) {
+    return { throttled: true, email: "not_configured", webhook: "not_configured" };
+  }
 
   const body =
     decision.suppressedSinceLast > 0
@@ -48,10 +64,11 @@ export async function sendAlert(
         }
       : detail;
 
-  await Promise.all([
+  const [email, webhook] = await Promise.all([
     emailAlert(log, subject, body),
     webhookAlert(log, subject, body),
   ]);
+  return { throttled: false, ...email, webhook };
 }
 
 /**
@@ -109,8 +126,8 @@ async function emailAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
-): Promise<void> {
-  if (!isEmailConfigured()) return;
+): Promise<{ email: AlertDelivery["email"]; emailError?: string }> {
+  if (!isEmailConfigured()) return { email: "not_configured" };
   try {
     const res = await fetch(RESEND_ENDPOINT, {
       method: "POST",
@@ -126,17 +143,31 @@ async function emailAlert(
       }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
-    if (!res.ok) {
-      // Resend explains rejections in the body (bad key, unverified
-      // sender); without it the log says nothing actionable.
-      log.error(
-        { status: res.status, body: await res.text().catch(() => "") },
-        "alert email rejected",
-      );
-    }
+    if (res.ok) return { email: "sent" };
+
+    // Resend explains rejections in the body (bad key, unverified
+    // sender); without it the log says nothing actionable.
+    const body = await res.text().catch(() => "");
+    log.error({ status: res.status, body }, "alert email rejected");
+    return { email: "failed", emailError: resendMessage(res.status, body) };
   } catch (err) {
     log.error({ err }, "alert email failed");
+    return {
+      email: "failed",
+      emailError: err instanceof Error ? err.message : "Delivery failed",
+    };
   }
+}
+
+/** Resend's own explanation, which is the actionable part of a rejection. */
+function resendMessage(status: number, body: string): string {
+  try {
+    const parsed = JSON.parse(body) as { message?: string };
+    if (parsed.message) return `${status}: ${parsed.message}`;
+  } catch {
+    // not JSON — fall through to the raw body
+  }
+  return `${status}: ${body.slice(0, 200) || "no detail"}`;
 }
 
 /** Plain text — these are read on a phone at an awkward hour. */
@@ -163,10 +194,10 @@ async function webhookAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
-): Promise<void> {
-  if (!config.ALERT_WEBHOOK_URL) return;
+): Promise<AlertDelivery["webhook"]> {
+  if (!config.ALERT_WEBHOOK_URL) return "not_configured";
   try {
-    await fetch(config.ALERT_WEBHOOK_URL, {
+    const res = await fetch(config.ALERT_WEBHOOK_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -176,7 +207,10 @@ async function webhookAlert(
       }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
+    if (!res.ok) log.error({ status: res.status }, "alert webhook rejected");
+    return res.ok ? "sent" : "failed";
   } catch (err) {
     log.error({ err }, "alert webhook failed");
+    return "failed";
   }
 }
