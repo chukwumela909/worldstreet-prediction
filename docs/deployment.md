@@ -77,7 +77,7 @@ RATE_LIMIT_MAX=200
 RATE_LIMIT_WINDOW=1 minute
 
 RESEND_API_KEY=re_...
-ALERT_EMAIL_FROM=Worldstreet Alerts <alerts@notifications.worldstreetgold.com>
+ALERT_EMAIL_FROM=Worldstreet Alerts <alerts@worldstreetgold.com>
 ALERT_EMAIL_TO=settlement@worldstreetgold.com,ops@worldstreetgold.com
 ALERT_REPEAT_HOURS=6
 ```
@@ -98,10 +98,13 @@ Notes:
   `SETTLEMENT_OVERDUE_HOURS`) to a human. The first three must all be set or
   no mail goes out, and `ALERT_EMAIL_FROM`'s domain has to be verified in
   Resend first — an unverified sender fails with `domain not verified` in
-  the logs and nothing else. Prefer a subdomain (`notifications.`) so
-  automated mail can't damage the root domain's reputation or collide with
-  an existing SPF record. `ALERT_EMAIL_TO` is comma-separated; make the
-  first a role address that outlives whoever set this up.
+  the logs and nothing else. `worldstreetgold.com` is already verified there,
+  so any local part on it works and no mailbox has to exist for it. (On a
+  fresh domain, prefer a subdomain like `notifications.` so automated mail
+  can't damage the root's reputation or collide with an existing SPF
+  record.) `ALERT_EMAIL_TO` is comma-separated and its recipients need no
+  verification; make the first a role address that outlives whoever set
+  this up.
 - `ALERT_REPEAT_HOURS` is how long one condition stays quiet after alerting.
   It matters more than it looks: the settlement poller re-detects a stuck
   market every `SETTLEMENT_POLL_SECONDS`, so without it a single overdue
