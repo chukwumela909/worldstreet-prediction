@@ -142,8 +142,13 @@
   --border-active: var(--neutral-300);
 
   --text-primary: var(--neutral-950);
-  --text-secondary: var(--neutral-500); /* muted labels, inactive tabs */
-  --text-tertiary: var(--neutral-300); /* volume labels */
+  /* Both muted rungs sit one step brighter than Polymarket's measured values
+     (secondary 500→600, tertiary 300→500): at the originals, tertiary scored
+     2.74:1 on bg-surface — far below WCAG AA 4.5:1 — and the volume labels it
+     drives are 12px. Moving tertiary alone would have collided with secondary,
+     so both shift to keep the hierarchy. See recon §3. */
+  --text-secondary: var(--neutral-600); /* muted labels, inactive tabs — 6.24:1 */
+  --text-tertiary: var(--neutral-500); /* volume labels — 4.38:1 on surface */
 
   --accent: var(--brand-500);
   --accent-hover: var(--brand-600);
@@ -153,7 +158,11 @@
   --yes: var(--green-500);
   --yes-solid: var(--green-400);
   --yes-tint: color-mix(in oklab, var(--green-500) 15%, transparent);
-  --no: var(--red-500);
+  /* --no is red-700, not the measured red-500: on the 15% tint red-500 scored
+     2.72:1 against Yes's 4.62:1, so the No pill read as the muddy one. red-700
+     lands at 5.01:1 — parity with Yes. Tint and solid stay keyed to red-500/400
+     so only the rest-state label changes. */
+  --no: var(--red-700);
   --no-solid: var(--red-400);
   --no-tint: color-mix(in oklab, var(--red-500) 15%, transparent);
 }
@@ -183,6 +192,13 @@
   --red-500: #e23939;
   --red-400: #c61d1d; /* measured as red-600; used as solid in light */
   --yellow-500: #f8d743;
+
+  /* Light keeps the measured red-500 label. The dark theme repoints --no to
+     red-700 for AA, but this ladder never overrode red-700, so inheriting it
+     here would paint #d78282 on a near-white tint (2.12:1) — worse than the
+     3.21:1 we have. Light's Yes/No pills both need their own contrast pass
+     (Yes is 1.79:1); pin until then rather than regress. */
+  --no: var(--red-500);
 
   /* semantic flips: page vs surface invert in light mode */
   --bg-page: var(--neutral-50);
@@ -388,4 +404,14 @@ body {
   font-feature-settings:
     "liga" 1, "calt" 1, "cv01" 1, "cv02" 1, "cv03" 1, "cv04" 1,
     "cv09" 0, "cv11" 1, "cv15" 1;
+}
+
+/* Keyboard focus ring. The UA default is `outline: auto` in `currentColor`,
+   which on the Buy pills draws green-on-green-tint / red-on-red-tint (2.7:1 —
+   effectively invisible). --accent is theme-aware (brand-500: #0093fd dark,
+   #1452f0 light) and clears 3:1 against page, surface and both buy tints; the
+   offset lifts the ring off the tint onto the card so it reads at any size. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

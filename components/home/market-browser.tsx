@@ -68,8 +68,11 @@ export function MarketBrowser({
           >
             <Search className="size-4.5 cursor-pointer" strokeWidth={2} />
           </button>
-          <SlidersHorizontal className="size-4.5 cursor-pointer" strokeWidth={2} />
-          <Bookmark className="size-4.5 cursor-pointer" strokeWidth={2} />
+          {/* no handlers behind these yet — Search above is a real button, so
+              side by side these two claimed the same affordance and did
+              nothing. Decorative until filter/watchlist are wired up. */}
+          <SlidersHorizontal className="size-4.5" strokeWidth={2} aria-hidden="true" />
+          <Bookmark className="size-4.5" strokeWidth={2} aria-hidden="true" />
         </div>
       </div>
       <MarketFilters active={filter} onChange={setFilter} filters={filters} />

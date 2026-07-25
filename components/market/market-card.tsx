@@ -33,7 +33,10 @@ export function MarketCard({ event }: { event: MarketEvent }) {
         <span className="flex items-center gap-2 text-tertiary">
           {/* renders only when a Local market is closing — see CloseCountdown */}
           <CloseCountdown event={event} className="text-xs" />
-          <Gift className="size-3.5 cursor-pointer hover:text-secondary" />
+          {/* decorative until the rewards feature exists — it carried
+              cursor-pointer + a hover colour but no handler, so it read as a
+              control on all 24 cards and did nothing when clicked */}
+          <Gift className="size-3.5" aria-hidden="true" />
           {/* watchlist resolves slugs against Polymarket — skip for Bayse */}
           {event.source !== "bayse" && <WatchButton slug={event.slug} />}
         </span>
@@ -146,10 +149,20 @@ function Gauge({ pct }: { pct: number }) {
 
 /* ---------- multi-outcome ---------- */
 
+/**
+ * Only ~3 of these rows are ever visible in the 180px card, but every row
+ * rendered stays in the tab order — a 51-outcome event put 96 unreachable
+ * buttons between one card and the next (86% of the grid's buttons overall),
+ * and screen readers announced them all. Cap the list; the title links to the
+ * event page, which is where the full set belongs.
+ */
+const MAX_ROWS = 8;
+
 function MultiBody({ event }: { event: MarketEvent }) {
+  const rows = event.markets.slice(0, MAX_ROWS);
   // fade the bottom edge when rows overflow, so the hidden 4th+
   // outcome has a visible scroll affordance
-  const overflows = event.markets.length > 3;
+  const overflows = rows.length > 3;
   return (
     <>
       <CardTitle event={event} />
@@ -160,7 +173,7 @@ function MultiBody({ event }: { event: MarketEvent }) {
             : ""
         }`}
       >
-        {event.markets.map((m) => (
+        {rows.map((m) => (
           <OutcomeRow key={m.id} market={m} />
         ))}
       </ul>
