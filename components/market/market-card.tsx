@@ -1,216 +1,149 @@
 import Link from "next/link";
-import { Gift } from "lucide-react";
 import { WatchButton } from "./watch-button";
 import { EventIcon } from "./event-icon";
-import { isBinary, type Market, type MarketEvent } from "@/types/market";
-import { CREDIT, formatNairaCompact, formatVolume, toPercent } from "@/lib/format";
-import { BuyButton } from "./buy-button";
+import { OutcomeRow } from "./outcome-row";
+import { isBinary, type MarketEvent } from "@/types/market";
+import {
+  formatNairaCompact,
+  formatUsdCompact,
+  toMultiplier,
+  toPercent,
+} from "@/lib/format";
 import { CloseCountdown } from "@/components/local/close-countdown";
 
 /**
- * Market card — the atomic unit of the home grid (~299×180 on desktop).
- * Binary events: title + probability gauge + Buy Yes/No buttons.
- * Multi-outcome events: scrollable outcome rows with mini Yes/No pills.
- * Specs: docs/polymarket-recon.md §7.
+ * Market card — the atomic unit of the home grid. Category strip, title,
+ * then one buyable row per outcome (name · return multiple · probability)
+ * over a stats footer.
+ *
+ * The card is deliberately not fixed-height any more. It used to be 180px
+ * with the outcome list scrolling inside it, which put rows behind a
+ * scrollbar on a card small enough that they read as the whole story.
+ * Rows are capped instead, and the title links to the event page where
+ * the full set lives.
  */
-export function MarketCard({ event }: { event: MarketEvent }) {
+export function MarketCard({
+  event,
+  label,
+}: {
+  event: MarketEvent;
+  /**
+   * Overrides the strip's text. The grid groups by tag but `category` is a
+   * coarser enum, so an untouched card can sit under a "Entertainment"
+   * heading calling itself "CULTURE". Sections pass their own key so the
+   * heading and the cards under it always agree.
+   */
+  label?: string;
+}) {
+  // Bayse (Local) events live under /local, Polymarket under /event
+  const href =
+    event.source === "bayse" ? `/local/${event.slug}` : `/event/${event.slug}`;
+
   return (
-    <article className="flex h-[180px] flex-col rounded-xl border border-border bg-surface p-3 shadow-card transition-colors hover:border-border-hover">
-      {isBinary(event) ? <BinaryBody event={event} /> : <MultiBody event={event} />}
-      <footer className="mt-auto flex items-center justify-between pt-2">
-        <span className="text-xs font-medium text-tertiary">
-          {/* Bayse reports pool liquidity (₦) + trades, not $ volume */}
-          {event.source === "bayse"
-            ? [
-                event.liquidityNgn &&
-                  formatNairaCompact(parseFloat(event.liquidityNgn)),
-                event.trades !== undefined && `${event.trades} Trades`,
-              ]
-                .filter(Boolean)
-                .join(" · ")
-            : formatVolume(event.volume)}
+    <article className="flex flex-col rounded-xl border border-border bg-surface p-4 shadow-card transition-colors hover:border-border-hover">
+      <header className="flex items-center justify-between gap-2">
+        <span className="flex min-w-0 items-center gap-2">
+          <EventIcon event={event} className="size-7 rounded-md text-sm" px={28} />
+          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+            {label ?? event.category}
+          </span>
         </span>
-        <span className="flex items-center gap-2 text-tertiary">
-          {/* renders only when a Local market is closing — see CloseCountdown */}
-          <CloseCountdown event={event} className="text-xs" />
-          {/* decorative until the rewards feature exists — it carried
-              cursor-pointer + a hover colour but no handler, so it read as a
-              control on all 24 cards and did nothing when clicked */}
-          <Gift className="size-3.5" aria-hidden="true" />
-          {/* watchlist resolves slugs against Polymarket — skip for Bayse */}
-          {event.source !== "bayse" && <WatchButton slug={event.slug} />}
-        </span>
+        {/* watchlist resolves slugs against Polymarket — skip for Bayse */}
+        {event.source !== "bayse" && <WatchButton slug={event.slug} />}
+      </header>
+
+      <Link href={href} className="mt-3 block">
+        <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug text-primary hover:underline">
+          {isBinary(event) ? event.markets[0].question : event.title}
+        </h3>
+      </Link>
+
+      <div className="mt-3 mb-3 flex flex-col">
+        <Outcomes event={event} />
+      </div>
+
+      {/* mt-auto pins the stats to the bottom edge: grid rows stretch every
+          card to the tallest in the row, so a two-outcome card next to a
+          three-outcome one would otherwise float its footer mid-card */}
+      <footer className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-xs font-medium text-tertiary">
+        <Stats event={event} />
+        {/* renders only when a Local market is closing — see CloseCountdown */}
+        <CloseCountdown event={event} className="text-xs" />
       </footer>
     </article>
   );
 }
 
-/* ---------- binary ---------- */
+/**
+ * Binary markets show both sides, so the two rows together are the whole
+ * market. Multi-outcome markets show one row per outcome, each buying that
+ * outcome — taking the other side of a single runner is an event-page
+ * action, not a grid one.
+ */
+const MAX_ROWS = 3;
 
-function BinaryBody({ event }: { event: MarketEvent }) {
-  const market = event.markets[0];
-  const pct = toPercent(market.outcomePrices[0]);
-  // Bayse buttons carry the real outcome labels + ₦-per-₦100-share price,
-  // like Bayse's own cards ("Buy Portable - ₦65")
-  const bayse = event.source === "bayse";
-  const [yesLabel, noLabel] = market.outcomeLabels ?? ["Yes", "No"];
-  return (
-    <>
-      <div className="flex items-start justify-between gap-2">
-        <CardTitle event={event} />
-        <Gauge pct={pct} />
-      </div>
-      <div className="mt-auto flex gap-2 pt-2">
-        <BuyButton
+function Outcomes({ event }: { event: MarketEvent }) {
+  if (isBinary(event)) {
+    const market = event.markets[0];
+    const pct = toPercent(market.outcomePrices[0]);
+    const [yesLabel, noLabel] = market.outcomeLabels ?? ["Yes", "No"];
+    return (
+      <>
+        <OutcomeRow
           side="yes"
-          label={bayse ? `Buy ${yesLabel} · ${CREDIT}${pct}` : "Buy Yes"}
+          label={yesLabel}
+          multiplier={toMultiplier(market.outcomePrices[0])}
+          pct={pct}
+          tinted
         />
-        <BuyButton
+        <OutcomeRow
           side="no"
-          label={bayse ? `Buy ${noLabel} · ${CREDIT}${100 - pct}` : "Buy No"}
+          label={noLabel}
+          multiplier={toMultiplier(market.outcomePrices[1])}
+          pct={100 - pct}
         />
-      </div>
-    </>
-  );
-}
+      </>
+    );
+  }
 
-/**
- * Probability gauge, measured from the live card DOM + source (recon §7):
- * r=29 arc spanning 200° (each end dips 10° below horizontal), stroke 4.5
- * round-capped, 12° gap between fill and track. Fill from the site's own
- * code: <30 red-500 · <50 amber-500 · else green-600, with
- * stroke-opacity = |p−50|/50 × 0.45 + 0.55. The % sits inside the arc's
- * lower half; "chance" hangs directly below the svg.
- */
-const GAUGE_R = 29;
-const GAUGE_SWEEP = 200;
-
-/** point at `a` degrees along the arc (0 = left end, 200 = right end) */
-function gaugePoint(a: number): [number, number] {
-  const phi = ((190 - a) * Math.PI) / 180;
-  return [GAUGE_R * Math.cos(phi), -GAUGE_R * Math.sin(phi)];
-}
-
-function gaugeArc(a1: number, a2: number): string {
-  const [x1, y1] = gaugePoint(a1);
-  const [x2, y2] = gaugePoint(a2);
-  const large = a2 - a1 > 180 ? 1 : 0;
-  return `M ${x1.toFixed(3)} ${y1.toFixed(3)} A ${GAUGE_R} ${GAUGE_R} 0 ${large} 1 ${x2.toFixed(3)} ${y2.toFixed(3)}`;
-}
-
-function Gauge({ pct }: { pct: number }) {
-  // measured endpoints: fill ends at (2p−7)°, track resumes at (2p+5)°
-  const fillEnd = Math.min(pct * 2 - 7, GAUGE_SWEEP);
-  const trackStart = Math.min(Math.max(pct * 2 + 5, 0), GAUGE_SWEEP);
-  const fill =
-    pct < 30
-      ? "var(--red-500)"
-      : pct < 50
-        ? "var(--amber-500)"
-        : "var(--green-600)";
-  const opacity = (Math.abs(pct - 50) / 50) * 0.45 + 0.55;
-  return (
-    <div className="relative flex w-[58px] shrink-0 flex-col items-center">
-      <svg
-        width="58"
-        height="34.04"
-        viewBox="-29 -29 58 34.036"
-        className="overflow-visible"
-      >
-        {trackStart < GAUGE_SWEEP && (
-          <path
-            d={gaugeArc(trackStart, GAUGE_SWEEP)}
-            fill="none"
-            strokeWidth="4.5"
-            strokeLinecap="round"
-            className="stroke-element-3"
-          />
-        )}
-        {fillEnd > 0 && (
-          <path
-            d={gaugeArc(0, fillEnd)}
-            fill="none"
-            strokeWidth="4.5"
-            strokeLinecap="round"
-            stroke={fill}
-            strokeOpacity={opacity}
-          />
-        )}
-      </svg>
-      <span className="absolute bottom-4 text-base font-medium leading-5">
-        {pct}%
-      </span>
-      <span className="text-xs font-semibold leading-4 text-secondary">
-        chance
-      </span>
-    </div>
-  );
-}
-
-/* ---------- multi-outcome ---------- */
-
-/**
- * Only ~3 of these rows are ever visible in the 180px card, but every row
- * rendered stays in the tab order — a 51-outcome event put 96 unreachable
- * buttons between one card and the next (86% of the grid's buttons overall),
- * and screen readers announced them all. Cap the list; the title links to the
- * event page, which is where the full set belongs.
- */
-const MAX_ROWS = 8;
-
-function MultiBody({ event }: { event: MarketEvent }) {
-  const rows = event.markets.slice(0, MAX_ROWS);
-  // fade the bottom edge when rows overflow, so the hidden 4th+
-  // outcome has a visible scroll affordance
-  const overflows = rows.length > 3;
   return (
     <>
-      <CardTitle event={event} />
-      <ul
-        className={`mt-2 flex flex-col gap-1 overflow-y-auto [scrollbar-width:thin] ${
-          overflows
-            ? "[mask-image:linear-gradient(to_bottom,black_calc(100%-14px),transparent)]"
-            : ""
-        }`}
-      >
-        {rows.map((m) => (
-          <OutcomeRow key={m.id} market={m} />
-        ))}
-      </ul>
+      {event.markets.slice(0, MAX_ROWS).map((m) => (
+        <OutcomeRow
+          key={m.id}
+          side="yes"
+          label={m.groupItemTitle ?? m.question}
+          multiplier={toMultiplier(m.outcomePrices[0])}
+          pct={toPercent(m.outcomePrices[0])}
+          tinted
+        />
+      ))}
     </>
   );
 }
 
-function OutcomeRow({ market }: { market: Market }) {
-  const pct = toPercent(market.outcomePrices[0]);
-  const name = market.groupItemTitle ?? market.question;
+/**
+ * Each source reports what it actually has: Bayse gives pool liquidity in
+ * credit plus a trade count, Gamma gives lifetime dollar volume and no
+ * liquidity on the event payload.
+ */
+function Stats({ event }: { event: MarketEvent }) {
+  if (event.source === "bayse") {
+    return (
+      <span className="truncate">
+        {[
+          event.liquidityNgn &&
+            `${formatNairaCompact(parseFloat(event.liquidityNgn))} liquidity`,
+          event.trades !== undefined && `${event.trades} trades`,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </span>
+    );
+  }
   return (
-    <li className="flex items-center gap-2">
-      <span className="min-w-0 flex-1 truncate text-sm font-medium">
-        {name}
-      </span>
-      <span className="text-sm font-semibold">{pct}%</span>
-      <span className="flex gap-1">
-        <BuyButton side="yes" label="Yes" outcome={name} mini />
-        <BuyButton side="no" label="No" outcome={name} mini />
-      </span>
-    </li>
+    <span className="truncate">
+      {formatUsdCompact(parseFloat(event.volume) || 0)} vol
+    </span>
   );
 }
-
-/* ---------- shared ---------- */
-
-function CardTitle({ event }: { event: MarketEvent }) {
-  // Bayse (Local) events live under /local, Polymarket under /event
-  const href =
-    event.source === "bayse" ? `/local/${event.slug}` : `/event/${event.slug}`;
-  return (
-    <Link href={href} className="flex min-w-0 items-center gap-2.5">
-      <EventIcon event={event} className="size-10 rounded-md text-xl" px={40} />
-      <h3 className="line-clamp-2 text-sm font-semibold leading-5 text-primary">
-        {isBinary(event) ? event.markets[0].question : event.title}
-      </h3>
-    </Link>
-  );
-}
-

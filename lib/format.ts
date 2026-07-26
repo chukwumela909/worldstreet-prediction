@@ -54,6 +54,24 @@ export function toPercent(price: string): number {
   return Math.round(parseFloat(price) * 100);
 }
 
+/**
+ * "0.582" → "1.72x" — what one unit staked returns if the outcome hits.
+ * A winning share always settles at 1 whole unit, so the multiple is just
+ * the inverse of the price. Prices at the rails make it meaningless
+ * (0 pays out infinitely, 1 pays out nothing), so those render as "—".
+ */
+export function toMultiplier(price: string): string {
+  const p = parseFloat(price);
+  if (!Number.isFinite(p) || p <= 0 || p >= 1) return "—";
+  const m = 1 / p;
+  // Longshots run to four figures (a 0.05% runner really does pay 2000x).
+  // Precision that matters near evens is noise out there, and the extra
+  // glyphs shove the row's numbers out of alignment, so drop decimals as
+  // the multiple climbs.
+  const digits = m < 10 ? 2 : m < 100 ? 1 : 0;
+  return `${m.toFixed(digits)}x`;
+}
+
 /** "0.582" → "58.2¢" (price in cents, one decimal). */
 export function toCents(price: string): string {
   return `${(parseFloat(price) * 100).toFixed(1)}¢`;
