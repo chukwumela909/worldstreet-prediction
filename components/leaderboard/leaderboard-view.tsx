@@ -3,8 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Search } from "lucide-react";
-import type { LeaderboardTrader, LeaderboardWindow } from "@/lib/polymarket";
-import { formatUsdCompact } from "@/lib/format";
+import {
+  avatarHue,
+  fetchLeaderboard,
+  type LeaderboardSort,
+  type LeaderboardTrader,
+  type LeaderboardWindow,
+} from "@/lib/leaderboard";
+import { formatNaira, formatNairaCompact } from "@/lib/format";
 
 const PERIODS = ["Today", "Weekly", "Monthly", "All"] as const;
 type Period = (typeof PERIODS)[number];
@@ -16,9 +22,9 @@ const PERIOD_WINDOW: Record<Period, LeaderboardWindow> = {
   All: "all",
 };
 
-type SortKey = "pnl" | "vol";
-
-const usd = (n: number) => `$${Math.round(n).toLocaleString("en-US")}`;
+/** "+₩12,500" / "−₩900" — formatNaira has no sign of its own. */
+const signed = (kobo: number) =>
+  `${kobo >= 0 ? "+" : "−"}${formatNaira(Math.abs(kobo))}`;
 
 interface Loaded {
   key: string;
@@ -26,14 +32,18 @@ interface Loaded {
 }
 
 /**
- * Leaderboard — modeled on polymarket.com/leaderboard: period pills,
- * name search, Profit/Loss vs Volume sort, ranked rows, and a "Top
- * profits today" right rail. All rows are live Polymarket rankings
- * (data-api /v1/leaderboard); there is no mock fallback.
+ * Leaderboard over the Local book: period pills, name search, Profit/Loss
+ * vs Volume sort, ranked rows, and a "Top profits today" rail.
+ *
+ * Every row is one of this platform's own traders, ranked on realized
+ * credit P&L from settled positions. An empty board is a real and
+ * expected answer while the book is young — it is reported as such rather
+ * than papered over, which is the whole reason this page no longer
+ * mirrors Polymarket's rankings.
  */
 export function LeaderboardView() {
   const [period, setPeriod] = useState<Period>("Monthly");
-  const [sort, setSort] = useState<SortKey>("pnl");
+  const [sort, setSort] = useState<LeaderboardSort>("pnl");
   const [query, setQuery] = useState("");
 
   const key = `${PERIOD_WINDOW[period]}|${sort}`;
@@ -41,10 +51,9 @@ export function LeaderboardView() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/leaderboard?window=${PERIOD_WINDOW[period]}&sort=${sort}`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((body: { traders?: LeaderboardTrader[] }) => {
-        if (!cancelled) setLoaded({ key, traders: body.traders ?? [] });
+    fetchLeaderboard(PERIOD_WINDOW[period], sort)
+      .then((traders) => {
+        if (!cancelled) setLoaded({ key, traders });
       })
       .catch(() => {
         if (!cancelled) setLoaded({ key, traders: null });
@@ -64,17 +73,20 @@ export function LeaderboardView() {
   const rows = useMemo(() => {
     if (!traders) return [];
     const q = query.trim().toLowerCase();
-    return traders.filter((t) => t.name.toLowerCase().includes(q));
+    return traders.filter(
+      (t) =>
+        t.displayName.toLowerCase().includes(q) ||
+        t.username.toLowerCase().includes(q),
+    );
   }, [traders, query]);
 
   // right rail: today's top profits — its own window, independent of pills
   const [topToday, setTopToday] = useState<LeaderboardTrader[] | null>(null);
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/leaderboard?window=1d&sort=pnl`)
-      .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
-      .then((body: { traders?: LeaderboardTrader[] }) => {
-        if (!cancelled) setTopToday((body.traders ?? []).slice(0, 7));
+    fetchLeaderboard("1d", "pnl", 7)
+      .then((t) => {
+        if (!cancelled) setTopToday(t.filter((x) => x.profitKobo > 0));
       })
       .catch(() => {
         if (!cancelled) setTopToday([]);
@@ -88,6 +100,9 @@ export function LeaderboardView() {
     <div className="flex flex-col gap-8 lg:flex-row lg:items-start">
       <section className="min-w-0 flex-1">
         <h1 className="text-[32px] font-semibold tracking-tight">Leaderboard</h1>
+        <p className="mt-1 text-sm text-secondary">
+          Realized profit on settled Local market positions.
+        </p>
 
         {/* period pills */}
         <div className="mt-5 inline-flex rounded-md border border-border p-0.5">
@@ -132,11 +147,18 @@ export function LeaderboardView() {
         {/* ranked rows */}
         {loading ? (
           <p className="py-10 text-center text-sm text-secondary">
-            Loading live rankings…
+            Loading rankings…
           </p>
         ) : failed ? (
           <p className="py-10 text-center text-sm text-secondary">
-            Live rankings are unavailable right now.
+            Rankings are unavailable right now.
+          </p>
+        ) : traders!.length === 0 ? (
+          <p className="py-10 text-center text-sm leading-6 text-secondary">
+            Nobody has {sort === "pnl" ? "settled a position" : "staked"} in this
+            period yet.
+            <br />
+            Rankings fill in as Local markets resolve.
           </p>
         ) : rows.length === 0 ? (
           <p className="py-10 text-center text-sm text-secondary">
@@ -146,7 +168,7 @@ export function LeaderboardView() {
           <ol>
             {rows.map((t, i) => (
               <li
-                key={`${t.rank}-${t.name}`}
+                key={t.username}
                 className="flex items-center gap-4 border-b border-border py-4 last:border-0"
               >
                 <span className="w-5 shrink-0 text-sm font-medium text-tertiary">
@@ -154,18 +176,21 @@ export function LeaderboardView() {
                 </span>
                 <TraderAvatar trader={t} className="size-10" px={40} />
                 <span className="min-w-0 flex-1 truncate text-[15px] font-semibold">
-                  {t.name}
+                  {t.displayName}
                 </span>
                 <span
                   className={`w-28 shrink-0 text-right text-sm font-semibold sm:w-32 ${
-                    sort === "pnl" ? "text-primary" : "text-secondary"
-                  } ${t.profit < 0 ? "text-no" : ""}`}
+                    t.profitKobo < 0
+                      ? "text-no"
+                      : sort === "pnl"
+                        ? "text-primary"
+                        : "text-secondary"
+                  }`}
                 >
-                  {t.profit >= 0 ? "+" : "−"}
-                  {usd(Math.abs(t.profit))}
+                  {signed(t.profitKobo)}
                 </span>
                 <span className="hidden w-32 shrink-0 text-right text-sm font-medium text-secondary sm:block">
-                  {usd(t.volume)}
+                  {formatNaira(t.volumeKobo)}
                 </span>
               </li>
             ))}
@@ -181,13 +206,13 @@ export function LeaderboardView() {
             <p className="py-6 text-center text-sm text-secondary">Loading…</p>
           ) : topToday.length === 0 ? (
             <p className="py-6 text-center text-sm text-secondary">
-              Unavailable right now.
+              No profits settled today yet.
             </p>
           ) : (
             <ol className="mt-3">
               {topToday.map((t, i) => (
                 <li
-                  key={`${t.rank}-${t.name}`}
+                  key={t.username}
                   className="flex items-center gap-3 border-b border-border py-3.5 last:border-0 last:pb-0"
                 >
                   <span className="w-4 shrink-0 text-xs font-medium text-tertiary">
@@ -195,10 +220,10 @@ export function LeaderboardView() {
                   </span>
                   <TraderAvatar trader={t} className="size-8" px={32} />
                   <span className="min-w-0 flex-1 truncate text-sm font-semibold">
-                    {t.name}
+                    {t.displayName}
                   </span>
                   <span className="text-sm font-semibold text-yes">
-                    +{formatUsdCompact(t.profit)}
+                    +{formatNairaCompact(t.profitKobo / 100)}
                   </span>
                 </li>
               ))}
@@ -219,10 +244,10 @@ function TraderAvatar({
   className: string;
   px: number;
 }) {
-  if (trader.avatarUrl) {
+  if (trader.avatar) {
     return (
       <Image
-        src={trader.avatarUrl}
+        src={trader.avatar}
         alt=""
         width={px}
         height={px}
@@ -230,11 +255,12 @@ function TraderAvatar({
       />
     );
   }
+  const hue = avatarHue(trader.username);
   return (
     <span
       className={`shrink-0 rounded-full ${className}`}
       style={{
-        background: `linear-gradient(135deg, hsl(${trader.hue} 60% 55%), hsl(${trader.hue + 60} 60% 45%))`,
+        background: `linear-gradient(135deg, hsl(${hue} 60% 55%), hsl(${hue + 60} 60% 45%))`,
       }}
       aria-hidden
     />

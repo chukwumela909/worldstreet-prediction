@@ -678,55 +678,6 @@ export const getEventTrades = unstable_cache(
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );
 
-export const LEADERBOARD_WINDOWS = ["1d", "1w", "30d", "all"] as const;
-export type LeaderboardWindow = (typeof LEADERBOARD_WINDOWS)[number];
-export type LeaderboardRankType = "pnl" | "vol";
-
-interface DataApiLeaderboardRow {
-  rank: string;
-  proxyWallet?: string;
-  userName?: string;
-  pseudonym?: string;
-  profileImage?: string;
-  vol?: number;
-  pnl?: number;
-}
-
-export interface LeaderboardTrader extends TraderIdentity {
-  rank: number;
-  profit: number;
-  volume: number;
-}
-
-/** Ranked traders by profit or volume over a window. */
-export const getLeaderboard = unstable_cache(
-  async (
-    window: LeaderboardWindow,
-    rankType: LeaderboardRankType,
-    limit = 30,
-  ): Promise<LeaderboardTrader[]> => {
-    const raw = await dataApiFetch<DataApiLeaderboardRow[]>("/v1/leaderboard", {
-      window,
-      rankType,
-      limit,
-    });
-    return (raw ?? []).map((r, i) => ({
-      ...toIdentity({
-        name: r.userName,
-        pseudonym: r.pseudonym,
-        profileImage: r.profileImage,
-        proxyWallet: r.proxyWallet,
-      }),
-      rank: Number(r.rank) || i + 1,
-      profit: r.pnl ?? 0,
-      volume: r.vol ?? 0,
-    }));
-  },
-  ["polymarket-leaderboard"],
-  // rankings move slowly; also keeps the 8 window×sort combos cheap
-  { revalidate: HISTORY_REVALIDATE_SECONDS, tags: ["polymarket"] },
-);
-
 /* ------------------------------------------------------------------ */
 /* Featured game (hero slide)                                          */
 /* ------------------------------------------------------------------ */
