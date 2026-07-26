@@ -36,8 +36,11 @@ export async function apiFetch<T = unknown>(
   url: string,
   options: FetchOptions = {},
 ): Promise<T> {
+  // Only declare a JSON body when there is one: Fastify rejects an empty
+  // body sent with `content-type: application/json`, which is how the
+  // bodyless POSTs here (test-alert) used to fail.
   const headers: Record<string, string> = {
-    "Content-Type": "application/json",
+    ...(options.body === undefined ? {} : { "Content-Type": "application/json" }),
     ...options.headers,
   };
 

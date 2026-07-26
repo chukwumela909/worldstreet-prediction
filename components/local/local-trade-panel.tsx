@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Wallet } from "lucide-react";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { ApiError } from "@/lib/api-client";
-import { formatNaira } from "@/lib/format";
+import { CREDIT, formatNaira } from "@/lib/format";
 import { useTickingNow } from "@/lib/use-now";
 import { tradingStopsAt } from "@/lib/countdown";
 import { CloseCountdown } from "@/components/local/close-countdown";
@@ -155,7 +155,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
     if (err.code === "INSUFFICIENT_FUNDS") {
       void refreshNairaWallet();
       return {
-        error: "Not enough naira for this stake.",
+        error: "Not enough credit for this stake.",
         confirmPriceKobo: null,
         shortfallKobo: Math.max(0, stakeKobo - (balanceKobo ?? 0)),
       };
@@ -218,10 +218,10 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
             )}
           </div>
           <div className="flex items-center gap-1">
-            <span className="text-3xl font-semibold text-tertiary">₦</span>
+            <span className="text-3xl font-semibold text-tertiary">{CREDIT}</span>
             <input
               inputMode="decimal"
-              aria-label="Stake in naira"
+              aria-label="Stake in credit"
               value={stakeText}
               placeholder="0"
               onChange={(e) =>
@@ -292,7 +292,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
               className="mt-3 flex h-10 w-full items-center justify-center gap-2 rounded-md bg-element-2 text-sm font-semibold text-primary hover:bg-element-3"
             >
               <Wallet className="size-4" />
-              Add naira
+              Add credit
             </button>
           )}
         {confirmation && (
@@ -310,7 +310,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
         )}
 
         <p className="mt-3 text-center text-xs leading-5 text-tertiary">
-          Prices are ₦ per ₦100 share, live from Bayse. Positions are held
+          Prices are ₩ per ₩100 share, live from Bayse. Positions are held
           to settlement — no selling back yet.
         </p>
 
@@ -319,7 +319,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
             onClick={() => setFunding(true)}
             className="mt-2 w-full text-center text-xs font-semibold text-accent hover:underline"
           >
-            Manage naira balance
+            Manage credit balance
           </button>
         )}
       </div>

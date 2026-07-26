@@ -68,7 +68,7 @@ export function PortfolioView() {
           className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
         >
           <Wallet className="size-3.5" />
-          Manage naira
+          Manage credit
         </button>
       </div>
 
@@ -77,10 +77,10 @@ export function PortfolioView() {
         <StatCard
           label="Dollar wallet"
           value={usdBalance === null ? "—" : usd(usdBalance)}
-          note="Shared across WorldStreet — funds your naira balance."
+          note="Shared across WorldStreet — funds your credit balance."
         />
         <StatCard
-          label="Naira balance"
+          label="Credit balance"
           value={balanceKobo === null ? "—" : formatNaira(balanceKobo)}
           note="What Local markets trade with."
         />

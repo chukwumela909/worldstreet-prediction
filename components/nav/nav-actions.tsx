@@ -75,7 +75,7 @@ function SignedInActions() {
         )}
         {balanceKobo !== null && (
           <NavStat
-            label="Naira"
+            label="Credit"
             value={formatNaira(balanceKobo)}
             tone="text-primary"
           />

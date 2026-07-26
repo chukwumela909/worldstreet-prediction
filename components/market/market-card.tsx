@@ -3,7 +3,7 @@ import { Gift } from "lucide-react";
 import { WatchButton } from "./watch-button";
 import { EventIcon } from "./event-icon";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
-import { formatNairaCompact, formatVolume, toPercent } from "@/lib/format";
+import { CREDIT, formatNairaCompact, formatVolume, toPercent } from "@/lib/format";
 import { BuyButton } from "./buy-button";
 import { CloseCountdown } from "@/components/local/close-countdown";
 
@@ -63,11 +63,11 @@ function BinaryBody({ event }: { event: MarketEvent }) {
       <div className="mt-auto flex gap-2 pt-2">
         <BuyButton
           side="yes"
-          label={bayse ? `Buy ${yesLabel} · ₦${pct}` : "Buy Yes"}
+          label={bayse ? `Buy ${yesLabel} · ${CREDIT}${pct}` : "Buy Yes"}
         />
         <BuyButton
           side="no"
-          label={bayse ? `Buy ${noLabel} · ₦${100 - pct}` : "Buy No"}
+          label={bayse ? `Buy ${noLabel} · ${CREDIT}${100 - pct}` : "Buy No"}
         />
       </div>
     </>

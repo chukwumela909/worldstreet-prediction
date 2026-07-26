@@ -14,23 +14,31 @@ export function formatVolume(volume: string): string {
   return `${formatUsdCompact(n)} Vol.`;
 }
 
-/** Compact naira amount: 2779660 → "₦2.8M", 69491 → "₦69.5K". */
+/**
+ * The Local book's currency is naira end to end — the ledger, the API and
+ * Bayse all speak NGN/kobo — but it is presented to users as "Credit"
+ * under the ₩ sign. Every rendered amount goes through this symbol so the
+ * mark is a one-line change.
+ */
+export const CREDIT = "₩";
+
+/** Compact credit amount: 2779660 → "₩2.8M", 69491 → "₩69.5K". */
 export function formatNairaCompact(n: number): string {
-  if (!Number.isFinite(n)) return "₦0";
-  if (n >= 1_000_000_000) return `₦${trimZero(n / 1_000_000_000)}B`;
-  if (n >= 1_000_000) return `₦${trimZero(n / 1_000_000)}M`;
-  if (n >= 1_000) return `₦${trimZero(n / 1_000)}K`;
-  return `₦${Math.round(n)}`;
+  if (!Number.isFinite(n)) return `${CREDIT}0`;
+  if (n >= 1_000_000_000) return `${CREDIT}${trimZero(n / 1_000_000_000)}B`;
+  if (n >= 1_000_000) return `${CREDIT}${trimZero(n / 1_000_000)}M`;
+  if (n >= 1_000) return `${CREDIT}${trimZero(n / 1_000)}K`;
+  return `${CREDIT}${Math.round(n)}`;
 }
 
 /**
- * Kobo → "₦12,500" / "₦12,500.75". Naira amounts in the Local book are
+ * Kobo → "₩12,500" / "₩12,500.75". Credit amounts in the Local book are
  * integer kobo end to end; only show the decimals when there are any.
  */
 export function formatNaira(kobo: number): string {
-  if (!Number.isFinite(kobo)) return "₦0";
+  if (!Number.isFinite(kobo)) return `${CREDIT}0`;
   const naira = kobo / 100;
-  return `₦${naira.toLocaleString("en-US", {
+  return `${CREDIT}${naira.toLocaleString("en-US", {
     minimumFractionDigits: 0,
     maximumFractionDigits: kobo % 100 === 0 ? 0 : 2,
   })}`;

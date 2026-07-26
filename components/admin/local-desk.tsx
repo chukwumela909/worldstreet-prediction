@@ -10,7 +10,7 @@ import {
   Mail,
   RefreshCw,
 } from "lucide-react";
-import { formatNaira } from "@/lib/format";
+import { CREDIT, formatNaira } from "@/lib/format";
 import { ApiError, isApiConfigured } from "@/lib/api-client";
 import {
   fetchSettlementQueue,
@@ -72,7 +72,7 @@ export function LocalDesk() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Local book</h1>
           <p className="mt-1 text-sm text-secondary">
-            Naira markets fed by Bayse, settled by us.
+            Credit markets fed by Bayse, settled by us.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -272,8 +272,8 @@ function FxCard() {
         <div>
           <h2 className="text-lg font-semibold">Conversion rate</h2>
           <p className="mt-0.5 text-sm text-secondary">
-            The mid rate for dollar↔naira funding. Until one is set, nobody
-            can fund a naira balance.
+            The mid rate for dollar↔credit funding. Until one is set, nobody
+            can fund a credit balance.
           </p>
         </div>
         {current && (
@@ -285,14 +285,14 @@ function FxCard() {
 
       {current ? (
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Stat label="Mid" value={`₦${current.mid.toFixed(2)}`} />
+          <Stat label="Mid" value={`${CREDIT}${current.mid.toFixed(2)}`} />
           <Stat
-            label="Users buy naira at"
-            value={`₦${current.usdToNgn.toFixed(2)}`}
+            label="Users buy credit at"
+            value={`${CREDIT}${current.usdToNgn.toFixed(2)}`}
           />
           <Stat
-            label="Users sell naira at"
-            value={`₦${current.ngnToUsd.toFixed(2)}`}
+            label="Users sell credit at"
+            value={`${CREDIT}${current.ngnToUsd.toFixed(2)}`}
           />
         </div>
       ) : (
@@ -307,7 +307,7 @@ function FxCard() {
           New mid rate
         </label>
         <div className="flex h-10 items-center gap-1 rounded-md border border-border bg-page px-3">
-          <span className="text-sm font-semibold text-tertiary">₦</span>
+          <span className="text-sm font-semibold text-tertiary">{CREDIT}</span>
           <input
             id="fx-rate"
             inputMode="decimal"

@@ -1,22 +1,36 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { formatNaira } from "@/lib/format";
 import { useLocalPortfolio, type LocalPosition } from "@/lib/local-trades";
+
+const TABS = ["Open", "Settled"] as const;
+type Tab = (typeof TABS)[number];
 
 /**
  * Local (naira) book inside the portfolio: every position taken against
  * Worldstreet on a Bayse market. Positions are held to settlement, so
  * there is no live mark here — an open row shows what it cost and what
  * it pays if it wins, and a settled row shows what actually landed.
+ * Open and settled are separate tabs — the settled list only grows, and
+ * it shouldn't push what's still live off the screen.
  */
 export function LocalPositions() {
   const { positions, loading, error } = useLocalPortfolio(true);
+  const [tab, setTab] = useState<Tab>("Open");
 
   const open = positions.filter((p) => p.status === "open");
   const settled = positions.filter((p) => p.status !== "open");
   const stakedKobo = open.reduce((s, p) => s + p.stakeKobo, 0);
   const potentialKobo = open.reduce((s, p) => s + p.potentialPayoutKobo, 0);
+
+  // someone whose bets have all resolved lands on an empty Open tab —
+  // show them the book they actually have
+  const active = tab === "Open" && open.length === 0 && settled.length > 0
+    ? "Settled"
+    : tab;
+  const rows = active === "Open" ? open : settled;
 
   return (
     <>
@@ -48,27 +62,43 @@ export function LocalPositions() {
           </Link>
         </div>
       ) : (
-        <>
-          {open.length > 0 && <Section title="Open" rows={open} />}
-          {settled.length > 0 && <Section title="Settled" rows={settled} />}
-        </>
+        <div className="mt-6">
+          <div className="flex gap-1.5">
+            {TABS.map((t) => {
+              const count = t === "Open" ? open.length : settled.length;
+              return (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={`flex h-8 items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold transition-colors ${
+                    active === t
+                      ? "bg-element-3 text-primary"
+                      : "text-secondary hover:bg-element-2 hover:text-primary"
+                  }`}
+                >
+                  {t}
+                  <span className="text-tertiary">{count}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {rows.length === 0 ? (
+            <p className="py-10 text-center text-sm text-secondary">
+              {active === "Open"
+                ? "No open positions."
+                : "Nothing settled yet."}
+            </p>
+          ) : (
+            <ul className="mt-1 flex flex-col">
+              {rows.map((p) => (
+                <PositionRow key={p.id} position={p} />
+              ))}
+            </ul>
+          )}
+        </div>
       )}
     </>
-  );
-}
-
-function Section({ title, rows }: { title: string; rows: LocalPosition[] }) {
-  return (
-    <div className="mt-6">
-      <h2 className="text-[13px] font-semibold uppercase tracking-wide text-tertiary">
-        {title}
-      </h2>
-      <ul className="mt-1 flex flex-col">
-        {rows.map((p) => (
-          <PositionRow key={p.id} position={p} />
-        ))}
-      </ul>
-    </div>
   );
 }
 

@@ -71,7 +71,7 @@ export function TradePanel({ event }: { event: MarketEvent }) {
           Trade Local markets
         </Link>
         <p className="mt-3 text-center text-xs leading-5 text-tertiary">
-          Local markets are naira-denominated and settle against
+          Local markets are credit-denominated and settle against
           Worldstreet.
         </p>
       </div>

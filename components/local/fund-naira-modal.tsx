@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { ArrowRight, CheckCircle2, Loader2, X } from "lucide-react";
 import { ApiError } from "@/lib/api-client";
-import { formatNaira } from "@/lib/format";
+import { CREDIT, formatNaira } from "@/lib/format";
 import {
   convertCurrency,
   newIdempotencyKey,
@@ -106,7 +106,7 @@ function FundDialog({
       });
       setDone(
         toNaira
-          ? `Added ${formatNaira(receives ?? 0)} to your naira balance`
+          ? `Added ${formatNaira(receives ?? 0)} to your credit balance`
           : `Withdrew $${((receives ?? 0) / 100).toFixed(2)} to your dollar wallet`,
       );
       setAmount("");
@@ -136,14 +136,14 @@ function FundDialog({
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="Naira wallet"
+        aria-label="Credit wallet"
         className="w-full max-w-[420px] rounded-xl border border-border bg-surface p-5 shadow-popover"
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-lg font-semibold">Naira wallet</h2>
+            <h2 className="text-lg font-semibold">Credit wallet</h2>
             <p className="mt-0.5 text-sm text-secondary">
-              Local markets settle in naira. Move funds from your
+              Local markets settle in credit. Move funds from your
               WorldStreet dollar balance.
             </p>
           </div>
@@ -163,7 +163,7 @@ function FundDialog({
             value={usdBalance === null ? "—" : `$${usdBalance.toFixed(2)}`}
           />
           <Balance
-            label="Naira balance"
+            label="Credit balance"
             value={balanceKobo === null ? "—" : formatNaira(balanceKobo)}
           />
         </div>
@@ -172,7 +172,7 @@ function FundDialog({
         <div className="mt-4 flex gap-6 border-b border-border">
           {(
             [
-              ["usd_to_ngn", "Add naira"],
+              ["usd_to_ngn", "Add credit"],
               ["ngn_to_usd", "Withdraw"],
             ] as const
           ).map(([value, label]) => (
@@ -197,11 +197,11 @@ function FundDialog({
                 htmlFor="convert-amount"
                 className="text-base font-semibold"
               >
-                {toNaira ? "Dollars" : "Naira"}
+                {toNaira ? "Dollars" : "Credit"}
               </label>
               <div className="flex items-center gap-1">
                 <span className="text-2xl font-semibold text-tertiary">
-                  {toNaira ? "$" : "₦"}
+                  {toNaira ? "$" : CREDIT}
                 </span>
                 <input
                   id="convert-amount"
@@ -252,7 +252,7 @@ function FundDialog({
               </span>
             </div>
             <p className="mt-2 text-center text-xs text-tertiary">
-              ₦
+              {CREDIT}
               {(toNaira ? fx.usdToNgn : fx.ngnToUsd).toLocaleString("en-US", {
                 maximumFractionDigits: 2,
               })}{" "}
@@ -268,9 +268,9 @@ function FundDialog({
               {overBalance
                 ? toNaira
                   ? "Not enough dollars"
-                  : "Not enough naira"
+                  : "Not enough credit"
                 : toNaira
-                  ? "Convert to naira"
+                  ? "Convert to credit"
                   : "Withdraw to dollars"}
             </button>
           </>
@@ -280,7 +280,7 @@ function FundDialog({
           // stays missing until an admin sets it.
           <p className="mt-5 text-center text-sm leading-6 text-secondary">
             {walletError ??
-              "Naira conversion isn’t switched on yet — the exchange rate hasn’t been set. An admin sets it on the Local book desk."}
+              "Credit conversion isn’t switched on yet — the exchange rate hasn’t been set. An admin sets it on the Local book desk."}
           </p>
         )}
 
