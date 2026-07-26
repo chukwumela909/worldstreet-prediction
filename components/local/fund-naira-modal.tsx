@@ -262,7 +262,7 @@ function FundDialog({
             <button
               disabled={amountMinor <= 0 || pending || overBalance}
               onClick={() => void submit()}
-              className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+              className="mt-4 flex h-11 w-full items-center justify-center gap-2 rounded-md bg-accent text-base font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
             >
               {pending && <Loader2 className="size-4 animate-spin" />}
               {overBalance

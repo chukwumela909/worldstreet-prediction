@@ -15,43 +15,57 @@
 
 /* ---------- Layer 1: primitives — dark (default) ---------- */
 :root {
-  /* neutral: 0 = page-dark ... 950 = text-bright */
-  --neutral-0: #15191d;
-  --neutral-50: #1e2428;
-  --neutral-100: #242b32;
-  --neutral-200: #2e3841;
-  --neutral-300: #586879;
-  --neutral-400: #697d91;
-  --neutral-500: #7b8996;
-  --neutral-600: #97a5b4;
-  --neutral-700: #afbac5;
-  --neutral-800: #bbc4cd;
-  --neutral-900: #d2d8df;
-  --neutral-950: #dee3e7;
+  /* neutral: 0 = page-dark ... 950 = text-bright
 
-  /* brand — bright blue (Trade button, links, active states) */
-  --brand-50: #132533;
-  --brand-100: #112f45;
-  --brand-200: #103957;
-  --brand-300: #0e446b;
-  --brand-400: #0b568d;
-  --brand-500: #0093fd;
-  --brand-600: #26a3fd;
-  --brand-700: #59b9fe;
-  --brand-800: #8ccefe;
-  --brand-900: #b8e1fe;
+     Worldstreet warm greys. Each rung is the Polymarket original re-tinted
+     at MATCHED relative luminance — only the hue moved, so every contrast
+     ratio the recon measured survives the rebrand untouched (secondary
+     still 6.24:1, tertiary still 4.38:1 on surface). Warmth is strongest
+     at the dark end and fades toward the text rungs, where a warm tint
+     reads as yellowed rather than branded. */
+  --neutral-0: #1a1816;
+  --neutral-50: #25231f;
+  --neutral-100: #2c2a26;
+  --neutral-200: #393732;
+  --neutral-300: #696660;
+  --neutral-400: #7e7a74;
+  --neutral-500: #8a8781;
+  --neutral-600: #a6a39e;
+  --neutral-700: #bbb8b3;
+  --neutral-800: #c5c3be;
+  --neutral-900: #dad7d2;
+  --neutral-950: #e5e2de;
 
-  /* blue — secondary blue (Sign Up button, info badges) */
-  --blue-50: #1c2f4b;
-  --blue-100: #1a366c;
-  --blue-200: #193d8d;
-  --blue-300: #1744ae;
-  --blue-400: #164bcf;
-  --blue-500: #1452f0;
-  --blue-600: #4475f3;
-  --blue-700: #7398f6;
-  --blue-800: #a3bcf9;
-  --blue-900: #d3dffc;
+  /* brand — Worldstreet gold (Trade button, links, active states).
+     500 is the brand value #fecc2f; 600 brightens for hover, matching the
+     dark theme's lighten-on-hover direction. 50–400 are gold-tinted darks
+     for washes. Gold is far too light to carry white text — solid gold
+     surfaces take --text-on-accent, see the semantic layer. */
+  --brand-50: #251d0f;
+  --brand-100: #2f2511;
+  --brand-200: #3b2e12;
+  --brand-300: #4a3914;
+  --brand-400: #7a5c15;
+  --brand-500: #fecc2f;
+  --brand-600: #ffd75c;
+  --brand-700: #ffe289;
+  --brand-800: #ffedb5;
+  --brand-900: #fff6dd;
+
+  /* bronze — secondary CTA (Sign Up button, hero game pills, info badges).
+     Occupies the old --blue-* slot: deep enough that white still clears AA
+     on 400/500, so it reads as the quieter sibling of the bright gold
+     primary instead of a second competing accent. */
+  --blue-50: #241a0c;
+  --blue-100: #3a2a0f;
+  --blue-200: #4a360f;
+  --blue-300: #6b4a11;
+  --blue-400: #8a5c14;
+  --blue-500: #9c6a17;
+  --blue-600: #bd8a2e;
+  --blue-700: #e0b970;
+  --blue-800: #ecd3a3;
+  --blue-900: #f7ecd5;
 
   /* green — Yes */
   --green-50: #1d3539;
@@ -113,18 +127,24 @@
   --alpha-black-800: #000000a6;
   --alpha-black-900: #000000e0;
 
-  /* chart series (multi-outcome lines, sampled from legend) */
-  --chart-1: #4378ff;
-  --chart-2: #87bfff;
-  --chart-3: #fdc503;
+  /* chart series (multi-outcome lines, sampled from legend).
+     1 leads in gold — it strokes the single price line on every binary
+     event page, the most-looked-at colour on the site after the accent.
+     2 and 3 are picked for hue distance from gold rather than family
+     resemblance: series are told apart by hue, and the old blue/yellow
+     pair put chart-3 (#fdc503) within a hair of the new brand value. */
+  --chart-1: #fecc2f;
+  --chart-2: #3fa896;
+  --chart-3: #c9a8ff;
   --chart-4: #ff5952; /* hero series red (measured: hero chart stroke #FF5952) */
 
-  /* hero + promo-rail primitives (measured on homepage) */
-  --neutral-25: #181d21; /* featured hero card bg */
-  --ink-0: #0a0b10; /* promo card gradient bottom */
-  --ink-50: #17181c; /* promo gradient top + CTA pill */
-  --ink-100: #202227; /* promo card border */
-  --ink-text: #ecedee;
+  /* hero + promo-rail primitives (measured on homepage, re-tinted warm to
+     sit on the new neutrals — these are background inks, not brand) */
+  --neutral-25: #1e1c19; /* featured hero card bg */
+  --ink-0: #0d0c09; /* promo card gradient bottom */
+  --ink-50: #1a1815; /* promo gradient top + CTA pill */
+  --ink-100: #262420; /* promo card border */
+  --ink-text: #edeae6;
   --purple-100: #230b37; /* combo CTA bg */
   --purple-200: #30104c; /* combo card wash */
   --purple-800: #b884e6; /* combo CTA text */
@@ -152,6 +172,13 @@
 
   --accent: var(--brand-500);
   --accent-hover: var(--brand-600);
+  /* Text/icons on a SOLID accent fill. Polymarket's accent was a mid blue,
+     so components hard-coded `text-white` on it and the pairing was never
+     given a token — which quietly made "rebrand = repoint primitives"
+     untrue for any accent lighter than mid. Worldstreet gold is one:
+     white on #fecc2f is 1.51:1. This ink lands at 12.11:1 on the rest
+     state and 13.18:1 on hover. */
+  --text-on-accent: #1a1408;
 
   /* Buy-button state model (see recon §7):
      rest = {yes|no} text on 15% tint · selected = white on {yes|no}-solid */
@@ -184,9 +211,46 @@
   --neutral-900: #1a1c1f;
   --neutral-950: #0e0f11;
 
+  /* Light has NOT been rebranded — it stays on the measured Polymarket
+     palette until it gets its own pass. Because it is an override block
+     over a now-gold :root, every primitive it used to inherit has to be
+     pinned back explicitly, or light would pick up dark's gold ladders
+     piecemeal (a bronze Sign Up that hovers to blue, a gold chart line
+     on a white page). Pinning is what keeps "dark only" actually true. */
   --brand-500: #1452f0; /* light-mode brand is the classic Polymarket blue */
   --brand-600: #1043c9; /* approx darker hover */
+  --brand-50: #132533;
+  --brand-100: #112f45;
+  --brand-200: #103957;
+  --brand-300: #0e446b;
+  --brand-400: #0b568d;
+  --brand-700: #59b9fe;
+  --brand-800: #8ccefe;
+  --brand-900: #b8e1fe;
+
+  /* accent stays a mid blue here, so its solid fill still takes white */
+  --text-on-accent: #ffffff;
+
+  --blue-50: #1c2f4b;
+  --blue-100: #1a366c;
+  --blue-200: #193d8d;
+  --blue-300: #1744ae;
+  --blue-400: #164bcf;
   --blue-500: #1652f0;
+  --blue-600: #4475f3;
+  --blue-700: #7398f6;
+  --blue-800: #a3bcf9;
+  --blue-900: #d3dffc;
+
+  --chart-1: #4378ff;
+  --chart-2: #87bfff;
+  --chart-3: #fdc503;
+  --chart-4: #ff5952;
+
+  --ink-0: #0a0b10;
+  --ink-50: #17181c;
+  --ink-100: #202227;
+  --ink-text: #ecedee;
   --green-500: #42c772;
   --green-400: #30a159; /* measured as green-600; used as solid in light */
   --red-500: #e23939;
@@ -231,6 +295,7 @@
 
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-on-accent: var(--text-on-accent);
 
   --color-yes: var(--yes);
   --color-yes-solid: var(--yes-solid);

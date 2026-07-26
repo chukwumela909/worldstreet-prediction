@@ -9,6 +9,11 @@ const NEUTRALS = [
 ] as const;
 
 const LADDERS = ["brand", "blue", "green", "red", "yellow"] as const;
+
+/* The --blue-* slot carries Worldstreet's bronze secondary CTA. The token
+   name stays `blue` so components (and the Tailwind mapping) don't move for
+   a rebrand — but this sheet is the reference, so it shows what's in there. */
+const LADDER_LABELS: Record<string, string> = { blue: "bronze" };
 const STEPS = ["50", "100", "200", "300", "400", "500", "600", "700", "800", "900"] as const;
 
 // Tailwind needs literal class names — no runtime interpolation.
@@ -52,7 +57,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 function Ladder({ name, steps }: { name: string; steps: readonly string[] }) {
   return (
     <div className="flex items-center gap-2">
-      <span className="w-16 text-xs text-secondary">{name}</span>
+      <span className="w-16 text-xs text-secondary">
+        {LADDER_LABELS[name] ?? name}
+      </span>
       <div className="flex overflow-hidden rounded-md border border-border">
         {LADDER_CLASSES[name].map((cls, i) => (
           <div key={cls} className={`flex h-10 w-12 items-end justify-center pb-1 ${cls}`}>
@@ -125,7 +132,7 @@ export default function TokensPage() {
           <button className="h-10 rounded-sm bg-no-solid px-4 text-sm font-semibold text-white">
             Buy No 41.9¢
           </button>
-          <button className="h-10 rounded-md bg-accent px-8 text-sm font-semibold text-white hover:bg-accent-hover">
+          <button className="h-10 rounded-md bg-accent px-8 text-sm font-semibold text-on-accent hover:bg-accent-hover">
             Trade
           </button>
         </div>

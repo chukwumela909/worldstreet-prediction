@@ -14,7 +14,7 @@ export default function Error({ reset }: { error: Error; reset: () => void }) {
       </p>
       <button
         onClick={reset}
-        className="mt-2 h-10 rounded-md bg-accent px-5 text-sm font-semibold text-white transition-colors hover:bg-accent-hover"
+        className="mt-2 h-10 rounded-md bg-accent px-5 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover"
       >
         Try again
       </button>

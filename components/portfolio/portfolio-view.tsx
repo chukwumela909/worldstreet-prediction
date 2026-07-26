@@ -48,7 +48,7 @@ export function PortfolioView() {
         </p>
         <button
           onClick={openAuth}
-          className="mt-5 h-11 w-full rounded-md bg-accent text-base font-semibold text-white transition-colors hover:bg-accent-hover"
+          className="mt-5 h-11 w-full rounded-md bg-accent text-base font-semibold text-on-accent transition-colors hover:bg-accent-hover"
         >
           Log In
         </button>
