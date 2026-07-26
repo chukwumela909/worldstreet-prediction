@@ -20,8 +20,9 @@ import type { MarketEvent } from "@/types/market";
  * extras that simply don't render if their fetch fails.
  *
  * `?category=` scopes the grid to its own live query (per-tag, or
- * newest-first for Breaking) — see lib/categories.ts. The hero always
- * shows the global trending feed.
+ * newest-first for Breaking) — see lib/categories.ts. A bare `/` is the
+ * Local book (DEFAULT_CATEGORY), the only tab anyone can trade on. The
+ * hero always shows the global trending feed regardless of tab.
  */
 
 async function loadHotTopics(): Promise<HotTopic[]> {
@@ -69,36 +70,42 @@ export default async function Home({ searchParams }: Props) {
     <>
       <SiteHeader activeCategory={tab.param} />
       <main className="mx-auto w-full max-w-[1280px] px-6 pb-16">
-        {trending === null || trending.length === 0 ? (
+        {/* Hero + rail are the global Polymarket feed. They used to gate the
+            whole page, which was the same thing as gating the grid back when
+            "/" was Trending. It isn't any more: the front door is the Local
+            book, and a Gamma outage must not take the one tradeable market
+            down with it. Optional chrome now — absent, not fatal. */}
+        {trending !== null && trending.length > 0 && (
+          <div className="flex gap-8 pt-1.5">
+            <FeaturedHero events={trending} game={game} />
+            <PromoRail topics={topics} />
+          </div>
+        )}
+
+        {/* market grid, scoped to the active category tab */}
+        {grid === null ? (
           <div className="flex min-h-[400px] flex-col items-center justify-center gap-2 text-center">
             <p className="text-lg font-semibold">Live market data is unavailable</p>
             <p className="max-w-md text-sm text-secondary">
-              We couldn&apos;t reach Polymarket&apos;s public API. Refresh in a
-              moment — nothing is shown here unless it&apos;s real market data.
+              We couldn&apos;t reach{" "}
+              {tab.source === "bayse"
+                ? "the Local market feed"
+                : "Polymarket’s public API"}
+              . Refresh in a moment — nothing is shown here unless it&apos;s
+              real market data.
             </p>
           </div>
+        ) : grid.length === 0 ? (
+          <p className="py-16 text-center text-sm text-secondary">
+            No live {tab.label} markets right now.
+          </p>
         ) : (
-          <>
-            {/* hero + promo rail */}
-            <div className="flex gap-8 pt-1.5">
-              <FeaturedHero events={trending} game={game} />
-              <PromoRail topics={topics} />
-            </div>
-
-            {/* market grid, scoped to the active category tab */}
-            {grid === null || grid.length === 0 ? (
-              <p className="py-16 text-center text-sm text-secondary">
-                No live {tab.label} markets right now.
-              </p>
-            ) : (
-              <MarketBrowser
-                // key resets the chip/search state when the tab changes
-                key={tab.param}
-                events={grid}
-                heading={scoped ? `${tab.label} markets` : "All markets"}
-              />
-            )}
-          </>
+          <MarketBrowser
+            // key resets the chip/search state when the tab changes
+            key={tab.param}
+            events={grid}
+            heading={scoped ? `${tab.label} markets` : "All markets"}
+          />
         )}
       </main>
     </>

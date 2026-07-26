@@ -39,9 +39,20 @@ export const CATEGORY_TABS: CategoryTab[] = [
   { param: "weather", label: "Weather", tagSlug: "weather" },
 ];
 
-const DEFAULT_TAB = CATEGORY_TABS[0];
+/**
+ * The tab a bare `/` lands on. Local is the only book anyone can actually
+ * trade — every other tab mirrors Polymarket for display — so it is what
+ * the front door should open onto.
+ *
+ * Named rather than positional (it used to be CATEGORY_TABS[0]) so that
+ * reordering the strip can't silently move the landing page.
+ */
+export const DEFAULT_CATEGORY = "local";
 
-/** Resolve a `?category=` value; unknown/absent → Trending. */
+const DEFAULT_TAB =
+  CATEGORY_TABS.find((t) => t.param === DEFAULT_CATEGORY) ?? CATEGORY_TABS[0];
+
+/** Resolve a `?category=` value; unknown/absent → the default tab. */
 export function categoryTab(param: string | undefined): CategoryTab {
   return CATEGORY_TABS.find((t) => t.param === param) ?? DEFAULT_TAB;
 }

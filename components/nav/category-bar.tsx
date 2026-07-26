@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { TrendingUp, Zap } from "lucide-react";
-import { CATEGORY_TABS } from "@/lib/categories";
+import { CATEGORY_TABS, DEFAULT_CATEGORY } from "@/lib/categories";
 import { ScrollStrip } from "@/components/scroll-strip";
 
 /**
@@ -9,7 +9,7 @@ import { ScrollStrip } from "@/components/scroll-strip";
  * page scoped to its own live Gamma query (`/?category=...`).
  * Inactive pills text-secondary, active text-primary; 14px semibold.
  */
-export function CategoryBar({ active = "trending" }: { active?: string }) {
+export function CategoryBar({ active = DEFAULT_CATEGORY }: { active?: string }) {
   const [trending, worldCup, breaking, ...rest] = CATEGORY_TABS;
 
   const pill = (isActive: boolean, extra = "") =>
@@ -17,8 +17,11 @@ export function CategoryBar({ active = "trending" }: { active?: string }) {
       extra || (isActive ? "text-primary" : "text-secondary hover:text-primary")
     }`;
 
+  // the default tab IS the bare "/", so it must not also be reachable at
+  // ?category=<default> — that would be two URLs for the landing page,
+  // and the pill would fail its own active check on one of them
   const href = (param: string) =>
-    param === "trending" ? "/" : `/?category=${param}`;
+    param === DEFAULT_CATEGORY ? "/" : `/?category=${param}`;
 
   return (
     <nav className="mx-auto flex h-14 w-full max-w-[1280px] items-center px-6">
