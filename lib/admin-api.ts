@@ -110,6 +110,30 @@ export async function sendTestAlert(): Promise<AlertTestResult> {
   return res.data;
 }
 
+/**
+ * What the whole open book could cost the house. `worstCaseKobo`
+ * assumes every open market resolves against us at once, net of the
+ * stakes already collected — negative is a loss.
+ */
+export interface BookRisk {
+  openPositions: number;
+  openMarkets: number;
+  openStakeKobo: number;
+  worstCaseKobo: number;
+  worstMarket: {
+    marketId: string;
+    marketTitle: string;
+    eventTitle: string;
+    eventSlug: string;
+    lossKobo: number;
+  } | null;
+}
+
+export async function fetchBookRisk(): Promise<BookRisk> {
+  const res = await apiFetch<{ data: BookRisk }>("/v1/admin/risk");
+  return res.data;
+}
+
 export async function fetchSettlements(): Promise<SettlementRecord[]> {
   const res = await apiFetch<{ data: { settlements: SettlementRecord[] } }>(
     "/v1/admin/settlements",
@@ -168,12 +192,31 @@ export interface WsOutcome {
   priceKobo: number;
 }
 
+/**
+ * One side of an open market. `profitIfWinsKobo` is the number that
+ * decides whether a price should move: everything staked across the
+ * market, less what this side would pay out. Negative means the house
+ * is short it.
+ */
+export interface OutcomeRisk {
+  outcomeId: string;
+  outcomeLabel: string;
+  positions: number;
+  stakeKobo: number;
+  payoutKobo: number;
+  profitIfWinsKobo: number;
+}
+
 export interface WsMarketExposure {
   openPositions: number;
   openStakeKobo: number;
   maxPayoutKobo: number;
   /** Settled ones included — any at all blocks deletion. */
   totalPositions: number;
+  /** Empty until someone has traded it. Worst side first. */
+  outcomes: OutcomeRisk[];
+  worstCaseKobo: number;
+  worstOutcomeId: string | null;
 }
 
 export interface WsMarket {

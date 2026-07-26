@@ -12,8 +12,9 @@ import {
   X,
 } from "lucide-react";
 import { CATEGORIES } from "@/types/market";
-import { CREDIT, formatNaira } from "@/lib/format";
+import { CREDIT, formatNaira, formatNairaSigned } from "@/lib/format";
 import { isApiConfigured } from "@/lib/api-client";
+import { BookRiskStrip } from "@/components/admin/book-risk";
 import { PAYOUT_PER_SHARE_KOBO } from "@/lib/local-trades";
 import {
   addWsMarket,
@@ -105,6 +106,8 @@ export function MarketsDesk() {
           </button>
         </div>
       </div>
+
+      <BookRiskStrip />
 
       {creating && (
         <CreateForm
@@ -526,9 +529,11 @@ function MarketRow({
           {market.exposure.openPositions > 0 &&
             ` · ${market.exposure.openPositions} open · ${formatNaira(
               market.exposure.openStakeKobo,
-            )} staked · pays up to ${formatNaira(market.exposure.maxPayoutKobo)}`}
+            )} staked`}
         </span>
       </div>
+
+      <SideBook market={market} />
 
       {settled ? (
         <p className="mt-2 text-[13px] font-medium text-tertiary">
@@ -596,6 +601,84 @@ function MarketRow({
       )}
 
       {error && <p className="mt-2 text-[13px] font-semibold text-no">{error}</p>}
+    </div>
+  );
+}
+
+/**
+ * Where the money actually is on one market.
+ *
+ * A market total says nothing on its own: ₦58,000 staked is a 5%
+ * earner if it's split across both sides and a ₦42,000 bet if it isn't.
+ * So this is per side, and the column that matters is the last one —
+ * everything collected on the market, less what that side would pay
+ * out. Red there means the house is short it, and the answer is to make
+ * that side dearer and the other cheaper until the two pay for each
+ * other.
+ */
+function SideBook({ market }: { market: WsMarket }) {
+  const { openPositions, openStakeKobo, outcomes, worstOutcomeId } = market.exposure;
+  if (openPositions === 0) return null;
+
+  const staked = new Map(outcomes.map((o) => [o.outcomeId, o]));
+
+  return (
+    <div className="mt-3 overflow-x-auto">
+      <table className="w-full min-w-[420px] text-left text-[13px]">
+        <thead>
+          <tr className="text-xs font-semibold text-tertiary">
+            <th className="pb-1 font-semibold">Side</th>
+            <th className="pb-1 text-right font-semibold">Staked on it</th>
+            <th className="pb-1 text-right font-semibold">You&rsquo;d pay out</th>
+            <th className="pb-1 text-right font-semibold">You&rsquo;d end up</th>
+          </tr>
+        </thead>
+        <tbody>
+          {market.outcomes.map((outcome) => {
+            // a side nobody has backed pays nothing, so the house keeps
+            // the lot if it lands
+            const side = staked.get(outcome.id);
+            const payoutKobo = side?.payoutKobo ?? 0;
+            const resultKobo = openStakeKobo - payoutKobo;
+            const short = resultKobo < 0;
+            return (
+              <tr
+                key={outcome.id}
+                className={`border-t border-border ${
+                  outcome.id === worstOutcomeId ? "font-semibold" : ""
+                }`}
+              >
+                <td className="py-1.5">
+                  {outcome.label}{" "}
+                  <span className="font-medium text-tertiary">
+                    at {formatNaira(outcome.priceKobo)}
+                  </span>
+                </td>
+                <td className="py-1.5 text-right">
+                  {side ? (
+                    <>
+                      {formatNaira(side.stakeKobo)}{" "}
+                      <span className="font-medium text-tertiary">
+                        ({side.positions})
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-tertiary">—</span>
+                  )}
+                </td>
+                <td className="py-1.5 text-right">{formatNaira(payoutKobo)}</td>
+                <td
+                  className={`py-1.5 text-right font-semibold ${
+                    short ? "text-no" : "text-yes"
+                  }`}
+                >
+                  {formatNairaSigned(resultKobo)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

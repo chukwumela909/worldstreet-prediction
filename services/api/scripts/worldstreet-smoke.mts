@@ -7,7 +7,8 @@
  * Covers what the route layer can't be trusted to get right on its own:
  * the pricing guard (a book that pays anyone who buys both sides), slug
  * uniqueness, the origin dispatcher that lets one trade path serve two
- * kinds of market, and the close-out that follows a settlement.
+ * kinds of market, the per-side risk arithmetic the desk prices off,
+ * and the close-out that follows a settlement.
  */
 process.env.NODE_ENV = "test";
 process.env.MONGODB_URI = "mongodb://placeholder";
@@ -30,6 +31,7 @@ const {
 const ws = await import("../src/trading/worldstreet.js");
 const events = await import("../src/trading/events.js");
 const settlement = await import("../src/trading/settlement.js");
+const risk = await import("../src/trading/risk.js");
 
 await ensureTradingIndexes();
 
@@ -174,7 +176,7 @@ check("an unresolved market has no winner", tradable.markets[0]?.resolvedOutcome
 const batch = await events.fetchTradableEvents([event.eventId, "not-an-event-of-ours"]);
 check("a batch keeps ours and drops what it can't reach", batch.size === 1);
 
-/* ---------------- settlement + close-out ---------------- */
+/* ---------------- the open book ---------------- */
 
 const yesId = market.outcomes[0]!.outcomeId;
 const noId = market.outcomes[1]!.outcomeId;
@@ -210,7 +212,66 @@ await Position.create({
   idempotencyKey: "user_b:ws-1",
 });
 
-// the house wrote a 105% book: ₦105,000 in, ₦100,000 out
+/* ---------------- risk, before anything settles ---------------- */
+
+// balanced: ₦105,000 collected against ₦100,000 owed either way, so the
+// house keeps ₦5,000 whichever side lands — the margin, actually earned
+const balanced = await risk.openRiskByMarket();
+check("the open market is measured", balanced.length === 1);
+check("both sides are broken out", balanced[0]?.outcomes.length === 2);
+check("all stakes are counted", balanced[0]?.stakeKobo === 105_000);
+check(
+  "a balanced book wins either way",
+  balanced[0]?.outcomes.every((o) => o.profitIfWinsKobo === 5_000) === true,
+);
+check("nothing is short", (balanced[0]?.worstCaseKobo ?? -1) === 5_000);
+
+const balancedBook = await risk.getBookRisk();
+check("the book holds what was staked", balancedBook.openStakeKobo === 105_000);
+check("the book's floor is a profit", balancedBook.worstCaseKobo === 5_000);
+check("nothing is flagged as a risk", balancedBook.worstMarket === null);
+
+// now tip it: four more Yes stakes and no No money against them
+for (let i = 0; i < 4; i += 1) {
+  await Position.create({
+    authUserId: `user_pile_${i}`,
+    eventId: event.eventId,
+    marketId: market.marketId,
+    outcomeId: yesId,
+    outcomeLabel: "Yes",
+    eventSlug: event.slug,
+    eventTitle: event.title,
+    marketTitle: market.title,
+    stakeKobo: 55_000,
+    priceKobo: 5_500,
+    shares: 10,
+    potentialPayoutKobo: 100_000,
+    idempotencyKey: `user_pile_${i}:ws-1`,
+  });
+}
+
+// ₦325,000 in; Yes landing owes ₦500,000
+const lopsided = (await risk.openRiskByMarket())[0]!;
+const yesSide = lopsided.outcomes.find((o) => o.outcomeId === yesId)!;
+const noSide = lopsided.outcomes.find((o) => o.outcomeId === noId)!;
+check("the heavy side is priced out", yesSide.profitIfWinsKobo === -175_000);
+check("the light side is all upside", noSide.profitIfWinsKobo === 225_000);
+check("the worst side is the heavy one", lopsided.worstOutcomeId === yesId);
+check(
+  "the sides are ordered worst-first",
+  lopsided.outcomes[0]?.outcomeId === yesId,
+);
+
+const tippedBook = await risk.getBookRisk();
+check("the book reports the loss", tippedBook.worstCaseKobo === -175_000);
+check(
+  "and names the market carrying it",
+  tippedBook.worstMarket?.marketId === market.marketId,
+);
+check("open positions are counted", tippedBook.openPositions === 6);
+
+/* ---------------- settlement + close-out ---------------- */
+
 const result = await settlement.adminSettleMarket({
   eventId: event.eventId,
   marketId: market.marketId,
@@ -218,8 +279,9 @@ const result = await settlement.adminSettleMarket({
   actor: "admin_1",
   log,
 });
-check("both positions settle", result.positionsSettled === 2);
-check("only the winner is paid", result.payoutTotalKobo === 100_000);
+check("every open position settles", result.positionsSettled === 6);
+// the five Yes holders are paid ₦1,000 each, the one No holder nothing
+check("only the winning side is paid", result.payoutTotalKobo === 500_000);
 
 const closed = await WorldstreetMarket.findOne({ marketId: market.marketId });
 check("the market records its winner", closed?.resolvedOutcomeId === yesId);

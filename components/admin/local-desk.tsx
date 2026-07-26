@@ -27,6 +27,7 @@ import {
   type QueueMarket,
 } from "@/lib/admin-api";
 import { useNairaWallet } from "@/lib/naira-wallet";
+import { BookRiskStrip } from "@/components/admin/book-risk";
 
 /**
  * The Local (naira) book's operating desk. Two jobs:
@@ -96,6 +97,8 @@ export function LocalDesk() {
           </button>
         </div>
       </div>
+
+      <BookRiskStrip />
 
       <FxCard />
 

@@ -236,6 +236,28 @@ Worldstreet market has to be settled by hand** from the Local book desk at
 `/admin`. Set a resolution date when you create one — that's what puts it in
 front of someone via the overdue alert.
 
+### Watching the book
+
+An overround only earns anything if the money lands on both sides of it. A
+market priced at 105% with every stake on one side isn't making 5% — it's a
+bet, at odds the house wrote itself. Both admin desks lead with the same strip
+answering which of the two the book currently is:
+
+- **Money held** — stakes taken on positions that haven't resolved
+- **Worst case** — every open market resolving against us at once, net of
+  those stakes. Green means the book is balanced and the number is ours
+  whatever happens; red is a real potential loss
+- **Biggest single risk** — the one market carrying the most downside
+
+Each market on `/admin/markets` then breaks that down per side: what's staked
+on it, what it would pay out, and what the house ends up with if it wins. A red
+figure there means the house is short that outcome, and the fix is to make it
+dearer and the other side cheaper until new money comes in on the light side.
+
+It covers Bayse positions too — the house pays those out as well — and is
+served by `GET /v1/admin/risk`, computed from open positions alone (no Relay
+call). The arithmetic is asserted in `npm run smoke:worldstreet`.
+
 ## 6. Deploying the web app (separate resource)
 
 The Next.js app is a second Coolify resource from the same repo with Base

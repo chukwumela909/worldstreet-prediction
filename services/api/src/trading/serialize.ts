@@ -3,6 +3,7 @@ import type {
   IWorldstreetEvent,
   IWorldstreetMarket,
 } from "./models.js";
+import { riskByMarketId, type OutcomeRisk } from "./risk.js";
 import { bookMarginBps } from "./worldstreet.js";
 
 /**
@@ -127,7 +128,26 @@ export interface MarketExposure {
   maxPayoutKobo: number;
   /** Any position at all, settled included — what blocks deletion. */
   totalPositions: number;
+  /**
+   * The open book by side — what's on each outcome and what the house
+   * makes or loses if it wins. Empty until someone has traded it. See
+   * trading/risk.ts for why the per-side view is the one that matters.
+   */
+  outcomes: OutcomeRisk[];
+  /** The side that hurts most, netted against everything collected. */
+  worstCaseKobo: number;
+  worstOutcomeId: string | null;
 }
+
+const NO_EXPOSURE: MarketExposure = {
+  openPositions: 0,
+  openStakeKobo: 0,
+  maxPayoutKobo: 0,
+  totalPositions: 0,
+  outcomes: [],
+  worstCaseKobo: 0,
+  worstOutcomeId: null,
+};
 
 export interface AdminMarket extends PublicMarket {
   /** House edge in the two prices, basis points over ₦100. */
@@ -159,23 +179,24 @@ export function serializeAdminEvent(
       ...serializeMarket(m),
       marginBps: bookMarginBps(m.outcomes.map((o) => o.priceKobo)),
       resolvedOutcomeId: m.resolvedOutcomeId ?? null,
-      exposure: exposure.get(m.marketId) ?? {
-        openPositions: 0,
-        openStakeKobo: 0,
-        maxPayoutKobo: 0,
-        totalPositions: 0,
-      },
+      exposure: exposure.get(m.marketId) ?? NO_EXPOSURE,
     })),
   };
 }
 
-/** Open exposure and lifetime position counts per market. */
+/**
+ * Open exposure and lifetime position counts per market, with the
+ * per-side breakdown folded in. Two reads: the counts (which have to
+ * include settled positions, since those are what block a delete) and
+ * the live risk (which is only about open ones).
+ */
 export async function exposureByMarket(
   marketIds: string[],
 ): Promise<Map<string, MarketExposure>> {
   const out = new Map<string, MarketExposure>();
   if (marketIds.length === 0) return out;
 
+  const risk = await riskByMarketId();
   const rows = await Position.aggregate<{
     _id: string;
     totalPositions: number;
@@ -203,11 +224,15 @@ export async function exposureByMarket(
     },
   ]);
   for (const row of rows) {
+    const sides = risk.get(row._id);
     out.set(row._id, {
       totalPositions: row.totalPositions,
       openPositions: row.openPositions,
       openStakeKobo: row.openStakeKobo,
       maxPayoutKobo: row.maxPayoutKobo,
+      outcomes: sides?.outcomes ?? [],
+      worstCaseKobo: sides?.worstCaseKobo ?? 0,
+      worstOutcomeId: sides?.worstOutcomeId ?? null,
     });
   }
   return out;

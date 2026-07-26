@@ -11,6 +11,7 @@ import {
 } from "../trading/settlement.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
 import { getSettlementQueue } from "../trading/exposure.js";
+import { getBookRisk } from "../trading/risk.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 
@@ -100,6 +101,16 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   app.get("/admin/exposure", async (request) => {
     await requireAdmin(request);
     return { success: true, data: await getSettlementQueue() };
+  });
+
+  /**
+   * What the open book could cost the house — see trading/risk.ts. The
+   * margin in a price only pays if the money lands on both sides of it,
+   * and this is the number that says whether it did.
+   */
+  app.get("/admin/risk", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getBookRisk() };
   });
 
   /**

@@ -44,6 +44,17 @@ export function formatNaira(kobo: number): string {
   })}`;
 }
 
+/**
+ * Signed credit amount with the sign outside the mark: "−₩4,200",
+ * "+₩5,800". `formatNaira` on its own puts a hyphen between the two
+ * ("₩-4,200"), which reads as part of the number rather than its sign —
+ * fine nowhere, and worst on the admin desk where the sign IS the point.
+ */
+export function formatNairaSigned(kobo: number): string {
+  if (!Number.isFinite(kobo)) return `${CREDIT}0`;
+  return `${kobo < 0 ? "−" : "+"}${formatNaira(Math.abs(kobo))}`;
+}
+
 function trimZero(n: number): string {
   const fixed = n >= 100 ? n.toFixed(0) : n.toFixed(1);
   return fixed.endsWith(".0") ? fixed.slice(0, -2) : fixed;
