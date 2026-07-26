@@ -16,14 +16,15 @@ export interface CategoryTab {
   /** Gamma sort field; defaults to volume24hr */
   order?: string;
   /** Data source for the tab; absent = Polymarket/Gamma */
-  source?: "bayse";
+  source?: "local";
 }
 
 export const CATEGORY_TABS: CategoryTab[] = [
   { param: "trending", label: "Trending" },
-  // Bayse-fed (African/Nigerian) markets, traded in naira against the
-  // house — see lib/bayse.ts and lib/local-trades.ts
-  { param: "local", label: "Local", source: "bayse" },
+  // The naira book: our own fixed-odds markets plus the Bayse-fed
+  // (African/Nigerian) feed, both traded against the house — see
+  // lib/worldstreet-markets.ts, lib/bayse.ts and lib/local-trades.ts
+  { param: "local", label: "Local", source: "local" },
   { param: "world-cup", label: "World Cup", tagSlug: "world-cup" },
   // newest listings first — where the visible day-to-day churn lives
   { param: "breaking", label: "Breaking", order: "startDate" },

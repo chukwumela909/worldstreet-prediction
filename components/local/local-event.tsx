@@ -12,29 +12,38 @@ import { LocalTradePanel } from "@/components/local/local-trade-panel";
 import { CloseCountdown } from "@/components/local/close-countdown";
 import { showsCountdown, tradingStopsAt } from "@/lib/countdown";
 import { useTickingNow } from "@/lib/use-now";
-import { useLiveBayseEvent } from "@/lib/use-live-bayse";
+import { useLiveLocalEvent } from "@/lib/use-live-local";
 
 /**
- * Detail page body for a Bayse (Local) event: header with naira stats,
- * price chart, outcome rows, and rules, with the naira trade panel on
- * the right. Clicking a buy pill selects that market+side in the panel,
- * same as the Polymarket event page.
+ * Detail page body for a Local event of either origin: header with
+ * naira stats, price chart, outcome rows, and rules, with the naira
+ * trade panel on the right. Clicking a buy pill selects that
+ * market+side in the panel, same as the Polymarket event page.
  *
  * Prices poll from the server-rendered snapshot, so what the panel
  * stakes against stays close to what the API will re-price it at.
+ *
+ * The chart is Bayse-only. Our own markets are fixed odds — the price
+ * is whatever the desk last set, so there is no history to draw and a
+ * flat line would imply a market that traded there.
  */
 export function LocalEvent({ event: initial }: { event: MarketEvent }) {
-  const event = useLiveBayseEvent(initial);
+  const event = useLiveLocalEvent(initial);
 
   return (
     <TradeProvider event={event}>
       <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-16 pt-4 lg:flex-row lg:items-start">
         <div className="min-w-0 flex-1">
           <LocalHeader event={event} />
-          <div className="mt-5">
-            <BaysePriceChart event={event} />
-          </div>
-          {!isBinary(event) && (
+          {event.source === "bayse" && (
+            <div className="mt-5">
+              <BaysePriceChart event={event} />
+            </div>
+          )}
+          {/* With no chart to carry it, a fixed-odds event needs its
+              prices in the body — including a binary one, whose single
+              row would otherwise live only in the side panel. */}
+          {(event.source !== "bayse" || !isBinary(event)) && (
             <div className="mt-5">
               <LocalOutcomeList event={event} />
             </div>
@@ -85,11 +94,20 @@ function LocalHeader({ event }: { event: MarketEvent }) {
               {event.trades.toLocaleString("en-US")} Trades
             </span>
           )}
-          {event.liquidityNgn && (
+          {/* Bayse reports a pool; on our own markets the house is the
+              counterparty, so what there is to report is the stake. */}
+          {event.liquidityNgn ? (
             <span className="flex items-center gap-1">
               <Droplets className="size-3.5" />
               {formatNairaCompact(parseFloat(event.liquidityNgn))}
             </span>
+          ) : (
+            event.stakedNgn !== undefined && (
+              <span className="flex items-center gap-1">
+                <Droplets className="size-3.5" />
+                {formatNairaCompact(parseFloat(event.stakedNgn))} staked
+              </span>
+            )
           )}
           {/* the clock replaces the date once it's the useful one — a
               15-minute market saying "Ends Jul 25" tells nobody anything */}
@@ -117,23 +135,29 @@ function nairaPrice(market: Market, side: 0 | 1): string {
 }
 
 function LocalOutcomeList({ event }: { event: MarketEvent }) {
+  // A binary event's one row would just repeat the h1 above it.
+  const named = !isBinary(event);
   return (
     <div className="divide-y divide-border border-t border-border">
       {event.markets.map((m) => (
-        <LocalOutcomeRow key={m.id} market={m} />
+        <LocalOutcomeRow key={m.id} market={m} named={named} />
       ))}
     </div>
   );
 }
 
-function LocalOutcomeRow({ market }: { market: Market }) {
+function LocalOutcomeRow({ market, named }: { market: Market; named: boolean }) {
   const { marketId, side, select } = useTradeSelection();
   const pct = toPercent(market.outcomePrices[0]);
   const name = market.groupItemTitle ?? market.question;
   const labels = market.outcomeLabels ?? ["Yes", "No"];
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-      <p className="min-w-0 flex-1 truncate text-[15px] font-semibold">{name}</p>
+      {named ? (
+        <p className="min-w-0 flex-1 truncate text-[15px] font-semibold">{name}</p>
+      ) : (
+        <span className="flex-1" />
+      )}
       <span className="text-[26px] font-semibold leading-none">{pct}%</span>
       <div className="flex w-full gap-2 sm:w-auto">
         <BuySideButton

@@ -29,14 +29,19 @@ import {
 import { useNairaWallet } from "@/lib/naira-wallet";
 
 /**
- * The Local (naira) book's operating desk — the one admin surface with
- * a real backend behind it. Two jobs:
+ * The Local (naira) book's operating desk. Two jobs:
  *
  *  - the FX rate, which nothing else can set and without which the
  *    whole book is inert (no rate → conversions 503 → nobody can fund)
- *  - settlement, where the poller has already handled the easy cases
- *    and what's left is exceptions: resolved-but-unsettled, a winning
- *    label Bayse's own outcomes don't match, overdue, or unreachable
+ *  - settlement, for both origins of market. On the Bayse half the
+ *    poller has already handled the easy cases and what's left is
+ *    exceptions: resolved-but-unsettled, a winning label Bayse's own
+ *    outcomes don't match, overdue, or unreachable. On our own markets
+ *    there is no poller to defer to — this desk IS the oracle, and
+ *    every one of them ends up here.
+ *
+ * Writing those markets is the Markets desk next door; this one only
+ * ever finishes them.
  *
  * Settling pays out every open position on the market, so both actions
  * ask for confirmation and neither is undoable.
@@ -72,7 +77,7 @@ export function LocalDesk() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Local book</h1>
           <p className="mt-1 text-sm text-secondary">
-            Credit markets fed by Bayse, settled by us.
+            Credit markets, ours and Bayse&rsquo;s, settled by us.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -154,7 +159,7 @@ export function LocalDesk() {
                   </span>
                 </p>
                 <p className="mt-0.5 text-[13px] font-medium text-tertiary">
-                  {s.source === "bayse-auto" ? "Auto (Bayse)" : `By ${s.actor}`} ·{" "}
+                  {s.source === "admin" ? `By ${s.actor}` : "Auto"} ·{" "}
                   {s.positionsSettled} position
                   {s.positionsSettled === 1 ? "" : "s"}
                   {s.createdAt && ` · ${fmtDateTime(s.createdAt)}`}
@@ -354,14 +359,14 @@ const ATTENTION: Record<
   { label: string; className: string }
 > = {
   resolved_unsettled: {
-    label: "Resolved on Bayse — settle",
+    label: "Resolved upstream — settle",
     className: "bg-yes-tint text-yes",
   },
   unmatched_outcome: {
     label: "Winner doesn't match an outcome",
     className: "bg-no-tint text-no",
   },
-  cancelled: { label: "Cancelled on Bayse — void", className: "bg-no-tint text-no" },
+  cancelled: { label: "Cancelled — void", className: "bg-no-tint text-no" },
   overdue: { label: "Overdue", className: "bg-accent/10 text-accent" },
   bayse_unreachable: {
     label: "Bayse unreachable",
@@ -391,6 +396,11 @@ function QueueCard({
             >
               {event.eventTitle || event.eventId}
             </Link>
+            {event.origin && (
+              <span className="shrink-0 rounded-full bg-element-2 px-2 py-0.5 text-[11px] font-semibold text-secondary">
+                {event.origin === "worldstreet" ? "Ours" : "Bayse"}
+              </span>
+            )}
             {flag && (
               <span
                 className={`flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${flag.className}`}
@@ -436,9 +446,10 @@ function MarketRow({
   market: QueueMarket;
   onDone: () => void;
 }) {
-  // Bayse's own winner is preselected when it matched an outcome; the
-  // desk can override it, which is the whole point of manual settlement.
-  const [choice, setChoice] = useState(market.bayseWinnerOutcomeId ?? "");
+  // The source's own winner is preselected when it matched an outcome;
+  // the desk can override it, which is the whole point of manual
+  // settlement. On our own markets there is nothing to preselect.
+  const [choice, setChoice] = useState(market.winnerOutcomeId ?? "");
   const [pending, setPending] = useState<"settle" | "void" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
@@ -499,8 +510,8 @@ function MarketRow({
         <p className="mt-0.5 text-[13px] font-medium text-tertiary">
           {market.openPositions} open · {formatNaira(market.openStakeKobo)} staked
           · pays up to {formatNaira(market.maxPayoutKobo)}
-          {market.bayseStatus && ` · Bayse: ${market.bayseStatus}`}
-          {market.bayseResolvedOutcome && ` → ${market.bayseResolvedOutcome}`}
+          {market.upstreamStatus && ` · ${market.upstreamStatus}`}
+          {market.resolvedOutcomeLabel && ` → ${market.resolvedOutcomeLabel}`}
         </p>
       </div>
 

@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Coins } from "lucide-react";
+import { ArrowLeft, Coins, PenSquare } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-context";
 
-const NAV = [{ href: "/admin", label: "Local book", icon: Coins }] as const;
+const NAV = [
+  { href: "/admin", label: "Local book", icon: Coins },
+  { href: "/admin/markets", label: "Markets", icon: PenSquare },
+] as const;
 
 /**
  * Admin chrome: sidebar on desktop, horizontal tab row on mobile.
@@ -23,7 +26,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <div className="w-full max-w-md rounded-xl border border-border bg-surface p-8 text-center shadow-card">
           <h1 className="text-xl font-semibold">Worldstreet Admin</h1>
           <p className="mt-2 text-sm text-secondary">
-            Log in to manage the Local book&rsquo;s rate and settlements.
+            Log in to write markets and manage the Local book&rsquo;s rate and
+            settlements.
           </p>
           <button
             onClick={openAuth}

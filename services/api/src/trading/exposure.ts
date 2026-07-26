@@ -1,30 +1,31 @@
 import { config } from "../config.js";
 import {
-  fetchBayseEvent,
-  winningOutcome,
-  type BayseEventLive,
-  type BayseOutcome,
-} from "./bayse.js";
+  fetchTradableEvents,
+  type MarketOrigin,
+  type TradableEvent,
+  type TradableOutcome,
+} from "./events.js";
 import { Position } from "./models.js";
 
 /**
  * The settlement queue: what the house still owes, per event, next to
- * what Bayse currently says about it. This is the resolution desk's
- * entry point — the per-event view can only answer about an event whose
- * id you already have.
+ * what the event's source currently says about it. This is the
+ * resolution desk's entry point — the per-event view can only answer
+ * about an event whose id you already have.
  *
  * Names come from the positions themselves (denormalized at trade time),
  * so a market keeps its row and its exposure even when Bayse is
- * unreachable; only the resolution half goes missing.
+ * unreachable; only the resolution half goes missing. Our own markets
+ * are read from the same database as the positions, so for those the
+ * unreachable case doesn't exist.
  */
 
 /**
- * Events per queue load. Each costs a Bayse round trip, so this is a
- * latency ceiling rather than a data limit — the biggest exposures sort
- * in first and the result flags when it bit.
+ * Events per queue load. Bayse ones each cost a Relay round trip, so
+ * this is a latency ceiling rather than a data limit — the biggest
+ * exposures sort in first and the result flags when it bit.
  */
 const MAX_QUEUE_EVENTS = 40;
-const FETCH_CONCURRENCY = 5;
 
 /** Why an event needs a human, or null when it's just waiting. */
 export type Attention =
@@ -41,19 +42,22 @@ export interface QueueMarket {
   openPositions: number;
   openStakeKobo: number;
   maxPayoutKobo: number;
-  /** Null when Bayse couldn't be reached for this event. */
-  bayseStatus: string | null;
-  bayseResolvedOutcome: string | null;
-  /** The outcome to settle on, pre-matched from Bayse's winning label. */
-  bayseWinnerOutcomeId: string | null;
-  outcomes: BayseOutcome[];
+  /** Null when the source couldn't be reached (Bayse events only). */
+  upstreamStatus: string | null;
+  /** What the source calls the winner, once it has one. */
+  resolvedOutcomeLabel: string | null;
+  /** The outcome to settle on, pre-matched from that label. */
+  winnerOutcomeId: string | null;
+  outcomes: TradableOutcome[];
 }
 
 export interface QueueEvent {
   eventId: string;
   eventTitle: string;
   eventSlug: string;
-  bayseStatus: string | null;
+  /** Where the market came from — Bayse's feed, or written by us. */
+  origin: MarketOrigin | null;
+  upstreamStatus: string | null;
   resolutionDate: string;
   openPositions: number;
   openStakeKobo: number;
@@ -99,45 +103,20 @@ async function openExposureByMarket(): Promise<ExposureRow[]> {
 }
 
 /**
- * Live Bayse state for many events, keyed by id. A failed fetch is
- * simply absent from the map: the queue still reports what we owe,
- * marked unreachable, rather than failing the page over one bad event.
- */
-async function fetchEvents(
-  eventIds: string[],
-): Promise<Map<string, BayseEventLive>> {
-  const out = new Map<string, BayseEventLive>();
-  let cursor = 0;
-
-  async function worker() {
-    while (cursor < eventIds.length) {
-      const eventId = eventIds[cursor];
-      cursor += 1;
-      if (!eventId) continue;
-      try {
-        out.set(eventId, await fetchBayseEvent(eventId));
-      } catch {
-        // absent from the map — reported as bayse_unreachable
-      }
-    }
-  }
-
-  await Promise.all(
-    Array.from({ length: Math.min(FETCH_CONCURRENCY, eventIds.length) }, worker),
-  );
-  return out;
-}
-
-/**
  * The poller settles resolved markets by itself, so a market that is
- * still open here while Bayse calls it resolved means auto-settlement
- * couldn't finish it. That, a winning label none of Bayse's own
- * outcomes match, and long-overdue resolutions are what the desk exists
- * to clear.
+ * still open here while its source calls it resolved means
+ * auto-settlement couldn't finish it. That, a winning label none of the
+ * source's own outcomes match, and long-overdue resolutions are what
+ * the desk exists to clear.
+ *
+ * A Worldstreet market never reaches "resolved" without the desk
+ * settling it, so what it actually surfaces here is the overdue flag —
+ * this queue is where someone finds out one of our own markets is past
+ * its result and still holding stakes.
  */
 export function attentionFor(params: {
-  event: BayseEventLive | null;
-  markets: Pick<QueueMarket, "bayseStatus" | "bayseWinnerOutcomeId">[];
+  event: TradableEvent | null;
+  markets: Pick<QueueMarket, "upstreamStatus" | "winnerOutcomeId">[];
   now: number;
   overdueMs: number;
 }): Attention {
@@ -145,8 +124,8 @@ export function attentionFor(params: {
   if (!event) return "bayse_unreachable";
   if (event.status === "cancelled") return "cancelled";
 
-  const resolved = markets.filter((m) => m.bayseStatus === "resolved");
-  if (resolved.some((m) => !m.bayseWinnerOutcomeId)) return "unmatched_outcome";
+  const resolved = markets.filter((m) => m.upstreamStatus === "resolved");
+  if (resolved.some((m) => !m.winnerOutcomeId)) return "unmatched_outcome";
   if (resolved.length > 0) return "resolved_unsettled";
 
   const resolutionMs = event.resolutionDate
@@ -170,7 +149,7 @@ export async function getSettlementQueue(): Promise<SettlementQueue> {
   }
 
   const eventIds = [...byEvent.keys()].slice(0, MAX_QUEUE_EVENTS);
-  const live = await fetchEvents(eventIds);
+  const live = await fetchTradableEvents(eventIds);
   const overdueMs = config.SETTLEMENT_OVERDUE_HOURS * 3_600_000;
   const now = Date.now();
 
@@ -187,9 +166,9 @@ export async function getSettlementQueue(): Promise<SettlementQueue> {
         openPositions: row.openPositions,
         openStakeKobo: row.openStakeKobo,
         maxPayoutKobo: row.maxPayoutKobo,
-        bayseStatus: market?.status ?? null,
-        bayseResolvedOutcome: market?.resolvedOutcome || null,
-        bayseWinnerOutcomeId: market ? (winningOutcome(market)?.id ?? null) : null,
+        upstreamStatus: market?.status ?? null,
+        resolvedOutcomeLabel: market?.resolvedOutcomeLabel ?? null,
+        winnerOutcomeId: market?.resolvedOutcomeId ?? null,
         outcomes: market?.outcomes ?? [],
       };
     });
@@ -198,7 +177,8 @@ export async function getSettlementQueue(): Promise<SettlementQueue> {
       eventId,
       eventTitle: event?.title ?? first?.eventTitle ?? "",
       eventSlug: event?.slug ?? first?.eventSlug ?? "",
-      bayseStatus: event?.status ?? null,
+      origin: event?.origin ?? null,
+      upstreamStatus: event?.status ?? null,
       resolutionDate: event?.resolutionDate ?? "",
       openPositions: marketRows.reduce((s, r) => s + r.openPositions, 0),
       openStakeKobo: marketRows.reduce((s, r) => s + r.openStakeKobo, 0),

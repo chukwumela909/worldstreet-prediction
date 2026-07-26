@@ -202,6 +202,40 @@ sends nothing; `--settle` additionally settles the market, which pays out
 **every** user holding it — staging only. See the header of
 `services/api/scripts/smoke-local-book.ts` for the rest of the flags.
 
+Two offline smoke tests need no deployment, credentials or database at all —
+they boot an in-memory Mongo and assert on the invariants that keep the book's
+money right. Run both from `services/api` before shipping anything that touches
+the ledger, settlement or pricing:
+
+```bash
+npm run smoke:ledger && npm run smoke:worldstreet
+```
+
+## 5c. Worldstreet's own markets
+
+The Local tab carries two books. Bayse's feed arrives priced and resolves
+itself; the other half is markets we write, on **fixed odds** — an admin sets
+what each side costs per ₦100 share and that is the price until an admin
+changes it. There is no maker and no order book behind them.
+
+They're authored at `/admin/markets` on the web app (same Clerk `admin` role).
+The two prices of a market are set independently and must sum to at least ₦100:
+the overround is the house margin, and a book priced under 100% pays anyone who
+buys both sides. The API refuses those, and refuses anything over a 30%
+overround as a fat-finger guard.
+
+A market is a **draft** until it's published, and only `open` and `closed`
+events reach the public feed (`GET /v1/markets`, unauthenticated — the Next
+server reads it during SSR). Nothing else about them is special: they trade
+through the same `POST /v1/trades`, debit the same naira ledger, and pay the
+same ₦100 a share.
+
+Settlement is the one real difference. Bayse resolves its own markets and the
+poller settles them unattended; ours have no oracle but the desk, so **every
+Worldstreet market has to be settled by hand** from the Local book desk at
+`/admin`. Set a resolution date when you create one — that's what puts it in
+front of someone via the overdue alert.
+
 ## 6. Deploying the web app (separate resource)
 
 The Next.js app is a second Coolify resource from the same repo with Base

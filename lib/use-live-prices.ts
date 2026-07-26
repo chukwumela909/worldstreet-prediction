@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { MarketEvent } from "@/types/market";
+import { isLocalBook, type MarketEvent } from "@/types/market";
 import { fetchEvents } from "@/lib/use-live-events";
 
 /**
@@ -23,15 +23,11 @@ export function useLivePrices(
   initial: MarketEvent[],
   intervalMs = DEFAULT_INTERVAL_MS,
 ): MarketEvent[] {
-  // keyed off content, not array identity; Bayse events are display-only
-  // and can't be re-fetched by slug from /api/events, so skip them
+  // keyed off content, not array identity; Local-book events can't be
+  // re-fetched by slug from /api/events (that's Gamma), so skip them
   const slugsKey = useMemo(
     () =>
-      [
-        ...new Set(
-          initial.filter((e) => e.source !== "bayse").map((e) => e.slug),
-        ),
-      ]
+      [...new Set(initial.filter((e) => !isLocalBook(e)).map((e) => e.slug))]
         .sort()
         .join(","),
     [initial],

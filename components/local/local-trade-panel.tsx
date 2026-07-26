@@ -20,18 +20,19 @@ import {
 import { payoutFor, placeLocalTrade, priceToKobo } from "@/lib/local-trades";
 
 /**
- * Trade panel for Local (Bayse) markets. Worldstreet is the
- * counterparty: the stake leaves the naira wallet now and a winning
- * share pays ₦100 at settlement. Hold-to-settlement only — there is no
- * sell side in v1, so the panel is a stake box, not a Buy/Sell pair.
+ * Trade panel for the Local book — Bayse markets and our own fixed-odds
+ * ones alike. Worldstreet is the counterparty either way: the stake
+ * leaves the naira wallet now and a winning share pays ₦100 at
+ * settlement. Hold-to-settlement only — there is no sell side in v1, so
+ * the panel is a stake box, not a Buy/Sell pair.
  *
- * Prices poll (see useLiveBayseEvent) but are never authoritative: every
+ * Prices poll (see useLiveLocalEvent) but are never authoritative: every
  * order carries the price it was shown at, the server re-prices live,
  * and anything that drifted past its tolerance comes back as an explicit
  * "confirm at the new price" step rather than a silent fill.
  */
 
-/** Bayse's own floor, mirrored so the panel can explain it before submitting. */
+/** The book's floor, mirrored so the panel can explain it before submitting. */
 const MIN_STAKE_KOBO = 10_000; // ₦100
 const QUICK_ADD_KOBO = [50_000, 100_000, 500_000]; // ₦500 / ₦1,000 / ₦5,000
 
@@ -95,7 +96,9 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   // deadline that matters here is earlier than the closing time.
   const stopsAt = tradingStopsAt(event);
   const msLeft = stopsAt === null || now === null ? null : stopsAt - now;
-  const closed = msLeft !== null && msLeft <= 0;
+  // A Worldstreet market can also be shut by the desk with time still on
+  // the clock — the server would refuse the trade, so say so first.
+  const closed = (msLeft !== null && msLeft <= 0) || event.tradingOpen === false;
 
   useEffect(() => {
     if (!confirmation) return;
@@ -310,8 +313,11 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
         )}
 
         <p className="mt-3 text-center text-xs leading-5 text-tertiary">
-          Prices are ₩ per ₩100 share, live from Bayse. Positions are held
-          to settlement — no selling back yet.
+          Prices are {CREDIT} per {CREDIT}100 share,{" "}
+          {event.source === "worldstreet"
+            ? "set by Worldstreet"
+            : "live from Bayse"}
+          . Positions are held to settlement — no selling back yet.
         </p>
 
         {user && balanceKobo !== null && !failure?.shortfallKobo && (

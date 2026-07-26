@@ -1,9 +1,10 @@
 import type { FastifyBaseLogger } from "fastify";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
-import { fetchBayseEvent, winningOutcome } from "./bayse.js";
+import { fetchTradableEvent } from "./events.js";
 import { creditNaira } from "./ledger.js";
 import { Position, Settlement, type SettlementSource } from "./models.js";
+import { markWorldstreetSettled } from "./worldstreet.js";
 
 /**
  * Settlement engine for the Local markets book. One market settles
@@ -12,10 +13,13 @@ import { Position, Settlement, type SettlementSource } from "./models.js";
  * refunds are idempotent per position via the ledger's refKey — so a
  * crashed run can be re-run safely and finishes what it started.
  *
- * Two callers: the poller below (Bayse-verified auto-settlement, the
- * primary path — Bayse resolves its own markets, including the 15-min
- * countdown series) and the admin routes (manual settle/void with the
- * admin as the oracle of record).
+ * Two callers: the poller below and the admin routes (manual
+ * settle/void with the admin as the oracle of record). What the poller
+ * can finish by itself depends on the origin — Bayse resolves its own
+ * markets, including the 15-min countdown series, so those settle
+ * unattended; Worldstreet's own markets have no oracle but the desk,
+ * so for those the poller only voids cancelled events and raises the
+ * overdue alert.
  */
 
 export interface SettleResult {
@@ -109,6 +113,14 @@ async function settlePositions(params: {
     { $set: { positionsSettled: settled, payoutTotalKobo: payoutTotal } },
   );
 
+  // no-op unless the market is one of ours
+  await markWorldstreetSettled({
+    marketId,
+    winningOutcomeId,
+    voided,
+    log: params.log,
+  });
+
   params.log.info(
     { marketId, voided, winningOutcomeId, settled, payoutTotal },
     "market settled",
@@ -158,14 +170,21 @@ export function adminVoidMarket(params: {
 }
 
 /* ------------------------------------------------------------------ */
-/* Bayse-verified auto-settlement poller                               */
+/* Auto-settlement poller                                              */
 /* ------------------------------------------------------------------ */
 
 /**
- * One pass: every event carrying open positions is re-checked against
- * Bayse; resolved markets settle with Bayse's own outcome as evidence,
- * cancelled events void, and anything unresolved long past its
- * resolution date raises an alert for the admin.
+ * One pass: every event carrying open positions is re-checked at
+ * source. Resolved markets settle with the source's own outcome as
+ * evidence, cancelled events void, and anything unresolved long past
+ * its resolution date raises an alert for the desk.
+ *
+ * For a Bayse event this is the whole settlement story — Relay
+ * resolves its own markets and the desk never has to look. For one of
+ * ours, a market only reaches "resolved" *because* the desk settled
+ * it, so the resolved branch finds the Settlement already written and
+ * no-ops; what earns the pass its keep there is voiding a cancelled
+ * event and nagging about an overdue one.
  */
 export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
   const eventIds: string[] = await Position.distinct("eventId", {
@@ -174,7 +193,9 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
 
   for (const eventId of eventIds) {
     try {
-      const event = await fetchBayseEvent(eventId);
+      const event = await fetchTradableEvent(eventId);
+      const autoSource: SettlementSource =
+        event.origin === "bayse" ? "bayse-auto" : "worldstreet-auto";
 
       if (event.status === "cancelled") {
         for (const market of event.markets) {
@@ -183,9 +204,9 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
             marketId: market.id,
             winningOutcomeId: null,
             voided: true,
-            source: "bayse-auto",
+            source: autoSource,
             actor: "system",
-            evidence: { bayseStatus: event.status },
+            evidence: { origin: event.origin, eventStatus: event.status },
             log,
           });
         }
@@ -194,15 +215,14 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
 
       for (const market of event.markets) {
         if (market.status !== "resolved") continue;
-        const winner = winningOutcome(market);
-        if (!winner) {
+        if (!market.resolvedOutcomeId) {
           await sendAlert(
             log,
             "Resolved market with unmatchable outcome",
             {
               eventId,
               marketId: market.id,
-              resolvedOutcome: market.resolvedOutcome,
+              resolvedOutcome: market.resolvedOutcomeLabel,
               eventTitle: event.title,
             },
             `unmatched:${market.id}`,
@@ -212,19 +232,20 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
         await settlePositions({
           eventId,
           marketId: market.id,
-          winningOutcomeId: winner.id,
+          winningOutcomeId: market.resolvedOutcomeId,
           voided: false,
-          source: "bayse-auto",
+          source: autoSource,
           actor: "system",
           evidence: {
-            bayseResolvedOutcome: market.resolvedOutcome,
-            bayseStatus: market.status,
+            origin: event.origin,
+            resolvedOutcome: market.resolvedOutcomeLabel,
+            marketStatus: market.status,
           },
           log,
         });
       }
 
-      // overdue: resolution date long past but Bayse still not resolved
+      // overdue: resolution date long past, still nothing resolved
       const resolutionMs = event.resolutionDate
         ? Date.parse(event.resolutionDate)
         : NaN;
@@ -238,6 +259,7 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
           "Market overdue for resolution",
           {
             eventId,
+            origin: event.origin,
             eventTitle: event.title,
             resolutionDate: event.resolutionDate,
           },

@@ -27,7 +27,7 @@ export interface Market {
   /** Outcome labels when they aren't Yes/No (Bayse, e.g. ["Portable", "Charles"]). */
   outcomeLabels?: [string, string];
   /**
-   * Bayse outcome ids, [yes, no] — what POST /v1/trades names when
+   * Local-book outcome ids, [yes, no] — what POST /v1/trades names when
    * staking naira on this market. Absent on Polymarket markets.
    */
   outcomeIds?: [string, string];
@@ -66,19 +66,32 @@ export interface MarketEvent {
   countdown?: boolean;
   markets: Market[];
   /**
-   * Where the event came from; absent = Polymarket. Bayse events are
-   * display-only — their detail page lives at /local/[slug] and skips
-   * the watchlist and live price polling.
+   * Where the event came from; absent = Polymarket. Both Local-book
+   * sources route their detail page to /local/[slug] and skip the
+   * watchlist and the Polymarket price poller: `bayse` is Relay's feed,
+   * `worldstreet` is a fixed-odds market we wrote ourselves.
    */
-  source?: "bayse";
-  /** Total trades across the event (Bayse `totalOrders`). */
+  source?: "bayse" | "worldstreet";
+  /** Total trades across the event (Bayse `totalOrders`, or our own count). */
   trades?: number;
   /** Pool liquidity in naira as a decimal string (Bayse events). */
   liquidityNgn?: string;
+  /**
+   * Naira staked into the event as a decimal string (Worldstreet
+   * events). Our markets have no pool to report — the house is the
+   * counterparty — so this is what a card shows in liquidity's place.
+   */
+  stakedNgn?: string;
   /** What the event tracks (Bayse detail page). */
   description?: string;
   /** Where resolution is verified, e.g. a chart URL (Bayse). */
   resolutionSource?: string;
+  /**
+   * False when the desk has closed the book but the result isn't in
+   * yet (Worldstreet events). Bayse events leave it unset and are
+   * gated on `closesAt` alone.
+   */
+  tradingOpen?: boolean;
 }
 
 export const CATEGORIES = [
@@ -96,6 +109,15 @@ export const CATEGORIES = [
 ] as const;
 
 export type Category = (typeof CATEGORIES)[number];
+
+/**
+ * True for the naira book — Bayse's feed and our own fixed-odds
+ * markets. These are the events that trade at /local/[slug] against the
+ * house, as opposed to the Polymarket events the site only mirrors.
+ */
+export function isLocalBook(event: Pick<MarketEvent, "source">): boolean {
+  return event.source === "bayse" || event.source === "worldstreet";
+}
 
 /** True when the event is a single Yes/No market. */
 export function isBinary(event: MarketEvent): boolean {

@@ -9,6 +9,7 @@ import {
   type FeaturedGame,
 } from "@/lib/polymarket";
 import { getBayseEvents } from "@/lib/bayse";
+import { getWorldstreetEvents } from "@/lib/worldstreet-markets";
 import { categoryTab } from "@/lib/categories";
 import type { HotTopic } from "@/lib/hot-topics";
 import type { MarketEvent } from "@/types/market";
@@ -41,6 +42,22 @@ async function loadFeaturedGame(): Promise<FeaturedGame | null> {
   }
 }
 
+/**
+ * The Local tab is two books under one heading: markets Worldstreet
+ * wrote, which lead because they're ours and there are few of them, and
+ * the Bayse feed behind them. Either source failing leaves the other on
+ * the page; only both failing is an outage, since an empty naira book
+ * and an unreachable one need to look different.
+ */
+async function loadLocalEvents(): Promise<MarketEvent[] | null> {
+  const [ours, bayse] = await Promise.all([
+    getWorldstreetEvents().catch(() => null),
+    getBayseEvents().catch(() => null),
+  ]);
+  if (ours === null && bayse === null) return null;
+  return [...(ours ?? []), ...(bayse ?? [])];
+}
+
 interface Props {
   searchParams: Promise<{ category?: string }>;
 }
@@ -54,8 +71,8 @@ export default async function Home({ searchParams }: Props) {
   const [trending, gridEvents, topics, game] = await Promise.all([
     getEvents({ limit: 24 }).catch(() => null),
     scoped
-      ? tab.source === "bayse"
-        ? getBayseEvents().catch(() => null)
+      ? tab.source === "local"
+        ? loadLocalEvents()
         : getEvents({ limit: 24, tagSlug: tab.tagSlug, order: tab.order }).catch(
             () => null,
           )
@@ -88,7 +105,7 @@ export default async function Home({ searchParams }: Props) {
             <p className="text-lg font-semibold">Live market data is unavailable</p>
             <p className="max-w-md text-sm text-secondary">
               We couldn&apos;t reach{" "}
-              {tab.source === "bayse"
+              {tab.source === "local"
                 ? "the Local market feed"
                 : "Polymarket’s public API"}
               . Refresh in a moment — nothing is shown here unless it&apos;s

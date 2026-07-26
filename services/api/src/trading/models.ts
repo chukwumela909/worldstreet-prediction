@@ -1,12 +1,20 @@
+import { randomUUID } from "node:crypto";
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose";
 
 /**
- * Trading data for the Local (Bayse-fed) markets book. All naira
- * amounts are integer kobo (`*Kobo`), mirroring the central wallet's
- * minor-unit convention. Worldstreet is the counterparty: stakes debit
- * the user's naira balance here, and settlement (admin- or Bayse-
- * verified) credits winners ₦100/share back. Nothing in this file
- * talks to Bayse or the central wallet — that's ledger.ts / trades.
+ * Trading data for the Local markets book. All naira amounts are
+ * integer kobo (`*Kobo`), mirroring the central wallet's minor-unit
+ * convention. Worldstreet is the counterparty: stakes debit the user's
+ * naira balance here, and settlement credits winners ₦100/share back.
+ * Nothing in this file talks to Bayse or the central wallet — that's
+ * ledger.ts / trades.
+ *
+ * The book carries two origins of market, and positions cannot tell
+ * them apart on purpose: Bayse-fed events (priced by Relay, resolved by
+ * Bayse or the desk) and Worldstreet's own fixed-odds events, defined
+ * at the bottom of this file and resolved only by the desk. Both are
+ * keyed by UUID strings, which is why the Worldstreet schemas mint
+ * `randomUUID()` ids of their own rather than exposing ObjectIds.
  */
 
 /* ------------------------------------------------------------------ */
@@ -80,10 +88,11 @@ export const POSITION_STATUSES = ["open", "won", "lost", "voided"] as const;
 export type PositionStatus = (typeof POSITION_STATUSES)[number];
 
 /**
- * A hold-to-settlement stake on one outcome of one Bayse market.
- * Denormalized snapshot fields (titles, labels, slug) freeze what the
- * user actually saw at trade time — the upstream event can churn.
- * Shares pay ₦100 (10 000 kobo) each on a win.
+ * A hold-to-settlement stake on one outcome of one market, of either
+ * origin. Denormalized snapshot fields (titles, labels, slug) freeze
+ * what the user actually saw at trade time — the event can churn, and
+ * a Bayse one can churn without asking us. Shares pay ₦100 (10 000
+ * kobo) each on a win.
  */
 const positionSchema = new Schema(
   {
@@ -153,7 +162,11 @@ export const FxRate: Model<IFxRate> =
   (mongoose.models.FxRate as Model<IFxRate>) ??
   mongoose.model<IFxRate>("FxRate", fxRateSchema);
 
-export const SETTLEMENT_SOURCES = ["bayse-auto", "admin"] as const;
+export const SETTLEMENT_SOURCES = [
+  "bayse-auto",
+  "worldstreet-auto",
+  "admin",
+] as const;
 export type SettlementSource = (typeof SETTLEMENT_SOURCES)[number];
 
 /**
@@ -185,12 +198,139 @@ export const Settlement: Model<ISettlement> =
   (mongoose.models.Settlement as Model<ISettlement>) ??
   mongoose.model<ISettlement>("Settlement", settlementSchema);
 
+/* ------------------------------------------------------------------ */
+/* Worldstreet's own markets                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lifecycle of an event we wrote ourselves.
+ *
+ *  draft     — being written; invisible to the site, untradeable
+ *  open      — listed and taking stakes until `closesAt`
+ *  closed    — still listed, no new stakes, waiting on the result
+ *  resolved  — every market settled
+ *  cancelled — abandoned; the poller voids what's open and refunds
+ */
+export const WS_EVENT_STATUSES = [
+  "draft",
+  "open",
+  "closed",
+  "resolved",
+  "cancelled",
+] as const;
+export type WsEventStatus = (typeof WS_EVENT_STATUSES)[number];
+
+/** Market statuses use Bayse's vocabulary so the dispatcher can be blind to origin. */
+export const WS_MARKET_STATUSES = [
+  "open",
+  "closed",
+  "resolved",
+  "cancelled",
+] as const;
+export type WsMarketStatus = (typeof WS_MARKET_STATUSES)[number];
+
+/**
+ * An event authored on the admin desk. `eventId` is the UUID the rest
+ * of the book keys on (positions, settlements, the trade route's own
+ * validation) — the ObjectId never leaves this file.
+ */
+const worldstreetEventSchema = new Schema(
+  {
+    eventId: {
+      type: String,
+      required: true,
+      unique: true,
+      default: () => randomUUID(),
+    },
+    /** URL slug — the site routes /local/<slug> on it. */
+    slug: { type: String, required: true, unique: true },
+    title: { type: String, required: true },
+    /** One of the site's own category labels, e.g. "Politics". */
+    category: { type: String, required: true, default: "Trending" },
+    description: { type: String, default: "" },
+    /** Absolute https URL, rendered unoptimized (any host). */
+    imageUrl: { type: String, default: "" },
+    resolutionSource: { type: String, default: "" },
+    status: {
+      type: String,
+      enum: WS_EVENT_STATUSES,
+      default: "draft",
+      index: true,
+    },
+    /** Trading stops here. Unset = open until the desk closes it. */
+    closesAt: { type: Date, default: null },
+    /** When the result is expected — drives the overdue alert. */
+    resolutionDate: { type: Date, default: null },
+    createdBy: { type: String, required: true },
+  },
+  { timestamps: true },
+);
+
+export type IWorldstreetEvent = InferSchemaType<typeof worldstreetEventSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const WorldstreetEvent: Model<IWorldstreetEvent> =
+  (mongoose.models.WorldstreetEvent as Model<IWorldstreetEvent>) ??
+  mongoose.model<IWorldstreetEvent>("WorldstreetEvent", worldstreetEventSchema);
+
+/**
+ * One side of a fixed-odds market. `priceKobo` is what a ₦100 share
+ * costs, set by the desk and only changed by the desk — there is no
+ * order book and no automated maker behind these numbers. The two
+ * prices of a market normally sum to more than ₦100; that overround is
+ * the house margin (see bookMarginBps in trading/worldstreet.ts).
+ */
+const worldstreetOutcomeSchema = new Schema(
+  {
+    outcomeId: { type: String, required: true, default: () => randomUUID() },
+    label: { type: String, required: true },
+    priceKobo: { type: Number, required: true, min: 100, max: 9_900 },
+  },
+  { _id: false },
+);
+
+const worldstreetMarketSchema = new Schema(
+  {
+    marketId: {
+      type: String,
+      required: true,
+      unique: true,
+      default: () => randomUUID(),
+    },
+    /** The parent's `eventId`, not its ObjectId. */
+    eventId: { type: String, required: true, index: true },
+    title: { type: String, required: true },
+    rules: { type: String, default: "" },
+    status: { type: String, enum: WS_MARKET_STATUSES, default: "open" },
+    /** Exactly two, enforced in the route layer. */
+    outcomes: { type: [worldstreetOutcomeSchema], required: true },
+    /** Set when the desk settles it; mirrors the Settlement record. */
+    resolvedOutcomeId: { type: String, default: null },
+    /** Display order within the event. */
+    order: { type: Number, default: 0 },
+  },
+  { timestamps: true },
+);
+
+export type IWorldstreetMarket = InferSchemaType<
+  typeof worldstreetMarketSchema
+> & { _id: mongoose.Types.ObjectId };
+
+export const WorldstreetMarket: Model<IWorldstreetMarket> =
+  (mongoose.models.WorldstreetMarket as Model<IWorldstreetMarket>) ??
+  mongoose.model<IWorldstreetMarket>(
+    "WorldstreetMarket",
+    worldstreetMarketSchema,
+  );
+
 /**
  * Wait for the money-critical unique indexes (ledger refKey, position
- * idempotencyKey, settlement marketId) to finish building. Mongoose
- * builds indexes in the background, so a cold start could otherwise
- * serve trades before the dedupe guarantees exist — call this at boot,
- * after connecting, before listening.
+ * idempotencyKey, settlement marketId, and the Worldstreet event/market
+ * ids the book keys on) to finish building. Mongoose builds indexes in
+ * the background, so a cold start could otherwise serve trades before
+ * the dedupe guarantees exist — call this at boot, after connecting,
+ * before listening.
  */
 export async function ensureTradingIndexes(): Promise<void> {
   await Promise.all([
@@ -199,5 +339,7 @@ export async function ensureTradingIndexes(): Promise<void> {
     Position.init(),
     FxRate.init(),
     Settlement.init(),
+    WorldstreetEvent.init(),
+    WorldstreetMarket.init(),
   ]);
 }

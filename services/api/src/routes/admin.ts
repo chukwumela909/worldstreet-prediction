@@ -9,7 +9,7 @@ import {
   adminSettleMarket,
   adminVoidMarket,
 } from "../trading/settlement.js";
-import { fetchBayseEvent, winningOutcome } from "../trading/bayse.js";
+import { fetchTradableEvent, requireMarket } from "../trading/events.js";
 import { getSettlementQueue } from "../trading/exposure.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
@@ -19,10 +19,14 @@ import { config } from "../config.js";
  * central Clerk role (publicMetadata.role === "admin") — the same
  * signal the rest of WorldStreet uses. Settlement here is manual and
  * final; the resolution desk should call GET /admin/markets/:eventId
- * first, which surfaces Bayse's own resolution to pre-fill the form.
+ * first, which surfaces the source's own resolution to pre-fill the
+ * form. Authoring Worldstreet's own markets lives next door in
+ * admin-markets.ts.
  */
 
-async function requireAdmin(request: FastifyRequest): Promise<AuthenticatedUser> {
+export async function requireAdmin(
+  request: FastifyRequest,
+): Promise<AuthenticatedUser> {
   const user = await authenticate(request);
   if (user.role !== "admin") {
     throw new ApiError(403, "Admin access required", "FORBIDDEN");
@@ -100,13 +104,15 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
 
   /**
    * Resolution-desk view of one event: our open exposure per market
-   * next to Bayse's live status/resolution, so settlement is a
-   * confirm-what-Bayse-says action rather than data entry.
+   * next to the source's live status/resolution, so settling a Bayse
+   * event is a confirm-what-Bayse-says action rather than data entry.
+   * Works for our own events too, where the resolution half is
+   * whatever the desk last recorded.
    */
   app.get("/admin/markets/:eventId", async (request) => {
     await requireAdmin(request);
     const { eventId } = request.params as { eventId: string };
-    const event = await fetchBayseEvent(eventId);
+    const event = await fetchTradableEvent(eventId);
 
     const exposures = await Position.aggregate<{
       _id: string;
@@ -131,6 +137,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       data: {
         event: {
           id: event.id,
+          origin: event.origin,
           title: event.title,
           status: event.status,
           resolutionDate: event.resolutionDate,
@@ -139,8 +146,8 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
             title: m.title,
             status: m.status,
             outcomes: m.outcomes,
-            bayseResolvedOutcome: m.resolvedOutcome || null,
-            bayseWinnerOutcomeId: winningOutcome(m)?.id ?? null,
+            resolvedOutcomeLabel: m.resolvedOutcomeLabel,
+            winnerOutcomeId: m.resolvedOutcomeId,
             openPositions: byMarket.get(m.id)?.openPositions ?? 0,
             openStakeKobo: byMarket.get(m.id)?.stakeKobo ?? 0,
             maxPayoutKobo: byMarket.get(m.id)?.maxPayoutKobo ?? 0,
@@ -156,11 +163,8 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const { eventId, marketId, winningOutcomeId } = request.body;
 
     // the outcome must actually belong to the market being settled
-    const event = await fetchBayseEvent(eventId);
-    const market = event.markets.find((m) => m.id === marketId);
-    if (!market) {
-      throw new ApiError(404, "Market not found on this event", "MARKET_NOT_FOUND");
-    }
+    const event = await fetchTradableEvent(eventId);
+    const market = requireMarket(event, marketId);
     if (!market.outcomes.some((o) => o.id === winningOutcomeId)) {
       throw new ApiError(400, "Outcome does not belong to this market", "OUTCOME_NOT_FOUND");
     }

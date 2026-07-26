@@ -4,7 +4,7 @@ import { z } from "zod";
 import { authenticate } from "../auth.js";
 import { config } from "../config.js";
 import { ApiError } from "../errors.js";
-import { fetchBayseEvent } from "../trading/bayse.js";
+import { fetchTradableEvent, requireMarket } from "../trading/events.js";
 import {
   creditNaira,
   debitNaira,
@@ -14,16 +14,21 @@ import {
 import { Position, type IPosition } from "../trading/models.js";
 
 /**
- * Hold-to-settlement trades on Bayse-fed Local markets. Worldstreet is
- * the counterparty: the stake debits the user's naira ledger and the
- * position pays ₦100/share if the admin/auto settlement declares its
- * outcome the winner. There is no sell-back in v1.
+ * Hold-to-settlement trades on the Local book — Bayse-fed events and
+ * Worldstreet's own fixed-odds ones alike. Worldstreet is the
+ * counterparty either way: the stake debits the user's naira ledger and
+ * the position pays ₦100/share if settlement declares its outcome the
+ * winner. There is no sell-back in v1.
  *
  * Price integrity: the client sends the price it showed the user
- * (`expectedPriceKobo`); the server re-fetches Bayse LIVE and executes
- * at the fresh price only if it moved less than the tolerance —
- * otherwise 409 PRICE_MOVED with the fresh price, and the client
- * re-confirms. Countdown markets additionally close to new trades
+ * (`expectedPriceKobo`); the server re-reads the market at source —
+ * Relay for a Bayse event, our own row for one of ours — and executes
+ * at the fresh price only if it moved less than the tolerance,
+ * otherwise 409 PRICE_MOVED with the fresh price for the client to
+ * re-confirm. Fixed odds rarely trip that, but the desk can reprice
+ * mid-session and this is what stops the stale quote filling.
+ *
+ * Countdown markets additionally close to new trades
  * `TRADE_COUNTDOWN_CUTOFF_SECONDS` before their closing time, since a
  * nearly-decided 15-minute market is pure adverse selection.
  */
@@ -74,15 +79,12 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
         );
       }
 
-      // fresh state from Bayse — never the cached display feed
-      const event = await fetchBayseEvent(body.eventId);
+      // fresh state at source — never the cached display feed
+      const event = await fetchTradableEvent(body.eventId);
       if (event.status !== "open") {
         throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
       }
-      const market = event.markets.find((m) => m.id === body.marketId);
-      if (!market) {
-        throw new ApiError(404, "Market not found on this event", "MARKET_NOT_FOUND");
-      }
+      const market = requireMarket(event, body.marketId);
       if (market.status !== "open") {
         throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
       }
@@ -107,7 +109,7 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
         throw new ApiError(404, "Outcome not found on this market", "OUTCOME_NOT_FOUND");
       }
 
-      const freshPriceKobo = Math.round(outcome.price * PAYOUT_PER_SHARE_KOBO);
+      const freshPriceKobo = outcome.priceKobo;
       if (freshPriceKobo < 1 || freshPriceKobo > 9_999) {
         throw new ApiError(409, "This outcome is not currently priceable", "MARKET_CLOSED");
       }

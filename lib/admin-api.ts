@@ -32,15 +32,17 @@ export interface QueueOutcome {
   price: number;
 }
 
+export type MarketOrigin = "bayse" | "worldstreet";
+
 export interface QueueMarket {
   marketId: string;
   marketTitle: string;
   openPositions: number;
   openStakeKobo: number;
   maxPayoutKobo: number;
-  bayseStatus: string | null;
-  bayseResolvedOutcome: string | null;
-  bayseWinnerOutcomeId: string | null;
+  upstreamStatus: string | null;
+  resolvedOutcomeLabel: string | null;
+  winnerOutcomeId: string | null;
   outcomes: QueueOutcome[];
 }
 
@@ -48,7 +50,8 @@ export interface QueueEvent {
   eventId: string;
   eventTitle: string;
   eventSlug: string;
-  bayseStatus: string | null;
+  origin: MarketOrigin | null;
+  upstreamStatus: string | null;
   resolutionDate: string;
   openPositions: number;
   openStakeKobo: number;
@@ -144,6 +147,166 @@ export async function voidMarket(params: {
     body: JSON.stringify(params),
   });
   return res.data;
+}
+
+/* ------------------------------------------------------------------ */
+/* Worldstreet's own markets                                           */
+/* ------------------------------------------------------------------ */
+
+export type WsEventStatus =
+  | "draft"
+  | "open"
+  | "closed"
+  | "resolved"
+  | "cancelled";
+export type WsMarketStatus = "open" | "closed" | "resolved" | "cancelled";
+
+export interface WsOutcome {
+  id: string;
+  label: string;
+  /** Kobo per ₩100 share — what the buyer pays. */
+  priceKobo: number;
+}
+
+export interface WsMarketExposure {
+  openPositions: number;
+  openStakeKobo: number;
+  maxPayoutKobo: number;
+  /** Settled ones included — any at all blocks deletion. */
+  totalPositions: number;
+}
+
+export interface WsMarket {
+  id: string;
+  title: string;
+  rules: string;
+  status: WsMarketStatus;
+  outcomes: WsOutcome[];
+  /** House edge in the two prices, basis points over ₩100. */
+  marginBps: number;
+  resolvedOutcomeId: string | null;
+  exposure: WsMarketExposure;
+}
+
+export interface WsEvent {
+  id: string;
+  slug: string;
+  title: string;
+  category: string;
+  description: string;
+  imageUrl: string;
+  resolutionSource: string;
+  status: WsEventStatus;
+  closesAt: string | null;
+  resolutionDate: string | null;
+  trades: number;
+  stakedKobo: number;
+  createdBy: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  markets: WsMarket[];
+}
+
+export interface WsOutcomeInput {
+  label: string;
+  priceKobo: number;
+}
+
+export interface WsMarketInput {
+  title: string;
+  rules?: string;
+  outcomes: WsOutcomeInput[];
+}
+
+export interface WsEventInput {
+  title: string;
+  category: string;
+  description?: string;
+  imageUrl?: string;
+  resolutionSource?: string;
+  closesAt?: string | null;
+  resolutionDate?: string | null;
+  status?: "draft" | "open";
+  markets: WsMarketInput[];
+}
+
+export interface WsEventPatch {
+  title?: string;
+  category?: string;
+  description?: string;
+  imageUrl?: string;
+  resolutionSource?: string;
+  closesAt?: string | null;
+  resolutionDate?: string | null;
+  status?: "draft" | "open" | "closed" | "cancelled";
+}
+
+export interface WsMarketPatch {
+  title?: string;
+  rules?: string;
+  status?: "open" | "closed";
+  outcomes?: WsOutcomeInput[];
+}
+
+const WS_BASE = "/v1/admin/worldstreet/events";
+
+export async function fetchWsEvents(): Promise<WsEvent[]> {
+  const res = await apiFetch<{ data: { events: WsEvent[] } }>(WS_BASE);
+  return res.data.events;
+}
+
+/** Every write returns the event as it now stands, so the desk re-renders from truth. */
+async function writeWsEvent(
+  url: string,
+  method: "POST" | "PATCH",
+  body: unknown,
+): Promise<WsEvent> {
+  const res = await apiFetch<{ data: { event: WsEvent } }>(url, {
+    method,
+    body: JSON.stringify(body),
+  });
+  return res.data.event;
+}
+
+export function createWsEvent(input: WsEventInput): Promise<WsEvent> {
+  return writeWsEvent(WS_BASE, "POST", input);
+}
+
+export function updateWsEvent(
+  eventId: string,
+  patch: WsEventPatch,
+): Promise<WsEvent> {
+  return writeWsEvent(`${WS_BASE}/${eventId}`, "PATCH", patch);
+}
+
+export function addWsMarket(
+  eventId: string,
+  input: WsMarketInput,
+): Promise<WsEvent> {
+  return writeWsEvent(`${WS_BASE}/${eventId}/markets`, "POST", input);
+}
+
+export function updateWsMarket(
+  eventId: string,
+  marketId: string,
+  patch: WsMarketPatch,
+): Promise<WsEvent> {
+  return writeWsEvent(`${WS_BASE}/${eventId}/markets/${marketId}`, "PATCH", patch);
+}
+
+export async function deleteWsMarket(
+  eventId: string,
+  marketId: string,
+): Promise<WsEvent> {
+  const res = await apiFetch<{ data: { event: WsEvent } }>(
+    `${WS_BASE}/${eventId}/markets/${marketId}`,
+    { method: "DELETE" },
+  );
+  return res.data.event;
+}
+
+export async function deleteWsEvent(eventId: string): Promise<void> {
+  await apiFetch(`${WS_BASE}/${eventId}`, { method: "DELETE" });
 }
 
 /**

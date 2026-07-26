@@ -4,20 +4,23 @@ import { useEffect, useState } from "react";
 import type { MarketEvent } from "@/types/market";
 
 /**
- * Keep a server-rendered Bayse event ticking, the way useLivePrices does
+ * Keep a server-rendered Local event ticking, the way useLivePrices does
  * for Polymarket ones: re-fetch the same slug and swap in fresh prices
  * so the header, outcome rows, and trade panel move without a reload.
  *
  * This matters more here than it does there — a stale price in the Local
  * panel is a stake the server re-prices and bounces back for
- * confirmation, so polling is what keeps that interruption rare.
+ * confirmation, so polling is what keeps that interruption rare. On a
+ * Bayse event the prices genuinely move minute to minute; on one of our
+ * own fixed-odds markets they only move when the desk moves them, and
+ * this is how a page already open finds out.
  *
  * A failed or empty refetch keeps the last known event rather than
  * blanking a page someone is mid-trade on.
  */
 const DEFAULT_INTERVAL_MS = 10_000;
 
-export function useLiveBayseEvent(
+export function useLiveLocalEvent(
   initial: MarketEvent,
   intervalMs = DEFAULT_INTERVAL_MS,
 ): MarketEvent {
@@ -28,7 +31,7 @@ export function useLiveBayseEvent(
     let cancelled = false;
 
     const tick = () => {
-      fetch(`/api/bayse/event?slug=${encodeURIComponent(slug)}`)
+      fetch(`/api/local/event?slug=${encodeURIComponent(slug)}`)
         .then((res) => (res.ok ? res.json() : Promise.reject(res.status)))
         .then((body: { event?: MarketEvent }) => {
           if (!cancelled && body.event) setLive(body.event);

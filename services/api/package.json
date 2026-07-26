@@ -12,6 +12,8 @@
     "start": "node dist/server.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "smoke:local": "tsx scripts/smoke-local-book.ts",
+    "smoke:ledger": "tsx scripts/ledger-smoke.mts",
+    "smoke:worldstreet": "tsx scripts/worldstreet-smoke.mts",
     "verify:leaderboard": "tsx scripts/verify-leaderboard.ts"
   },
   "dependencies": {

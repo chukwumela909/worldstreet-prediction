@@ -2,7 +2,7 @@ import Link from "next/link";
 import { WatchButton } from "./watch-button";
 import { EventIcon } from "./event-icon";
 import { OutcomeRow } from "./outcome-row";
-import { isBinary, type MarketEvent } from "@/types/market";
+import { isBinary, isLocalBook, type MarketEvent } from "@/types/market";
 import {
   formatNairaCompact,
   formatUsdCompact,
@@ -35,9 +35,9 @@ export function MarketCard({
    */
   label?: string;
 }) {
-  // Bayse (Local) events live under /local, Polymarket under /event
-  const href =
-    event.source === "bayse" ? `/local/${event.slug}` : `/event/${event.slug}`;
+  // naira-book events live under /local, Polymarket under /event
+  const local = isLocalBook(event);
+  const href = local ? `/local/${event.slug}` : `/event/${event.slug}`;
 
   return (
     <article className="flex flex-col rounded-xl border border-border bg-surface p-4 shadow-card transition-colors hover:border-border-hover">
@@ -48,8 +48,8 @@ export function MarketCard({
             {label ?? event.category}
           </span>
         </span>
-        {/* watchlist resolves slugs against Polymarket — skip for Bayse */}
-        {event.source !== "bayse" && <WatchButton slug={event.slug} />}
+        {/* watchlist resolves slugs against Polymarket — skip the Local book */}
+        {!local && <WatchButton slug={event.slug} />}
       </header>
 
       <Link href={href} className="mt-3 block">
@@ -96,11 +96,15 @@ function Outcomes({ event }: { event: MarketEvent }) {
           pct={pct}
           tinted
         />
+        {/* The No price is quoted, not inferred: on a Polymarket or Bayse
+            market the pair sums to 1 and the two are the same number, but
+            a Worldstreet book is priced with an overround and 100 − yes
+            would undercut the price the row's own multiple is built on. */}
         <OutcomeRow
           side="no"
           label={noLabel}
           multiplier={toMultiplier(market.outcomePrices[1])}
-          pct={100 - pct}
+          pct={toPercent(market.outcomePrices[1])}
         />
       </>
     );
@@ -124,18 +128,21 @@ function Outcomes({ event }: { event: MarketEvent }) {
 
 /**
  * Each source reports what it actually has: Bayse gives pool liquidity in
- * credit plus a trade count, Gamma gives lifetime dollar volume and no
- * liquidity on the event payload.
+ * credit plus a trade count, our own markets have no pool but do know
+ * what's been staked into them, and Gamma gives lifetime dollar volume
+ * and no liquidity on the event payload.
  */
 function Stats({ event }: { event: MarketEvent }) {
-  if (event.source === "bayse") {
+  if (isLocalBook(event)) {
+    const pool =
+      event.liquidityNgn !== undefined
+        ? `${formatNairaCompact(parseFloat(event.liquidityNgn))} liquidity`
+        : event.stakedNgn !== undefined
+          ? `${formatNairaCompact(parseFloat(event.stakedNgn))} staked`
+          : null;
     return (
       <span className="truncate">
-        {[
-          event.liquidityNgn &&
-            `${formatNairaCompact(parseFloat(event.liquidityNgn))} liquidity`,
-          event.trades !== undefined && `${event.trades} trades`,
-        ]
+        {[pool, event.trades !== undefined && `${event.trades} trades`]
           .filter(Boolean)
           .join(" · ")}
       </span>
