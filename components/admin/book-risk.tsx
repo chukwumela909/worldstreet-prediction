@@ -17,9 +17,15 @@ import { fetchBookRisk, useAdminResource } from "@/lib/admin-api";
  * `worstCase` assumes every open market resolves the wrong way at once.
  * They settle independently, so it isn't a forecast — it's the floor,
  * and it already nets off the stakes taken.
+ *
+ * It reads its own endpoint, so nothing the desk around it does reaches
+ * it on its own: settle the market carrying the downside and the strip
+ * would keep quoting a book that no longer exists. `reloadKey` is how
+ * the desk says it changed something — bump it wherever the desk
+ * refreshes itself.
  */
-export function BookRiskStrip() {
-  const risk = useAdminResource(fetchBookRisk, true);
+export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
+  const risk = useAdminResource(fetchBookRisk, true, reloadKey);
 
   // A 403 is a non-admin, which the desks around this already explain;
   // don't stack a second refusal on top of theirs.
@@ -44,7 +50,12 @@ export function BookRiskStrip() {
     );
   }
 
-  const exposed = worstCaseKobo < 0;
+  // One market being short isn't cancelled out by another's margin:
+  // they settle on their own days, and the short one pays out on its
+  // own. So the book only counts as balanced when the net is a profit
+  // AND no single market is carrying a loss.
+  const netLoss = worstCaseKobo < 0;
+  const exposed = netLoss || worstMarket !== null;
 
   return (
     <section className="mt-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:grid-cols-3">
@@ -56,7 +67,7 @@ export function BookRiskStrip() {
       <Stat
         label={exposed ? "Worst case" : "Locked-in profit"}
         value={formatNairaSigned(worstCaseKobo)}
-        valueClass={exposed ? "text-no" : "text-yes"}
+        valueClass={netLoss ? "text-no" : "text-yes"}
         note={
           exposed
             ? "if every open market goes against us"

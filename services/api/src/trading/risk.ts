@@ -77,10 +77,21 @@ interface Row {
   eventSlug: string;
 }
 
-/** Open exposure per market, broken down by side, heaviest downside first. */
-export async function openRiskByMarket(): Promise<MarketRisk[]> {
+/**
+ * Open exposure per market, broken down by side, heaviest downside
+ * first. Pass `marketIds` to narrow it to the markets a caller is
+ * actually rendering — without it this walks every open position in
+ * the book, which is only what the book-wide read wants.
+ */
+export async function openRiskByMarket(
+  marketIds?: string[],
+): Promise<MarketRisk[]> {
   const rows = await Position.aggregate<Row>([
-    { $match: { status: "open" } },
+    {
+      $match: marketIds
+        ? { status: "open", marketId: { $in: marketIds } }
+        : { status: "open" },
+    },
     {
       $group: {
         _id: { marketId: "$marketId", outcomeId: "$outcomeId" },
@@ -169,7 +180,9 @@ export async function getBookRisk(): Promise<BookRisk> {
 }
 
 /** The per-side rows keyed by market, for callers that already have one. */
-export async function riskByMarketId(): Promise<Map<string, MarketRisk>> {
-  const markets = await openRiskByMarket();
+export async function riskByMarketId(
+  marketIds: string[],
+): Promise<Map<string, MarketRisk>> {
+  const markets = await openRiskByMarket(marketIds);
   return new Map(markets.map((m) => [m.marketId, m]));
 }

@@ -34,6 +34,26 @@ async function shutdown(signal: string) {
 process.once("SIGTERM", () => void shutdown("SIGTERM"));
 process.once("SIGINT", () => void shutdown("SIGINT"));
 
+/**
+ * Nothing here fires a promise it doesn't await, so neither of these
+ * should ever run. They exist because the alternative to catching them
+ * is Node killing the process with the reason on stderr and nothing in
+ * the structured log — a restart nobody can explain afterwards.
+ *
+ * A stray rejection doesn't mean the book is unsound (request failures
+ * are handled by Fastify, and every money path is transactional), so it
+ * is logged and serving continues. An uncaught exception can leave
+ * state we can't reason about, so that one still ends the process and
+ * lets the platform start a clean one.
+ */
+process.on("unhandledRejection", (reason) => {
+  app.log.error({ err: reason }, "Unhandled promise rejection — still serving");
+});
+process.on("uncaughtException", (err) => {
+  app.log.fatal({ err }, "Uncaught exception — exiting for a clean restart");
+  process.exit(1);
+});
+
 try {
   await connectDatabase();
   // unique-index guarantees (idempotency, one-shot settlement) must

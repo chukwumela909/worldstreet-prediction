@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Info, Search } from "lucide-react";
+import { LogoMark } from "@/components/home/hero/shared";
 import { NavActions } from "@/components/nav/nav-actions";
 import { SearchBox } from "@/components/nav/search-box";
 
@@ -13,7 +14,7 @@ export function TopNav() {
     <div className="mx-auto flex h-[60px] w-full max-w-[1280px] items-center gap-4 px-6">
       {/* Logo */}
       <Link href="/" className="flex shrink-0 items-center gap-2">
-        <LogoMark />
+        <LogoMark className="h-5 w-7" />
         <span className="text-lg font-bold tracking-tight">Worldstreet</span>
       </Link>
 
@@ -35,14 +36,5 @@ export function TopNav() {
         <NavActions />
       </div>
     </div>
-  );
-}
-
-/** Placeholder logomark — swapped at rebrand. */
-function LogoMark() {
-  return (
-    <svg viewBox="0 0 24 24" className="size-7 text-primary" fill="currentColor" aria-hidden>
-      <path d="M4 4h16v3.2L12 10 4 7.2V4zm0 6.4L12 13.2l8-2.8v3.2L12 16.4 4 13.6v-3.2zm0 6.4 8 2.8 8-2.8V20l-8 2.8L4 20v-3.2z" transform="scale(0.86) translate(2 0)" />
-    </svg>
   );
 }

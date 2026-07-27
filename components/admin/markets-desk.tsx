@@ -56,6 +56,14 @@ const MAX_MARGIN_BPS = 3_000;
 export function MarketsDesk() {
   const events = useAdminResource(fetchWsEvents, true);
   const [creating, setCreating] = useState(false);
+  // The risk strip reads a different endpoint, so every path that
+  // changes the book has to re-read both. Anything that used to call
+  // events.refresh() calls this instead.
+  const [bookVersion, setBookVersion] = useState(0);
+  const refresh = () => {
+    events.refresh();
+    setBookVersion((v) => v + 1);
+  };
 
   if (!isApiConfigured()) {
     return (
@@ -91,7 +99,7 @@ export function MarketsDesk() {
         </div>
         <div className="flex items-center gap-2">
           <button
-            onClick={events.refresh}
+            onClick={refresh}
             className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
           >
             <RefreshCw className={`size-3.5 ${events.loading ? "animate-spin" : ""}`} />
@@ -107,13 +115,13 @@ export function MarketsDesk() {
         </div>
       </div>
 
-      <BookRiskStrip />
+      <BookRiskStrip reloadKey={bookVersion} />
 
       {creating && (
         <CreateForm
           onDone={() => {
             setCreating(false);
-            events.refresh();
+            refresh();
           }}
         />
       )}
@@ -132,7 +140,7 @@ export function MarketsDesk() {
 
       <div className="mt-6 flex flex-col gap-3">
         {events.data?.map((event) => (
-          <EventCard key={event.id} event={event} onChanged={events.refresh} />
+          <EventCard key={event.id} event={event} onChanged={refresh} />
         ))}
       </div>
     </>
@@ -636,10 +644,15 @@ function SideBook({ market }: { market: WsMarket }) {
         <tbody>
           {market.outcomes.map((outcome) => {
             // a side nobody has backed pays nothing, so the house keeps
-            // the lot if it lands
+            // the lot if it lands — and that's the only case worth
+            // netting off here. Where the side has been traded the
+            // server has already done the sum, off one read of the
+            // book; redoing it against a stake total that was counted
+            // separately would drift by any trade landing between the
+            // two, and could contradict the worst-side marker below.
             const side = staked.get(outcome.id);
             const payoutKobo = side?.payoutKobo ?? 0;
-            const resultKobo = openStakeKobo - payoutKobo;
+            const resultKobo = side?.profitIfWinsKobo ?? openStakeKobo;
             const short = resultKobo < 0;
             return (
               <tr

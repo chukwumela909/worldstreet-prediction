@@ -370,6 +370,12 @@ export function useAdminResource<T>(
   /** Must be a stable reference — pass a module-level fetcher, not an inline arrow. */
   load: () => Promise<T>,
   enabled: boolean,
+  /**
+   * Bump to re-read from outside — for a resource whose data something
+   * else on the page changes, so the owner of that action can say so.
+   * The current figures stay on screen while the new ones land.
+   */
+  version = 0,
 ): AdminResource<T> {
   // One state object: the effect body itself never calls setState, only
   // its async callbacks do, so a load can't cascade renders.
@@ -406,7 +412,7 @@ export function useAdminResource<T>(
     return () => {
       cancelled = true;
     };
-  }, [active, load, reloads]);
+  }, [active, load, reloads, version]);
 
   return {
     ...state,

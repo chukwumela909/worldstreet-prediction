@@ -22,6 +22,13 @@ import { CATEGORIES } from "@/types/market";
  */
 
 const REVALIDATE_SECONDS = 30;
+/**
+ * A page render waits on this. Without a deadline an API that hangs
+ * rather than refusing takes the render with it — and these sit beside
+ * the Bayse feed, which is the whole reason a failure here returns null
+ * instead of throwing.
+ */
+const FETCH_TIMEOUT_MS = 10_000;
 /** Detail-page polling — the desk can reprice mid-session. */
 const LIVE_REVALIDATE_SECONDS = 10;
 
@@ -139,7 +146,10 @@ async function apiGet<T>(path: string): Promise<T | null> {
   if (!API_BASE) return null; // API not wired in this environment
   let res: Response;
   try {
-    res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+    res = await fetch(`${API_BASE}${path}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch {
     return null;
   }
@@ -159,8 +169,12 @@ async function apiGet<T>(path: string): Promise<T | null> {
  */
 export const getWorldstreetEvents = unstable_cache(
   async (): Promise<MarketEvent[]> => {
-    const body = await apiGet<{ data: { events: ApiEvent[] } }>("/v1/markets");
-    return (body?.data.events ?? [])
+    const body = await apiGet<{ data?: { events?: ApiEvent[] } }>("/v1/markets");
+    // every level is optional on purpose: a proxy or an older build of
+    // the API can answer 200 with an envelope this doesn't recognise,
+    // and reaching blindly through it would throw inside the cache and
+    // take the page down instead of leaving the Bayse feed on it
+    return (body?.data?.events ?? [])
       .map(toWorldstreetEvent)
       .filter((e): e is MarketEvent => e !== null);
   },
@@ -169,10 +183,11 @@ export const getWorldstreetEvents = unstable_cache(
 );
 
 async function fetchBySlug(slug: string): Promise<MarketEvent | null> {
-  const body = await apiGet<{ data: { event: ApiEvent } }>(
+  const body = await apiGet<{ data?: { event?: ApiEvent } }>(
     `/v1/markets/slug/${encodeURIComponent(slug)}`,
   );
-  return body ? toWorldstreetEvent(body.data.event) : null;
+  const event = body?.data?.event;
+  return event ? toWorldstreetEvent(event) : null;
 }
 
 /** One Worldstreet market by slug, or null when it isn't one of ours. */

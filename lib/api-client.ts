@@ -27,6 +27,15 @@ interface FetchOptions extends Omit<RequestInit, "headers"> {
   headers?: Record<string, string>;
 }
 
+/**
+ * Every button that talks to the API waits on this. A request that
+ * hangs rather than failing leaves the button spinning with nothing to
+ * show and no way back — a timeout turns that into the error state each
+ * caller already handles. Generous, because a cold container's first
+ * response is genuinely slow.
+ */
+const REQUEST_TIMEOUT_MS = 20_000;
+
 export function isApiConfigured(): boolean {
   return Boolean(API_BASE);
 }
@@ -51,11 +60,27 @@ export async function apiFetch<T = unknown>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
-  const res = await fetch(target, {
-    ...options,
-    headers,
-    credentials: "include",
-  });
+  let res: Response;
+  try {
+    res = await fetch(target, {
+      ...options,
+      headers,
+      credentials: "include",
+      // a caller that brought its own signal (an abort on unmount) keeps it
+      signal: options.signal ?? AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
+  } catch (err) {
+    // fetch only rejects on network-level failure — DNS, CORS, offline,
+    // or our own timeout. All of them mean the same thing to a caller,
+    // and all of them read better than an unhandled rejection.
+    throw new ApiError(
+      err instanceof DOMException && err.name === "TimeoutError"
+        ? "The server took too long to respond. Try again."
+        : "Couldn't reach the server. Check your connection and try again.",
+      0,
+      null,
+    );
+  }
 
   // Parse defensively: gateway failures and error pages return HTML or an
   // empty body, and res.json() there throws an opaque "Unexpected token '<'"

@@ -28,6 +28,13 @@ import type { SeriesPoint } from "@/lib/series";
  */
 
 const RELAY_BASE = "https://relay.bayse.markets";
+/**
+ * A page render waits on this, so an upstream that hangs rather than
+ * refusing is worse than one that's down: without a deadline the render
+ * hangs with it and the visitor gets a blank tab instead of the "feed
+ * unavailable" state the page already knows how to show.
+ */
+const FETCH_TIMEOUT_MS = 10_000;
 const DEFAULT_REVALIDATE_SECONDS = 60;
 /** Detail-page price polling — see getBayseEventLive. */
 const LIVE_REVALIDATE_SECONDS = 10;
@@ -216,8 +223,13 @@ async function relayFetch<T>(
 
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store" });
+    res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch {
+    // a timeout lands here too, and reads the same to the caller: the
+    // feed didn't answer
     throw new BayseApiError(`Relay request failed: ${url.pathname} (network error)`);
   }
   if (!res.ok) {

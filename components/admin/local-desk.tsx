@@ -50,6 +50,14 @@ import { BookRiskStrip } from "@/components/admin/book-risk";
 export function LocalDesk() {
   const queue = useAdminResource(fetchSettlementQueue, true);
   const settlements = useAdminResource(fetchSettlements, true);
+  // The risk strip reads its own endpoint; settling here empties part
+  // of the book, so it has to re-read with the rest of the desk.
+  const [bookVersion, setBookVersion] = useState(0);
+  const refresh = () => {
+    queue.refresh();
+    settlements.refresh();
+    setBookVersion((v) => v + 1);
+  };
 
   if (!isApiConfigured()) {
     return (
@@ -84,10 +92,7 @@ export function LocalDesk() {
         <div className="flex items-center gap-2">
           <TestAlertButton />
           <button
-            onClick={() => {
-              queue.refresh();
-              settlements.refresh();
-            }}
+            onClick={refresh}
             className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
           >
             <RefreshCw
@@ -98,7 +103,7 @@ export function LocalDesk() {
         </div>
       </div>
 
-      <BookRiskStrip />
+      <BookRiskStrip reloadKey={bookVersion} />
 
       <FxCard />
 
@@ -132,10 +137,7 @@ export function LocalDesk() {
               key={event.eventId}
               event={event}
               overdueHours={queue.data!.overdueHours}
-              onDone={() => {
-                queue.refresh();
-                settlements.refresh();
-              }}
+              onDone={refresh}
             />
           ))}
         </div>

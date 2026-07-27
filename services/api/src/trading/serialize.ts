@@ -196,32 +196,34 @@ export async function exposureByMarket(
   const out = new Map<string, MarketExposure>();
   if (marketIds.length === 0) return out;
 
-  const risk = await riskByMarketId();
-  const rows = await Position.aggregate<{
-    _id: string;
-    totalPositions: number;
-    openPositions: number;
-    openStakeKobo: number;
-    maxPayoutKobo: number;
-  }>([
-    { $match: { marketId: { $in: marketIds } } },
-    {
-      $group: {
-        _id: "$marketId",
-        totalPositions: { $sum: 1 },
-        openPositions: {
-          $sum: { $cond: [{ $eq: ["$status", "open"] }, 1, 0] },
-        },
-        openStakeKobo: {
-          $sum: { $cond: [{ $eq: ["$status", "open"] }, "$stakeKobo", 0] },
-        },
-        maxPayoutKobo: {
-          $sum: {
-            $cond: [{ $eq: ["$status", "open"] }, "$potentialPayoutKobo", 0],
+  const [risk, rows] = await Promise.all([
+    riskByMarketId(marketIds),
+    Position.aggregate<{
+      _id: string;
+      totalPositions: number;
+      openPositions: number;
+      openStakeKobo: number;
+      maxPayoutKobo: number;
+    }>([
+      { $match: { marketId: { $in: marketIds } } },
+      {
+        $group: {
+          _id: "$marketId",
+          totalPositions: { $sum: 1 },
+          openPositions: {
+            $sum: { $cond: [{ $eq: ["$status", "open"] }, 1, 0] },
+          },
+          openStakeKobo: {
+            $sum: { $cond: [{ $eq: ["$status", "open"] }, "$stakeKobo", 0] },
+          },
+          maxPayoutKobo: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "open"] }, "$potentialPayoutKobo", 0],
+            },
           },
         },
       },
-    },
+    ]),
   ]);
   for (const row of rows) {
     const sides = risk.get(row._id);

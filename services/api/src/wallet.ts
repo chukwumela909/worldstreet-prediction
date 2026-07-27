@@ -31,6 +31,14 @@ export function isWalletConfigured(): boolean {
   return Boolean(config.WALLET_API_URL && config.WALLET_SERVICE_TOKEN);
 }
 
+/**
+ * A trade holds an HTTP connection open while this runs. A wallet that
+ * hangs rather than refusing would hold it indefinitely — the user's
+ * Buy button spins with no result and no error. Failing at a deadline
+ * gives them UNREACHABLE, which every caller already handles.
+ */
+const WALLET_TIMEOUT_MS = 15_000;
+
 async function walletCall<T>(
   method: "GET" | "POST",
   path: string,
@@ -48,7 +56,11 @@ async function walletCall<T>(
 
   let json: (Record<string, unknown> & { ok?: boolean; code?: string; error?: string }) | null;
   try {
-    const init: RequestInit = { method, headers };
+    const init: RequestInit = {
+      method,
+      headers,
+      signal: AbortSignal.timeout(WALLET_TIMEOUT_MS),
+    };
     if (opts.body != null) init.body = JSON.stringify(opts.body);
     const res = await fetch(`${config.WALLET_API_URL.replace(/\/+$/, "")}${path}`, init);
     json = (await res.json().catch(() => null)) as typeof json;

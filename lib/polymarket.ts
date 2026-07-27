@@ -25,6 +25,14 @@ import { deriveHotTopics, type HotTopic } from "@/lib/hot-topics";
 const GAMMA_BASE = "https://gamma-api.polymarket.com";
 const CLOB_BASE = "https://clob.polymarket.com";
 const DATA_API_BASE = "https://data-api.polymarket.com";
+/**
+ * These are awaited during a page render, so an upstream that hangs
+ * instead of refusing would hang the render with it — a blank tab where
+ * the caller's error state should be. Geoblocking usually surfaces as a
+ * slow black hole rather than a clean refusal, which is exactly the
+ * shape this guards against.
+ */
+const FETCH_TIMEOUT_MS = 10_000;
 const DEFAULT_REVALIDATE_SECONDS = 60;
 /** History moves slower than spot prices, and payloads are larger. */
 const HISTORY_REVALIDATE_SECONDS = 300;
@@ -267,7 +275,10 @@ async function gammaFetch<T>(
     // no-store: raw Gamma payloads run to ~7MB (> Next's 2MB fetch-cache
     // entry limit). The public fetchers below cache the small normalized
     // result via unstable_cache instead.
-    res = await fetch(url, { cache: "no-store" });
+    res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch {
     throw new PolymarketApiError(
       `Gamma request failed: ${url.pathname} (network error — Polymarket may be geoblocked in this region)`,
@@ -511,7 +522,10 @@ export const getPriceHistory = unstable_cache(
 
     let res: Response;
     try {
-      res = await fetch(url, { cache: "no-store" });
+      res = await fetch(url, {
+        cache: "no-store",
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
     } catch {
       throw new PolymarketApiError(
         "CLOB request failed (network error — Polymarket may be geoblocked in this region)",
@@ -548,7 +562,10 @@ async function dataApiFetch<T>(
   }
   let res: Response;
   try {
-    res = await fetch(url, { cache: "no-store" });
+    res = await fetch(url, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
   } catch {
     throw new PolymarketApiError(
       `Data API request failed: ${url.pathname} (network error — Polymarket may be geoblocked in this region)`,

@@ -67,10 +67,21 @@ function heroDate(iso: string): string {
   });
 }
 
-export function LogoMark() {
+/**
+ * The Worldstreet "W" — the same two-triangle mark the rest of the WorldStreet
+ * platforms ship as their favicon. Gold comes from `text-accent`, so it tracks
+ * the brand primitive rather than a pinned hex.
+ */
+export function LogoMark({ className = "size-3.5" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 24 24" className="size-3.5" fill="currentColor" aria-hidden>
-      <path d="M4 4h16v3.2L12 10 4 7.2V4zm0 6.4L12 13.2l8-2.8v3.2L12 16.4 4 13.6v-3.2zm0 6.4 8 2.8 8-2.8V20l-8 2.8L4 20v-3.2z" />
+    <svg
+      viewBox="17 27 66 46"
+      className={`${className} text-accent`}
+      fill="currentColor"
+      aria-hidden
+    >
+      <polygon points="17,27 40,73 53,30" />
+      <polygon points="47,30 60,73 83,27" />
     </svg>
   );
 }
