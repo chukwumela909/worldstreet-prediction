@@ -66,7 +66,7 @@ MONGODB_DB_NAME=worldstreet-prediction
 
 CLERK_PUBLISHABLE_KEY=pk_live_...
 CLERK_SECRET_KEY=sk_live_...
-CLERK_AUTHORIZED_PARTIES=https://worldstreetgold.com,https://www.worldstreetgold.com,https://prediction.worldstreetgold.com
+CLERK_AUTHORIZED_PARTIES=
 
 CORS_ORIGINS=https://prediction.worldstreetgold.com
 
@@ -86,8 +86,12 @@ Notes:
 
 - `TRUST_PROXY=true` is required behind Coolify's Traefik, otherwise rate
   limiting buckets every request under the proxy's IP.
-- `CLERK_AUTHORIZED_PARTIES` must list every web origin whose session tokens
-  this API accepts. A token minted by an origin not on the list is rejected.
+- `CLERK_AUTHORIZED_PARTIES` must stay EMPTY while the WorldStreet mobile app
+  uses this API. Native Clerk tokens carry no `azp` claim, and the SDK rejects
+  azp-less tokens whenever this option is set — a value here 401s every mobile
+  request while web keeps working, which reads as "mobile auth is broken".
+  If it is ever set, it must list every web origin whose session tokens this
+  API accepts; a token minted by an origin not on the list is rejected.
 - `CORS_ORIGINS` only adds to the built-in allowlist in `src/app.ts`
   (`prediction.worldstreetgold.com`, `worldstreetgold.com`,
   `www.worldstreetgold.com`), so it can stay empty if those cover you.
