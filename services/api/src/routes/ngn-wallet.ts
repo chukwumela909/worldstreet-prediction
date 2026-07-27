@@ -169,6 +169,10 @@ export const ngnWalletRoutes: FastifyPluginAsync = async (rawApp) => {
         metadata: { kind: "ngn_withdrawal", rate: fx.ngnToUsd },
       });
       if (!credit.ok) {
+        request.log.error(
+          { code: credit.code, message: credit.message, refKey },
+          "central wallet credit failed during NGN withdrawal",
+        );
         // central side failed — give the naira back
         await creditNaira({
           authUserId,

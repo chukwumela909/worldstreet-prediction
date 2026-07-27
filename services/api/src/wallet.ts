@@ -126,6 +126,8 @@ export function creditWallet(params: {
     body: {
       amountMinor: params.amountUsdMinor,
       currency: "USD",
+      // the wallet requires a reference on platform credits and dedupes on it
+      reference: params.idempotencyKey,
       description: params.description,
       metadata: params.metadata ?? {},
     },
