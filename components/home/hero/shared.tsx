@@ -68,20 +68,19 @@ function heroDate(iso: string): string {
 }
 
 /**
- * The Worldstreet "W" — the same two-triangle mark the rest of the WorldStreet
- * platforms ship as their favicon. Gold comes from `text-accent`, so it tracks
- * the brand primitive rather than a pinned hex.
+ * The Worldstreet badge — black "W" on a gold rounded square, the lockup
+ * worldstreetgold.com serves as its icon. Drawn from tokens (`fill-accent` /
+ * `fill-on-accent`) rather than the brand's pinned hex, so a repoint of the
+ * accent primitive carries the mark with it.
  */
 export function LogoMark({ className = "size-3.5" }: { className?: string }) {
   return (
-    <svg
-      viewBox="17 27 66 46"
-      className={`${className} text-accent`}
-      fill="currentColor"
-      aria-hidden
-    >
-      <polygon points="17,27 40,73 53,30" />
-      <polygon points="47,30 60,73 83,27" />
+    <svg viewBox="0 0 100 100" className={className} aria-hidden>
+      <rect width="100" height="100" rx="12" className="fill-accent" />
+      <g className="fill-on-accent">
+        <polygon points="11.7,27 38.4,73 53.5,30" />
+        <polygon points="46.5,30 61.6,73 88.3,27" />
+      </g>
     </svg>
   );
 }

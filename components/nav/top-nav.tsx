@@ -14,7 +14,7 @@ export function TopNav() {
     <div className="mx-auto flex h-[60px] w-full max-w-[1280px] items-center gap-4 px-6">
       {/* Logo */}
       <Link href="/" className="flex shrink-0 items-center gap-2">
-        <LogoMark className="h-5 w-7" />
+        <LogoMark className="size-7" />
         <span className="text-lg font-bold tracking-tight">Worldstreet</span>
       </Link>
 
