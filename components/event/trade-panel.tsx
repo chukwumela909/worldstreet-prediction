@@ -60,13 +60,9 @@ export function TradePanel({ event }: { event: MarketEvent }) {
           />
         </div>
 
-        <p className="mt-4 text-center text-sm leading-6 text-secondary">
-          These prices are mirrored from Polymarket. Trading them on
-          Worldstreet isn&rsquo;t live yet.
-        </p>
         <Link
           href="/?category=local"
-          className="mt-3 flex h-11 w-full items-center justify-center rounded-md bg-accent text-base font-semibold text-on-accent transition-colors hover:bg-accent-hover"
+          className="mt-4 flex h-11 w-full items-center justify-center rounded-md bg-accent text-base font-semibold text-on-accent transition-colors hover:bg-accent-hover"
         >
           Trade Local markets
         </Link>
