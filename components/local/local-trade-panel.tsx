@@ -312,18 +312,10 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
           </p>
         )}
 
-        <p className="mt-3 text-center text-xs leading-5 text-tertiary">
-          Prices are {CREDIT} per {CREDIT}100 share,{" "}
-          {event.source === "worldstreet"
-            ? "set by Worldstreet"
-            : "live from Bayse"}
-          . Positions are held to settlement — no selling back yet.
-        </p>
-
         {user && balanceKobo !== null && !failure?.shortfallKobo && (
           <button
             onClick={() => setFunding(true)}
-            className="mt-2 w-full text-center text-xs font-semibold text-accent hover:underline"
+            className="mt-3 w-full text-center text-xs font-semibold text-accent hover:underline"
           >
             Manage credit balance
           </button>
