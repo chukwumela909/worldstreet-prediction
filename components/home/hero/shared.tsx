@@ -1,5 +1,6 @@
 /** Shared header/footer pieces for hero slides. */
 
+import Image from "next/image";
 import { EventIcon } from "@/components/market/event-icon";
 
 export function HeroHeader({
@@ -68,20 +69,18 @@ function heroDate(iso: string): string {
 }
 
 /**
- * The bare Worldstreet "W" — no badge, no plate (WorldStreet1x.png). Monochrome
- * by design: it takes `text-primary`, so it reads white on the dark theme the
- * way the source asset does, and flips to ink on light instead of vanishing.
+ * The Worldstreet badge (WorldStreet4.png): black W on a gold rounded square.
+ * Full-color asset, so it carries its own contrast on both themes.
  */
 export function LogoMark({ className = "h-3 w-auto" }: { className?: string }) {
   return (
-    <svg
-      viewBox="11 26 78 48"
-      className={`${className} text-primary`}
-      fill="currentColor"
+    <Image
+      src="/worldstreet-logo.png"
+      alt=""
+      width={372}
+      height={339}
+      className={className}
       aria-hidden
-    >
-      <polygon points="11.7,27 38.4,73 53.5,30" />
-      <polygon points="46.5,30 61.6,73 88.3,27" />
-    </svg>
+    />
   );
 }
