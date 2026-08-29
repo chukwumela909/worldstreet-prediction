@@ -44,7 +44,7 @@ export function MarketCard({
       <header className="flex items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-2">
           <EventIcon event={event} className="size-7 rounded-md text-sm" px={28} />
-          <span className="truncate text-[11px] font-semibold uppercase tracking-wider text-tertiary">
+          <span className="truncate text-[13px] font-semibold uppercase tracking-wider text-secondary sm:text-xs">
             {label ?? event.category}
           </span>
         </span>
@@ -53,7 +53,7 @@ export function MarketCard({
       </header>
 
       <Link href={href} className="mt-3 block">
-        <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug text-primary hover:underline">
+        <h3 className="line-clamp-2 text-[17px] font-semibold leading-snug text-primary hover:underline sm:text-base">
           {isBinary(event) ? event.markets[0].question : event.title}
         </h3>
       </Link>
@@ -65,10 +65,10 @@ export function MarketCard({
       {/* mt-auto pins the stats to the bottom edge: grid rows stretch every
           card to the tallest in the row, so a two-outcome card next to a
           three-outcome one would otherwise float its footer mid-card */}
-      <footer className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-xs font-medium text-tertiary">
+      <footer className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-sm font-medium text-secondary sm:text-[13px]">
         <Stats event={event} />
         {/* renders only when a Local market is closing — see CloseCountdown */}
-        <CloseCountdown event={event} className="text-xs" />
+        <CloseCountdown event={event} className="text-sm sm:text-[13px]" />
       </footer>
     </article>
   );

@@ -8,7 +8,7 @@ import { ScrollStrip } from "@/components/scroll-strip";
  * Category pill bar (~56px) below the top nav — a slider strip with
  * chevron pagers when the pills overflow. Each pill links to the home
  * page scoped to its own live query (`/?category=...`).
- * Inactive pills text-secondary, active text-primary; 14px semibold.
+ * Inactive pills text-secondary, active text-primary; 16px bold.
  *
  * Tabs are addressed by param, never by position. This used to destructure
  * `[trending, worldCup, breaking, ...rest]` off CATEGORY_TABS, which had
@@ -24,10 +24,10 @@ const LEAD = ["trending", DEFAULT_CATEGORY] as const;
 const FEATURED = ["world-cup", "breaking"] as const;
 
 const ICONS: Record<string, ReactNode> = {
-  trending: <TrendingUp className="size-4" strokeWidth={2.5} />,
-  local: <MapPin className="size-4" strokeWidth={2.5} />,
-  "world-cup": <span className="text-base leading-none">⚽</span>,
-  breaking: <Zap className="size-4 text-yellow-500" strokeWidth={2.5} />,
+  trending: <TrendingUp className="size-5" strokeWidth={2.75} />,
+  local: <MapPin className="size-5" strokeWidth={2.75} />,
+  "world-cup": <span className="text-lg leading-none">⚽</span>,
+  breaking: <Zap className="size-5 text-yellow-500" strokeWidth={2.75} />,
 };
 
 /**
@@ -52,7 +52,7 @@ export function CategoryBar({ active = DEFAULT_CATEGORY }: { active?: string }) 
   );
 
   const pill = (isActive: boolean, extra = "") =>
-    `flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm font-semibold transition-colors ${
+    `flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-base font-bold transition-colors ${
       extra || (isActive ? "text-primary" : "text-secondary hover:text-primary")
     }`;
 
@@ -84,17 +84,18 @@ export function CategoryBar({ active = DEFAULT_CATEGORY }: { active?: string }) 
     <nav className="mx-auto flex h-14 w-full max-w-[1280px] items-center px-6">
       {/* -ml pulls the first pill's padding back so its label lines up with
           the logo and the page content, not the pill's hover box */}
-      <ScrollStrip className="-ml-2.5 items-center gap-1">
+      <ScrollStrip className="-ml-3 items-center gap-1">
         {lead.map((t) => tabLink(t.param, t.label))}
 
         {/* featured group, then divider, like the real site */}
         <span className="mx-1.5 flex items-center gap-1.5">
-          <button className="flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1 text-sm font-semibold text-secondary hover:text-primary">
-            <span className="text-base leading-none">🎛️</span>
+          {/* borrows pill() so it cannot drift out of size with the links */}
+          <button className={pill(false)}>
+            <span className="text-lg leading-none">🎛️</span>
             Combos
           </button>
           {featured.map((t) => tabLink(t.param, t.label))}
-          <span className="h-4 w-px bg-border-active/40" />
+          <span className="h-5 w-px bg-border-active/40" />
         </span>
 
         {rest.map((t) => tabLink(t.param, t.label))}

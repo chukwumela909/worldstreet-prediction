@@ -50,18 +50,18 @@ export function OutcomeRow({
     >
       <span
         aria-hidden="true"
-        className={`h-4 w-[3px] shrink-0 rounded-full ${
+        className={`h-5 w-[3px] shrink-0 rounded-full sm:h-[18px] ${
           side === "yes" ? "bg-yes" : "bg-no"
         }`}
       />
-      <span className="min-w-0 flex-1 truncate text-left text-sm font-medium text-primary">
+      <span className="min-w-0 flex-1 truncate text-left text-base font-medium text-primary sm:text-[15px]">
         {label}
       </span>
-      <span className="shrink-0 text-[13px] font-medium tabular-nums text-tertiary">
+      <span className="shrink-0 text-[15px] font-medium tabular-nums text-secondary sm:text-sm">
         {multiplier}
       </span>
       <span
-        className={`w-[52px] shrink-0 rounded-md py-1 text-center text-[13px] font-semibold tabular-nums transition-colors ${rest} ${hover}`}
+        className={`w-[58px] shrink-0 rounded-md py-1 text-center text-[15px] font-semibold tabular-nums transition-colors sm:w-[54px] sm:text-sm ${rest} ${hover}`}
       >
         {pct}%
       </span>
