@@ -25,6 +25,8 @@ export interface BayseMarketLive {
   outcomes: [BayseOutcome, BayseOutcome];
   /** Uppercased winning label ("YES", "PORTABLE") once resolved. */
   resolvedOutcome: string;
+  /** The winner's outcome id, when Relay provides it. */
+  resolvedOutcomeId: string;
 }
 
 export interface BayseEventLive {
@@ -51,6 +53,7 @@ interface RawMarket {
   outcome2Label?: string;
   outcome2Price?: number;
   resolvedOutcome?: string;
+  resolvedOutcomeId?: string;
 }
 
 interface RawEvent {
@@ -81,6 +84,7 @@ function toLive(raw: RawEvent): BayseEventLive {
       title: m.title,
       status: m.status ?? "open",
       resolvedOutcome: m.resolvedOutcome ?? "",
+      resolvedOutcomeId: m.resolvedOutcomeId ?? "",
       outcomes: [
         { id: m.outcome1Id, label: m.outcome1Label || "Yes", price: m.outcome1Price },
         { id: m.outcome2Id, label: m.outcome2Label || "No", price: m.outcome2Price },
@@ -126,11 +130,18 @@ export async function fetchBayseEvent(eventId: string): Promise<BayseEventLive> 
 }
 
 /**
- * The winning outcome of a resolved market, matched by label —
- * Relay reports `resolvedOutcome` as the winner's label uppercased
- * (e.g. "YES", "NO", "PORTABLE"). Null when unresolved or unmatched.
+ * The winning outcome of a resolved market. Relay's `resolvedOutcomeId`
+ * is authoritative when present; `resolvedOutcome` (the winner's label
+ * uppercased, e.g. "YES", "PORTABLE") is the fallback — but on the
+ * countdown series it carries yes/no semantics ("NO" on an Up/Down
+ * market), so the id must be tried first. Null when unresolved or
+ * neither field matches an outcome.
  */
 export function winningOutcome(market: BayseMarketLive): BayseOutcome | null {
+  const byId = market.outcomes.find(
+    (o) => o.id === market.resolvedOutcomeId,
+  );
+  if (byId) return byId;
   const winner = market.resolvedOutcome.trim().toUpperCase();
   if (!winner) return null;
   return (
