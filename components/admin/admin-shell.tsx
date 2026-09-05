@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Coins, PenSquare } from "lucide-react";
+import { ArrowLeft, Coins, PenSquare, Users } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-context";
 
 const NAV = [
   { href: "/admin", label: "Local book", icon: Coins },
   { href: "/admin/markets", label: "Markets", icon: PenSquare },
+  { href: "/admin/traders", label: "Traders", icon: Users },
 ] as const;
 
 /**

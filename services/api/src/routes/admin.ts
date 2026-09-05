@@ -4,13 +4,14 @@ import { z } from "zod";
 import { authenticate, type AuthenticatedUser } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { getFxQuote } from "../trading/fx.js";
-import { FxRate, Position, Settlement } from "../trading/models.js";
+import { FxRate, LedgerEntry, Position, Settlement } from "../trading/models.js";
 import {
   adminSettleMarket,
   adminVoidMarket,
 } from "../trading/settlement.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
 import { getSettlementQueue } from "../trading/exposure.js";
+import { listTraders, TRADER_SORTS, type TraderSort } from "../trading/traders.js";
 import { getBookRisk } from "../trading/risk.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
@@ -44,6 +45,15 @@ const settleBody = z.object({
   eventId: z.string().uuid(),
   marketId: z.string().uuid(),
   winningOutcomeId: z.string().uuid(),
+});
+
+const tradersQuery = z.object({
+  /** Matches username, display name, email, or an exact Clerk user id. */
+  search: z.string().trim().max(120).optional(),
+  sort: z.enum(TRADER_SORTS).optional(),
+  limit: z.coerce.number().int().min(1).max(200).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  activeOnly: z.coerce.boolean().optional(),
 });
 
 const voidBody = z.object({
@@ -207,6 +217,83 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       throw new ApiError(409, "This market is already settled", "ALREADY_SETTLED");
     }
     return { success: true, data: result };
+  });
+
+  /**
+   * Who is playing the book. Everyone with a local profile, with what
+   * they have staked, what they are still riding and what they have
+   * realized next to it — the desk's people view, where /leaderboard is
+   * the public winners view. `activeOnly=true` drops the accounts that
+   * signed up and never staked.
+   */
+  app.get(
+    "/admin/traders",
+    { schema: { querystring: tradersQuery } },
+    async (request) => {
+      await requireAdmin(request);
+      const { search, sort, limit, offset, activeOnly } = request.query;
+      return {
+        success: true,
+        data: await listTraders({
+          search,
+          sort: sort as TraderSort,
+          limit,
+          offset,
+          activeOnly,
+        }),
+      };
+    },
+  );
+
+  /**
+   * One person's play: their profile and their positions, newest first,
+   * with the money movements that produced them. This is the answer to
+   * "what has this account actually been doing" — the list view can
+   * only say how much, not on what.
+   */
+  app.get("/admin/traders/:authUserId", async (request) => {
+    await requireAdmin(request);
+    const { authUserId } = request.params as { authUserId: string };
+
+    const list = await listTraders({ search: authUserId, limit: 1 });
+    const trader = list.traders.find((t) => t.authUserId === authUserId);
+    if (!trader) {
+      throw new ApiError(404, "No such trader", "USER_NOT_FOUND");
+    }
+
+    const [positions, ledger] = await Promise.all([
+      Position.find({ authUserId }).sort({ createdAt: -1 }).limit(100).lean(),
+      LedgerEntry.find({ authUserId }).sort({ createdAt: -1 }).limit(50).lean(),
+    ]);
+
+    return {
+      success: true,
+      data: {
+        trader,
+        positions: positions.map((p) => ({
+          id: String(p._id),
+          eventId: p.eventId,
+          eventSlug: p.eventSlug,
+          eventTitle: p.eventTitle,
+          marketTitle: p.marketTitle,
+          outcomeLabel: p.outcomeLabel,
+          stakeKobo: p.stakeKobo,
+          priceKobo: p.priceKobo,
+          potentialPayoutKobo: p.potentialPayoutKobo,
+          status: p.status,
+          createdAt: p.createdAt?.toISOString?.() ?? null,
+          settledAt: p.settledAt?.toISOString?.() ?? null,
+        })),
+        ledger: ledger.map((l) => ({
+          id: String(l._id),
+          type: l.type,
+          amountKobo: l.amountKobo,
+          balanceAfterKobo: l.balanceAfterKobo,
+          description: l.description,
+          createdAt: l.createdAt?.toISOString?.() ?? null,
+        })),
+      },
+    };
   });
 
   /** Recent settlements, newest first — the audit trail. */

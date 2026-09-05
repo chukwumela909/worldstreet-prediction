@@ -424,3 +424,112 @@ export function useAdminResource<T>(
     },
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Traders — who is playing the book                                   */
+/* ------------------------------------------------------------------ */
+
+export const TRADER_SORTS = [
+  "recent",
+  "staked",
+  "pnl",
+  "balance",
+  "trades",
+  "joined",
+] as const;
+export type TraderSort = (typeof TRADER_SORTS)[number];
+
+export interface TraderRow {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  avatar: string;
+  joinedAt: string | null;
+  balanceKobo: number;
+  trades: number;
+  openPositions: number;
+  wonPositions: number;
+  lostPositions: number;
+  voidedPositions: number;
+  stakedKobo: number;
+  openStakeKobo: number;
+  openPayoutKobo: number;
+  /** Realized profit for the trader; the house's side of it is the inverse. */
+  realizedPnlKobo: number;
+  lastTradeAt: string | null;
+}
+
+export interface TraderSummary {
+  users: number;
+  traders: number;
+  stakedKobo: number;
+  openStakeKobo: number;
+  realizedPnlKobo: number;
+  balanceKobo: number;
+}
+
+export interface TraderList {
+  traders: TraderRow[];
+  total: number;
+  summary: TraderSummary;
+  truncated: boolean;
+}
+
+export interface TraderPosition {
+  id: string;
+  eventId: string;
+  eventSlug: string;
+  eventTitle: string;
+  marketTitle: string;
+  outcomeLabel: string;
+  stakeKobo: number;
+  priceKobo: number;
+  potentialPayoutKobo: number;
+  status: "open" | "won" | "lost" | "voided";
+  createdAt: string | null;
+  settledAt: string | null;
+}
+
+export interface TraderLedgerEntry {
+  id: string;
+  type: string;
+  amountKobo: number;
+  balanceAfterKobo: number;
+  description: string;
+  createdAt: string | null;
+}
+
+export interface TraderDetail {
+  trader: TraderRow;
+  positions: TraderPosition[];
+  ledger: TraderLedgerEntry[];
+}
+
+/** The people list. Searches username, display name and email. */
+export async function fetchTraders(params: {
+  search?: string;
+  sort?: TraderSort;
+  limit?: number;
+  offset?: number;
+  activeOnly?: boolean;
+}): Promise<TraderList> {
+  const qs = new URLSearchParams();
+  if (params.search) qs.set("search", params.search);
+  if (params.sort) qs.set("sort", params.sort);
+  if (params.limit) qs.set("limit", String(params.limit));
+  if (params.offset) qs.set("offset", String(params.offset));
+  if (params.activeOnly) qs.set("activeOnly", "true");
+  const res = await apiFetch<{ data: TraderList }>(
+    `/v1/admin/traders?${qs.toString()}`,
+  );
+  return res.data;
+}
+
+/** One person's play: their positions and money movements, newest first. */
+export async function fetchTrader(authUserId: string): Promise<TraderDetail> {
+  const res = await apiFetch<{ data: TraderDetail }>(
+    `/v1/admin/traders/${encodeURIComponent(authUserId)}`,
+  );
+  return res.data;
+}
