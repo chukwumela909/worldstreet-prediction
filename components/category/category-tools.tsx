@@ -9,6 +9,7 @@ import {
   XMarkIcon as X,
 } from "@heroicons/react/24/outline";
 import type { MarketEvent } from "@/types/market";
+import type { LoadMoreStatus } from "@/lib/use-load-more";
 
 export type SortKey = "trending" | "movers" | "closing" | "volume" | "balanced";
 
@@ -212,6 +213,45 @@ export function FrequencyMenu({
         )}
       </fieldset>
     </Popover>
+  );
+}
+
+/**
+ * "Load more" under a market grid (see lib/use-load-more.ts): the
+ * reference's secondary button, disabled and relabelled while a page is
+ * on its way, and swapped for a one-line retry when one fails. Renders
+ * nothing once the feed has run out.
+ */
+export function LoadMore({
+  status,
+  onLoad,
+  className = "",
+}: {
+  status: LoadMoreStatus;
+  onLoad: () => void;
+  className?: string;
+}) {
+  if (status === "done") return null;
+  return (
+    <div aria-live="polite" className={`flex justify-center ${className}`}>
+      {status === "error" ? (
+        <p role="alert" className="text-sm text-secondary">
+          Couldn&rsquo;t load more markets.{" "}
+          <button type="button" onClick={onLoad} className="font-semibold text-primary underline">
+            Try again
+          </button>
+        </p>
+      ) : (
+        <button
+          type="button"
+          onClick={onLoad}
+          disabled={status === "loading"}
+          className="h-9 rounded-sm border border-border bg-surface px-4 text-sm font-medium text-primary transition-colors hover:border-border-active hover:bg-element-2 disabled:pointer-events-none disabled:text-secondary"
+        >
+          {status === "loading" ? "Loading…" : "Load more"}
+        </button>
+      )}
+    </div>
   );
 }
 

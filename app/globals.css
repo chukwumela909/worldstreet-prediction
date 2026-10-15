@@ -148,6 +148,12 @@
   --bg-sunken: #0b0b0b; /* footer, wells */
   --bg-overlay: #535353; /* surface.overlay — toast entrance, neutral badge */
   --domain-accent: var(--predict-500);
+  /* A game in progress — the sports cards' LIVE frame and label, the
+     rail's live games, the "LIVE · N" count. The reference paints live
+     with the predict primitive directly; it gets its own role here because
+     --domain-accent only says which product you're in, never what's
+     happening. Follows --predict-500 into light (#9333ea). */
+  --live: var(--predict-500);
   --bg-page: var(--neutral-0);
   --bg-surface: var(--neutral-50);
   --bg-element: var(--neutral-50);
@@ -270,7 +276,7 @@
   --ink-100: #d2d2cf;
   --ink-text: #1a1a1a;
 
-  --predict-500: #9333ea;
+  --predict-500: #9333ea; /* also --live */
   --bg-sunken: #eeeeec;
   --bg-overlay: #ffffff;
 
@@ -294,6 +300,7 @@
   --color-sunken: var(--bg-sunken);
   --color-overlay: var(--bg-overlay);
   --color-domain: var(--domain-accent);
+  --color-live: var(--live);
   --color-surface: var(--bg-surface);
   --color-element: var(--bg-element);
   --color-element-2: var(--bg-element-2);

@@ -8,10 +8,11 @@ import { isBinary, isLocalBook, type MarketEvent } from "@/types/market";
 import {
   formatNairaCompact,
   formatUsdCompact,
-  toMultiplier,
   toPercent,
 } from "@/lib/format";
 import { CloseCountdown } from "@/components/local/close-countdown";
+import { marketHref } from "@/lib/book";
+import { useQuote } from "@/components/book-pricing";
 
 /**
  * Market card — the atomic unit of the home grid. An identity strip (icon,
@@ -39,7 +40,7 @@ export function MarketCard({
   // naira-book events live under /local, Polymarket under /event
   const local = isLocalBook(event);
   const href = eventHref(event);
-  const outcomes = isBinary(event) ? 2 : event.markets.length;
+  const outcomes = isBinary(event) ? 2 : (event.marketCount ?? event.markets.length);
 
   return (
     <PrefetchArticle
@@ -52,9 +53,7 @@ export function MarketCard({
           {label ?? event.category}
         </span>
         {event.subcategory && (
-          <span className="ml-auto shrink-0 text-xs text-secondary">
-            {event.subcategory}
-          </span>
+          <span className="ml-auto shrink-0 text-xs text-secondary">{event.subcategory}</span>
         )}
       </header>
 
@@ -91,7 +90,7 @@ export function MarketCard({
 }
 
 export function eventHref(event: Pick<MarketEvent, "slug" | "source">): string {
-  return isLocalBook(event) ? `/local/${event.slug}` : `/event/${event.slug}`;
+  return marketHref(event.slug, event);
 }
 
 /** "Oct 15, 2026" — from the full close time when the source gives one. */
@@ -128,6 +127,7 @@ function CloseDate({ event }: { event: MarketEvent }) {
 const MAX_ROWS = 2;
 
 function Outcomes({ event, href }: { event: MarketEvent; href: string }) {
+  const { quoteMultiplier } = useQuote();
   if (isBinary(event)) {
     const market = event.markets[0];
     const [yesLabel, noLabel] = market.outcomeLabels ?? ["Yes", "No"];
@@ -137,7 +137,7 @@ function Outcomes({ event, href }: { event: MarketEvent; href: string }) {
           label={yesLabel}
           tone={YES_TONE}
           pct={toPercent(market.outcomePrices[0])}
-          multiplier={toMultiplier(market.outcomePrices[0])}
+          multiplier={quoteMultiplier(event, market.outcomePrices[0])}
           href={href}
         />
         {/* The No price is quoted, not inferred: on a Polymarket or Bayse
@@ -148,7 +148,7 @@ function Outcomes({ event, href }: { event: MarketEvent; href: string }) {
           label={noLabel}
           tone={NO_TONE}
           pct={toPercent(market.outcomePrices[1])}
-          multiplier={toMultiplier(market.outcomePrices[1])}
+          multiplier={quoteMultiplier(event, market.outcomePrices[1])}
           href={href}
         />
       </>
@@ -163,7 +163,7 @@ function Outcomes({ event, href }: { event: MarketEvent; href: string }) {
           label={m.groupItemTitle ?? m.question}
           tone={outcomeTone(i)}
           pct={toPercent(m.outcomePrices[0])}
-          multiplier={toMultiplier(m.outcomePrices[0])}
+          multiplier={quoteMultiplier(event, m.outcomePrices[0])}
           href={href}
         />
       ))}

@@ -3,11 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowRightIcon as ArrowRight,
+  ArrowUpRightIcon as ArrowUpRight,
   CheckCircleIcon as CheckCircle2,
   ArrowPathIcon as Loader2,
+  WalletIcon as Wallet,
   XMarkIcon as X,
 } from "@heroicons/react/24/outline";
 import { ApiError } from "@/lib/api-client";
+import { WALLET_FUND_URL } from "@/lib/auth-config";
 import { CREDIT, formatNaira } from "@/lib/format";
 import {
   convertCurrency,
@@ -298,6 +301,30 @@ function FundDialog({
             {done}
           </p>
         )}
+
+        {/* The dollars converted above come from the central WorldStreet
+            wallet, which is topped up on the main site — so the way to
+            more credit when it's empty starts there. */}
+        <div className="mt-5 flex items-center gap-3 border-t border-border pt-4">
+          <span className="grid size-9 shrink-0 place-items-center rounded-full bg-element-2 text-accent-ink">
+            <Wallet className="size-5" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold">Fund your WorldStreet wallet</p>
+            <p className="text-xs text-secondary">
+              Top up your dollar balance, then convert it to credit here.
+            </p>
+          </div>
+          <a
+            href={WALLET_FUND_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex h-9 shrink-0 items-center gap-1.5 rounded-sm border border-border bg-surface px-3 text-sm font-medium text-primary transition-colors hover:border-border-active hover:bg-element-2"
+          >
+            Fund wallet
+            <ArrowUpRight className="size-4" />
+          </a>
+        </div>
       </div>
     </div>
   );

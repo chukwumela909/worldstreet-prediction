@@ -73,6 +73,8 @@ const PILL_VARIANTS = {
 const PILL_SIZES = {
   sm: "h-8 min-w-14 px-3 text-[13px]",
   md: "h-10 min-w-16 px-3.5 text-sm",
+  /** The sports list's big round pill: 48px square on phones, 76×64 from sm. */
+  lg: "h-12 w-12 px-1 text-xs sm:h-16 sm:w-[76px] sm:px-3 sm:text-sm",
 };
 
 /**

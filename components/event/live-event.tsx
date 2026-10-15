@@ -12,7 +12,7 @@ import { DetailCard, MarketDetail, StatusToken } from "@/components/event/market
 import { MarketInfo } from "@/components/event/market-info";
 import { OutcomeList } from "@/components/event/outcome-list";
 import { PriceChart } from "@/components/event/price-chart";
-import { TradePanel } from "@/components/event/trade-panel";
+import { LocalTradePanel } from "@/components/local/local-trade-panel";
 import { TradeProvider } from "@/components/event/trade-context";
 import { useLivePrices } from "@/lib/use-live-prices";
 
@@ -33,7 +33,7 @@ export function LiveEvent({ event: initial }: { event: MarketEvent }) {
     <TradeProvider event={event}>
       <MarketDetail
         breadcrumb={<DetailBreadcrumb category={event.category} watchSlug={event.slug} />}
-        ticket={<TradePanel event={event} />}
+        ticket={<LocalTradePanel event={event} />}
       >
         <EventLockup
           event={event}

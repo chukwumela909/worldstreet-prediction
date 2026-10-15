@@ -41,9 +41,10 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
     <OutcomesCard>
       {event.markets.map((m, i) => {
         // a binary event's one row would only repeat the title as its name
-        const name = binary ? "Yes" : (m.groupItemTitle ?? m.question);
-        const yes = `Yes ${toCents(m.outcomePrices[0])}`;
-        const no = `No ${toCents(m.outcomePrices[1])}`;
+        const name = binary ? (m.outcomeLabels?.[0] ?? "Yes") : (m.groupItemTitle ?? m.question);
+        const [yesLabel, noLabel] = m.outcomeLabels ?? ["Yes", "No"];
+        const yes = `${yesLabel} ${toCents(m.outcomePrices[0])}`;
+        const no = `${noLabel} ${toCents(m.outcomePrices[1])}`;
         return (
           <OutcomeQuoteRow
             key={m.id}

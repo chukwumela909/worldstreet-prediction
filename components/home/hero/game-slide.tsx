@@ -6,7 +6,7 @@ import {
 } from "@heroicons/react/24/outline";
 import type { FeaturedGame, GameLineGroup } from "@/lib/polymarket";
 import { useAuth } from "@/components/auth/auth-context";
-import { toMultiplier } from "@/lib/format";
+import { useQuote } from "@/components/book-pricing";
 import { OutcomeRow } from "@/components/market/outcome-row";
 import { PILL_TONE, QuotePill, outcomeTone } from "@/components/market/outcome-quote";
 import { HeroFooter, HeroHeader, QuoteColumnLabels, type SlideHeaderProps } from "./shared";
@@ -21,6 +21,7 @@ export function GameSlide({
   headerExtra,
   eager,
 }: { game: FeaturedGame } & SlideHeaderProps) {
+  const { quoteMultiplier } = useQuote();
   const { user, openAuth } = useAuth();
   const gate = () => {
     if (!user) openAuth();
@@ -55,7 +56,8 @@ export function GameSlide({
                 label={o.label}
                 tone={outcomeTone(i)}
                 pct={o.pct}
-                multiplier={toMultiplier(String(o.pct / 100))}
+                // the featured game is always a Polymarket one
+                multiplier={quoteMultiplier({}, String(o.pct / 100))}
                 href={href}
               />
             ))}

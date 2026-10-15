@@ -1,26 +1,37 @@
 "use client";
 
 import type { MarketEvent } from "@/types/market";
-import { toMultiplier, toPercent } from "@/lib/format";
+import { toPercent } from "@/lib/format";
+import { useQuote } from "@/components/book-pricing";
 import { OutcomeRow } from "@/components/market/outcome-row";
 import { outcomeTone } from "@/components/market/outcome-quote";
 import { CommentsMarquee } from "./comments-marquee";
 import { HeroChart } from "./hero-chart";
-import { HeroFooter, HeroHeader, QuoteColumnLabels, type SlideHeaderProps } from "./shared";
+import {
+  HeroFooter,
+  HeroHeader,
+  QuoteColumnLabels,
+  ResolutionSource,
+  type SlideHeaderProps,
+  type SlideVariant,
+} from "./shared";
 
 /** Outcomes on the slide; the chart draws the same ones in the same tones. */
 const MAX_OUTCOMES = 4;
 
 /**
  * Multi-outcome market hero slide: quote rows (name over chance bar ·
- * payout · price pill) with the live comments marquee under them on the
- * left, the price history of those same outcomes on the right.
+ * payout · price pill) on the left — over the live comments marquee on
+ * the home hero, over the resolution source on a category page — and
+ * the price history of those same outcomes on the right.
  */
 export function MarketSlide({
   event,
   headerExtra,
   eager,
-}: { event: MarketEvent } & SlideHeaderProps) {
+  variant = "hero",
+}: { event: MarketEvent; variant?: SlideVariant } & SlideHeaderProps) {
+  const { quoteMultiplier } = useQuote();
   const shown = event.markets.slice(0, MAX_OUTCOMES);
   const tones = shown.map((_, i) => outcomeTone(i));
   const href = `/event/${event.slug}`;
@@ -51,13 +62,17 @@ export function MarketSlide({
                 label={m.groupItemTitle ?? m.question}
                 tone={tones[i]}
                 pct={toPercent(m.outcomePrices[0])}
-                multiplier={toMultiplier(m.outcomePrices[0])}
+                multiplier={quoteMultiplier(event, m.outcomePrices[0])}
                 href={href}
                 size="md"
               />
             ))}
           </div>
-          <CommentsMarquee eventId={event.id} />
+          {variant === "category" ? (
+            <ResolutionSource event={event} href={href} />
+          ) : (
+            <CommentsMarquee eventId={event.id} />
+          )}
         </div>
         <div className="hidden min-w-0 md:block">
           <HeroChart markets={shown} colors={tones} />

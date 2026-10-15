@@ -14,6 +14,7 @@ import {
 import { getBayseEvents } from "@/lib/bayse";
 import { getWorldstreetEvents } from "@/lib/worldstreet-markets";
 import { CATEGORY_TABS, categoryTab, type CategoryTab } from "@/lib/categories";
+import { findGroup } from "@/lib/category-groups";
 import type { HotTopic } from "@/lib/hot-topics";
 import type { MarketEvent } from "@/types/market";
 
@@ -24,9 +25,9 @@ import type { MarketEvent } from "@/types/market";
  * simply don't render if their fetch fails.
  *
  * `?category=` picks the view (see lib/categories.ts). A bare `/` is the
- * Local book (DEFAULT_CATEGORY), the only tab anyone can trade on, and it
- * and Trending get the home board; every Polymarket category gets its own
- * category page.
+ * Local book (DEFAULT_CATEGORY), and it and Trending get the home board;
+ * every Polymarket category gets its own category page. Every market on
+ * every tab trades (lib/book.ts prices them).
  *
  * Nothing here awaits data before returning: each slow part sits behind
  * its own Suspense boundary, so the page shell streams at once and every
@@ -129,19 +130,29 @@ export default async function Home({ searchParams }: Props) {
 }
 
 async function CategoryContent({ tab, group }: { tab: CategoryTab; group: string }) {
+  // a sidebar group is its own Gamma tag, fetched whole; a label that
+  // names no group is ignored rather than trusted as a tag
+  const subgroup = findGroup(tab.param, group);
   const events = await getEvents({
     limit: CATEGORY_LIMIT,
-    tagSlug: tab.tagSlug,
+    tagSlug: subgroup?.slug ?? tab.tagSlug,
     order: tab.order,
   }).catch(() => null);
   if (events === null) return <Unavailable source="Polymarket’s public API" />;
-  if (events.length === 0) {
+  // an empty group still gets the screen, so its sidebar can lead back out
+  if (events.length === 0 && !subgroup) {
     return (
       <p className="py-16 text-center text-secondary">No live {tab.label} markets right now.</p>
     );
   }
   return (
-    <CategoryScreen param={tab.param} label={tab.label} group={group} events={events} />
+    <CategoryScreen
+      param={tab.param}
+      label={tab.label}
+      group={subgroup?.label ?? ""}
+      groupSlug={subgroup?.slug}
+      events={events}
+    />
   );
 }
 

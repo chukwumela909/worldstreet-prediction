@@ -3,17 +3,29 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
+  ChevronDownIcon as ChevronDown,
   ChevronLeftIcon as ChevronLeft,
   ChevronRightIcon as ChevronRight,
   XMarkIcon as X,
 } from "@heroicons/react/24/outline";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
 import { useLivePrices } from "@/lib/use-live-prices";
+import { categoryFeed, useLoadMore } from "@/lib/use-load-more";
 import { useWatchlist } from "@/lib/watchlist-store";
+import { CATEGORY_GROUPS } from "@/lib/category-groups";
+import { SportsTicketProvider } from "@/components/sports/sports-ticket";
+import { SportsEventRail } from "@/components/sports/sports-event-rail";
+import { SportsBoard } from "@/components/sports/sports-board";
 import { MarketCard } from "@/components/market/market-card";
 import { BinarySlide } from "@/components/home/hero/binary-slide";
 import { MarketSlide } from "@/components/home/hero/market-slide";
-import { CategoryTools, FrequencyMenu, FREQUENCIES, type SortKey } from "./category-tools";
+import {
+  CategoryTools,
+  FrequencyMenu,
+  FREQUENCIES,
+  LoadMore,
+  type SortKey,
+} from "./category-tools";
 
 /**
  * A category tab's own page (/?category=politics, ...): a subgroup
@@ -21,27 +33,33 @@ import { CategoryTools, FrequencyMenu, FREQUENCIES, type SortKey } from "./categ
  * can page through, then the grid. The reference's CategoryMarkets screen,
  * on live data.
  *
- * Subgroups come from the events' own tags (most common first), so every
- * entry in the sidebar matches at least one market; the reference's
- * hand-written group lists would mostly come up empty against a live
- * feed. The active subgroup is a URL param, so a filtered view can be
- * linked to.
+ * The sidebar is the reference's group list (lib/category-groups.ts),
+ * each entry a Polymarket tag. The active group is a URL param the server
+ * resolves and fetches by its tag, so `events` arrive already in the
+ * group and a filtered view can be linked to.
  */
-const MAX_GROUPS = 10;
-
 export function CategoryScreen({
   param,
   label,
   group,
+  groupSlug,
   events: initialEvents,
 }: {
   param: string;
   label: string;
-  /** Active subgroup (a tag label), or "" for All markets. */
+  /** Active sidebar group's label, or "" for All markets. */
   group: string;
+  /** The active group's tag — what Load more keeps paging. */
+  groupSlug?: string;
   events: MarketEvent[];
 }) {
-  const events = useLivePrices(initialEvents);
+  // later pages join the first one before anything below derives from
+  // it, so sort, search, saved and frequency all see one list
+  const { events: loaded, status, loadMore } = useLoadMore(
+    initialEvents,
+    categoryFeed(param, initialEvents, groupSlug),
+  );
+  const events = useLivePrices(loaded);
   const watchlist = useWatchlist();
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<SortKey>("trending");
@@ -51,30 +69,10 @@ export function CategoryScreen({
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [promo, setPromo] = useState(true);
 
-  const groups = useMemo(() => {
-    const own = label.toLowerCase();
-    const counts = new Map<string, number>();
-    for (const e of events)
-      for (const t of e.tags ?? []) {
-        const key = t.toLowerCase();
-        if (key === own || FREQUENCIES.some((f) => f.tags.includes(key))) continue;
-        counts.set(t, (counts.get(t) ?? 0) + 1);
-      }
-    return [...counts.entries()]
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, MAX_GROUPS)
-      .map(([tag]) => tag);
-  }, [events, label]);
-
-  const inGroup = useMemo(
-    () => events.filter((e) => !group || e.tags?.includes(group)),
-    [events, group],
-  );
-
   const visible = useMemo(() => {
     const term = query.trim().toLowerCase();
     const freq = FREQUENCIES.find((f) => f.value === frequency);
-    const filtered = inGroup.filter((e) => {
+    const filtered = events.filter((e) => {
       if (savedOnly && !watchlist.includes(e.slug)) return false;
       if (freq && !e.tags?.some((t) => freq.tags.includes(t.toLowerCase()))) return false;
       if (!term) return true;
@@ -85,7 +83,7 @@ export function CategoryScreen({
     });
     const sorted = sortEvents(filtered, sort);
     return reverse ? sorted.reverse() : sorted;
-  }, [inGroup, query, frequency, savedOnly, watchlist, sort, reverse]);
+  }, [events, query, frequency, savedOnly, watchlist, sort, reverse]);
 
   const featured = visible.length > 0 ? visible[featuredIndex % visible.length] : null;
   const page = (step: number) =>
@@ -109,41 +107,57 @@ export function CategoryScreen({
     </nav>
   );
 
+  const tools = (
+    <CategoryTools
+      query={query}
+      sort={sort}
+      reverse={reverse}
+      savedOnly={savedOnly}
+      onQuery={setQuery}
+      onSort={setSort}
+      onReverse={setReverse}
+      onSaved={() => setSavedOnly((v) => !v)}
+    />
+  );
+  const loadMoreButton = <LoadMore status={status} onLoad={loadMore} className="mt-8" />;
+
+  // Sports is the reference's own layout: the games rail over the page,
+  // and in the content column the type pills, single-column game cards
+  // and the trade ticket beside them, in place of featured + grid
+  if (param === "sports") {
+    return (
+      <SportsTicketProvider events={visible}>
+        <SportsEventRail events={events} />
+        <section className={LAYOUT}>
+          <CategorySidebar param={param} label={label} group={group} />
+          <div className="min-w-0">
+            <SportsBoard
+              events={visible}
+              title={group || label}
+              tools={tools}
+              footer={loadMoreButton}
+              resetHref={`/?category=${param}`}
+              onReset={() => {
+                setQuery("");
+                setSavedOnly(false);
+              }}
+            />
+          </div>
+        </section>
+      </SportsTicketProvider>
+    );
+  }
+
   return (
-    <section className="grid items-start gap-4 md:grid-cols-[160px_minmax(0,1fr)] md:gap-5 xl:grid-cols-[192px_minmax(0,1fr)] xl:gap-6">
-      <nav
-        aria-label={`${label} subgroups`}
-        className="flex gap-1 overflow-x-auto border-b border-border pb-3 text-sm [scrollbar-width:none] md:sticky md:top-[152px] md:max-h-[calc(100dvh-180px)] md:flex-col md:overflow-y-auto md:border-0 md:pb-0 md:pr-2"
-      >
-        <SidebarLink href={`/?category=${param}`} current={!group}>
-          All markets
-        </SidebarLink>
-        {groups.map((g) => (
-          <SidebarLink
-            key={g}
-            href={`/?category=${param}&group=${encodeURIComponent(g)}`}
-            current={group === g}
-          >
-            {g}
-          </SidebarLink>
-        ))}
-      </nav>
+    <section className={LAYOUT}>
+      <CategorySidebar param={param} label={label} group={group} />
 
       <div className="min-w-0">
         <header className="mb-4 flex min-h-12 flex-wrap items-center justify-between gap-4">
           <h1 className="text-xl font-bold tracking-[-0.02em]">{group || label}</h1>
           <div className="flex w-full items-center justify-between gap-3 md:w-auto">
-            <CategoryTools
-              query={query}
-              sort={sort}
-              reverse={reverse}
-              savedOnly={savedOnly}
-              onQuery={setQuery}
-              onSort={setSort}
-              onReverse={setReverse}
-              onSaved={() => setSavedOnly((v) => !v)}
-            />
-            <FrequencyMenu events={inGroup} value={frequency} onChange={setFrequency} />
+            {tools}
+            <FrequencyMenu events={events} value={frequency} onChange={setFrequency} />
           </div>
         </header>
 
@@ -172,7 +186,7 @@ export function CategoryScreen({
 
         {featured && (
           <section aria-label="Featured market" className="mb-4">
-            <div className="relative h-[440px] overflow-hidden rounded-xl border border-border bg-surface shadow-card">
+            <div className="relative overflow-hidden rounded-xl border border-border bg-surface shadow-card md:h-[480px]">
               {/* the pager rides in the card's header beside the link and
                   save actions on wide screens, and drops under the card
                   below xl where the header has no room for it */}
@@ -180,6 +194,7 @@ export function CategoryScreen({
                 <BinarySlide
                   key={featured.id}
                   event={featured}
+                  variant="category"
                   eager
                   headerExtra={featuredPager("ml-2 hidden xl:flex")}
                 />
@@ -187,6 +202,7 @@ export function CategoryScreen({
                 <MarketSlide
                   key={featured.id}
                   event={featured}
+                  variant="category"
                   eager
                   headerExtra={featuredPager("ml-2 hidden xl:flex")}
                 />
@@ -218,8 +234,76 @@ export function CategoryScreen({
             </Link>
           </div>
         )}
+        {loadMoreButton}
       </div>
     </section>
+  );
+}
+
+/** Sidebar beside content — the reference's category-layout columns. */
+const LAYOUT =
+  "grid items-start gap-4 md:grid-cols-[160px_minmax(0,1fr)] md:gap-5 xl:grid-cols-[192px_minmax(0,1fr)] xl:gap-6";
+
+/** Uppercase caption over the Sports sidebar ("Featured"). */
+const KICKER =
+  "shrink-0 self-center px-1 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-secondary md:self-auto md:px-3";
+
+/**
+ * The reference's CategorySidebar: All markets, then the category's
+ * groups — a parent with children folds open under a chevron (open
+ * already when the active group is in it). Sports adds the "Featured"
+ * kicker and the green "What's next" caption. Below md it's one
+ * scrolling row, as the reference does under 700px.
+ */
+function CategorySidebar({
+  param,
+  label,
+  group,
+}: {
+  param: string;
+  label: string;
+  group: string;
+}) {
+  const sports = param === "sports";
+  const href = (g: string) =>
+    g ? `/?category=${param}&group=${encodeURIComponent(g)}` : `/?category=${param}`;
+  const link = (g: string, text = g) => (
+    <SidebarLink key={g || "all"} href={href(g)} current={group === g}>
+      {text}
+    </SidebarLink>
+  );
+
+  return (
+    <nav
+      aria-label={`${label} subgroups`}
+      className="flex items-start gap-1 overflow-x-auto border-b border-border pb-3 text-sm [scrollbar-width:none] md:sticky md:top-[152px] md:max-h-[calc(100dvh-192px)] md:flex-col md:items-stretch md:gap-0 md:overflow-y-auto md:border-0 md:pb-0 md:pr-2"
+    >
+      {sports && <p className={KICKER}>Featured</p>}
+      {link("", "All markets")}
+      {sports && (
+        <p className={`${KICKER} normal-case tracking-normal text-yes md:mt-4`}>What&apos;s next</p>
+      )}
+      {(CATEGORY_GROUPS[param] ?? []).map((g) =>
+        g.children ? (
+          <details
+            key={g.label}
+            open={group === g.label || g.children.some((c) => c.label === group) || undefined}
+            className="group/fold shrink-0 open:min-w-48 md:open:min-w-0"
+          >
+            <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-md px-3 font-medium text-secondary transition-colors hover:bg-surface hover:text-primary md:min-h-12 [&::-webkit-details-marker]:hidden">
+              {g.label}
+              <ChevronDown className="size-3 transition-transform group-open/fold:rotate-180" />
+            </summary>
+            <div className="pl-3">
+              {g.slug && link(g.label)}
+              {g.children.map((c) => link(c.label))}
+            </div>
+          </details>
+        ) : (
+          link(g.label)
+        ),
+      )}
+    </nav>
   );
 }
 

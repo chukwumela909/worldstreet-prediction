@@ -20,6 +20,14 @@ export const CLERK_SIGN_IN_URL =
   process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ||
   "https://www.worldstreetgold.com/login";
 
+/**
+ * Where a user tops up their central WorldStreet dollar wallet — the money
+ * the credit dialog converts from. That wallet lives on the main site, not
+ * here; point this at its funding page.
+ */
+export const WALLET_FUND_URL =
+  process.env.NEXT_PUBLIC_WALLET_FUND_URL || "https://www.worldstreetgold.com";
+
 /** Base URL of the standalone prediction API; empty = not wired yet. */
 export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(
   /\/+$/,

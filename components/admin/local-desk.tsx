@@ -11,6 +11,7 @@ import {
   ArrowPathIcon as RefreshCw,
 } from "@heroicons/react/24/outline";
 import { CREDIT, formatNaira } from "@/lib/format";
+import { bookHref } from "@/lib/book";
 import { ApiError, isApiConfigured } from "@/lib/api-client";
 import {
   fetchSettlementQueue,
@@ -396,7 +397,7 @@ function QueueCard({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/local/${event.eventSlug}`}
+              href={bookHref(event.eventSlug, event.eventId)}
               className="truncate text-[15px] font-semibold hover:underline"
             >
               {event.eventTitle || event.eventId}

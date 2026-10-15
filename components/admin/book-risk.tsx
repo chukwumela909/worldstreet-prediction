@@ -6,6 +6,7 @@ import {
   ShieldCheckIcon as ShieldCheck,
 } from "@heroicons/react/24/outline";
 import { formatNaira, formatNairaSigned } from "@/lib/format";
+import { bookHref } from "@/lib/book";
 import { fetchBookRisk, useAdminResource } from "@/lib/admin-api";
 
 /**
@@ -84,7 +85,7 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
           valueClass="text-no"
           note={
             <Link
-              href={`/local/${worstMarket.eventSlug}`}
+              href={bookHref(worstMarket.eventSlug, worstMarket.marketId)}
               className="hover:text-primary hover:underline"
             >
               {worstMarket.eventTitle || worstMarket.marketTitle}

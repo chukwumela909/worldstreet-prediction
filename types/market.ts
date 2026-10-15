@@ -24,16 +24,61 @@ export interface Market {
   conditionId?: string;
   /** Real 24h price change as a decimal (e.g. -0.0025 = -0.25pp). */
   oneDayPriceChange?: number;
-  /** Outcome labels when they aren't Yes/No (Bayse, e.g. ["Portable", "Charles"]). */
+  /** Outcome labels when they aren't Yes/No (e.g. ["Portable", "Charles"], ["Over", "Under"]). */
   outcomeLabels?: [string, string];
   /**
-   * Local-book outcome ids, [yes, no] — what POST /v1/trades names when
-   * staking naira on this market. Absent on Polymarket markets.
+   * Outcome ids, [yes, no] — what POST /v1/trades names when staking
+   * naira on this market. Local book only (UUIDs); absent = not
+   * tradeable, as every international (Polymarket) market is.
    */
   outcomeIds?: [string, string];
   /** Resolution criteria text (Bayse markets). */
   rules?: string;
+  /** "moneyline" | "spreads" | "totals" | ... on sports game markets. */
+  sportsMarketType?: string;
 }
+
+/** One side of a game, as the source describes it. */
+export interface GameTeam {
+  name: string;
+  abbreviation?: string;
+  logoUrl?: string;
+  /** The team's colour, e.g. "#134F89" — for its row's accent. */
+  color?: string;
+  side?: "home" | "away";
+  record?: string;
+}
+
+/**
+ * Live state of a sports game (Polymarket game events). The score and
+ * period come through as the source writes them — "0-3" / "1H" for
+ * soccer, "Bot 2nd" for baseball, "000-000|1-1|Bo3" for a best-of-three
+ * — so they're displayed, never parsed for logic.
+ */
+export interface GameState {
+  live: boolean;
+  ended: boolean;
+  score?: string;
+  period?: string;
+  /** Minutes played, when the sport has a clock. */
+  elapsed?: string;
+  /** Kickoff, ISO. */
+  startTime?: string;
+  /** League or competition, e.g. "UEFA Europa League 2025". */
+  league?: string;
+  teams: GameTeam[];
+}
+
+/** The sports page's market types (the reference's pills). */
+export const SPORT_TYPES = [
+  "Games",
+  "Props",
+  "To advance",
+  "Futures",
+  "Win totals",
+  "Awards",
+] as const;
+export type SportType = (typeof SPORT_TYPES)[number];
 
 /** An event groups one or more markets under a single card/page. */
 export interface MarketEvent {
@@ -66,6 +111,12 @@ export interface MarketEvent {
   countdown?: boolean;
   markets: Market[];
   /**
+   * The event's full market count, set only when a list trimmed
+   * `markets` to a subset (lib/polymarket.ts trimForList) — what a card's
+   * "N outcomes" should say.
+   */
+  marketCount?: number;
+  /**
    * Where the event came from; absent = Polymarket. Both Local-book
    * sources route their detail page to /local/[slug] and skip the
    * watchlist and the Polymarket price poller: `bayse` is Relay's feed,
@@ -92,6 +143,10 @@ export interface MarketEvent {
    * gated on `closesAt` alone.
    */
   tradingOpen?: boolean;
+  /** Sports game state — present on game events (two teams, a kickoff). */
+  game?: GameState;
+  /** Which sports pill the event belongs to; absent outside sports. */
+  sportType?: SportType;
 }
 
 export const CATEGORIES = [

@@ -3,10 +3,19 @@
 import type { ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { ArrowTopRightOnSquareIcon as ArrowTopRightOnSquare } from "@heroicons/react/24/outline";
 import type { MarketEvent } from "@/types/market";
 import { EventIcon } from "@/components/market/event-icon";
 import { WatchButton } from "@/components/market/watch-button";
 import { CopyLinkButton } from "./copy-link-button";
+
+/**
+ * Where a slide sits: the home hero (rows over the comments marquee, a
+ * binary's big chance number) or a category page's featured card, which
+ * is the reference's FeaturedMarket — rows over the resolution source,
+ * and a binary charts both its sides.
+ */
+export type SlideVariant = "hero" | "category";
 
 /** What a slide passes down to its header beyond the event itself. */
 export interface SlideHeaderProps {
@@ -74,6 +83,57 @@ export function HeroHeader({
       )}
     </div>
   );
+}
+
+/**
+ * The reference's resolution block under a featured market's rows: the
+ * source the result is checked against (an outbound link, named by its
+ * host), the rules clamped to two lines, and a link to the full rules on
+ * the market page. Polymarket often leaves the source empty and names it
+ * in the rules instead; then the block is just the rules.
+ */
+export function ResolutionSource({
+  event,
+  href,
+}: {
+  event: Pick<MarketEvent, "description" | "resolutionSource" | "markets">;
+  href: string;
+}) {
+  const source = sourceLink(event.resolutionSource);
+  const rules = event.description?.trim() || event.markets[0]?.rules?.trim();
+  if (!source && !rules) return null;
+  return (
+    <section className="mt-4 text-xs text-secondary">
+      <p>{source ? "Resolution source" : "Rules"}</p>
+      {source && (
+        <a
+          href={source.url}
+          target="_blank"
+          rel="noreferrer"
+          className="my-2 flex w-fit items-center gap-2 text-primary hover:underline"
+        >
+          {source.label}
+          <ArrowTopRightOnSquare className="size-3" />
+        </a>
+      )}
+      {rules && <p className={`line-clamp-2 ${source ? "" : "mt-2"}`}>{rules}</p>}
+      <Link href={href} className="my-2 flex w-fit text-primary hover:underline">
+        Read full rules
+      </Link>
+    </section>
+  );
+}
+
+/** An http(s) source URL and its host as the link text; null for anything else. */
+function sourceLink(raw: string | undefined): { url: string; label: string } | null {
+  if (!raw) return null;
+  try {
+    const url = new URL(raw.trim());
+    if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+    return { url: url.href, label: url.hostname.replace(/^www\./, "") };
+  } catch {
+    return null;
+  }
 }
 
 /** "Market · Pays out · Odds" captions over a featured market's outcome rows. */

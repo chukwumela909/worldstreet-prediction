@@ -62,9 +62,10 @@ export const BAR_CATEGORIES = [
 ] as const;
 
 /**
- * The tab a bare `/` lands on. Local is the only book anyone can actually
- * trade — every other tab mirrors Polymarket for display — so it is what
- * the front door should open onto.
+ * The tab a bare `/` lands on: the Local book — Nigerian and African
+ * markets plus WorldStreet's own — which is the front door. Every tab
+ * trades; international (Polymarket) markets are priced at Polymarket
+ * plus the house spread (lib/book.ts).
  *
  * Named rather than positional (it used to be CATEGORY_TABS[0]) so that
  * reordering the strip can't silently move the landing page.

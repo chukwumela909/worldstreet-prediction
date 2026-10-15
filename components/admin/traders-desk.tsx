@@ -9,6 +9,7 @@ import {
   UsersIcon as Users,
 } from "@heroicons/react/24/outline";
 import { formatNaira, formatNairaSigned } from "@/lib/format";
+import { bookHref } from "@/lib/book";
 import { isApiConfigured, ApiError } from "@/lib/api-client";
 import {
   fetchTrader,
@@ -396,7 +397,7 @@ function TraderRowItem({ trader }: { trader: TraderRow }) {
                 >
                   <span className="min-w-0 flex-1">
                     <Link
-                      href={`/local/${p.eventSlug}`}
+                      href={bookHref(p.eventSlug, p.eventId)}
                       className="block truncate text-[13px] font-semibold hover:underline"
                     >
                       {p.eventTitle}

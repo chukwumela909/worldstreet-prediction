@@ -34,12 +34,30 @@ import {
  */
 const GHOST_OPACITY = 0.14;
 
+/** Id suffix of the derived complement line (a binary's No side). */
+const COMPLEMENT = ":no";
+
+/** One drawn line: a market's Yes price, or a binary's derived No. */
+interface ChartLine {
+  id: string;
+  label: string;
+  color: string;
+  /** Current price in percent, for the legend at rest. */
+  pct: number;
+}
+
 export function HeroChart({
   markets,
   colors,
+  complement,
 }: {
   markets: Market[];
   colors: string[];
+  /**
+   * Also draw the first market's No side (100 - Yes): the category
+   * page's binary featured card shows both lines, like the reference.
+   */
+  complement?: { label: string; color: string };
 }) {
   const now = usePageNow();
   const [hoverRow, setHoverRow] = useState<ChartRow | null>(null);
@@ -48,23 +66,49 @@ export function HeroChart({
 
   const history = usePriceHistory(markets, "HERO");
 
+  const lines = useMemo<ChartLine[]>(() => {
+    const out = markets.map((m, i) => ({
+      id: m.id,
+      label: m.groupItemTitle ?? m.outcomeLabels?.[0] ?? "Yes",
+      color: colors[i],
+      pct: parseFloat(m.outcomePrices[0]) * 100,
+    }));
+    const first = markets[0];
+    if (complement && first)
+      out.push({
+        id: first.id + COMPLEMENT,
+        label: complement.label,
+        color: complement.color,
+        pct: parseFloat(first.outcomePrices[1]) * 100,
+      });
+    return out;
+  }, [markets, colors, complement]);
+
   const { data, xTicks, yTicks } = useMemo(() => {
     if (now === null)
       return { data: [] as ChartRow[], xTicks: [], yTicks: [] as number[] };
 
     // real CLOB history only — while it loads (or if the fetch fails)
-    // the chart stays empty rather than plotting an invented curve
-    const series = markets.map((m) => history.byMarket[m.id] ?? []);
+    // the chart stays empty rather than plotting an invented curve. The
+    // complement mirrors the first market's own history; no extra fetch.
+    const series = lines.map((line) =>
+      line.id.endsWith(COMPLEMENT)
+        ? (history.byMarket[line.id.slice(0, -COMPLEMENT.length)] ?? []).map((pt) => ({
+            ...pt,
+            p: 100 - pt.p,
+          }))
+        : (history.byMarket[line.id] ?? []),
+    );
 
     const merged: ChartRow[] = mergeSeries(
-      markets.map((m, i) => ({ id: m.id, points: series[i] })),
+      lines.map((line, i) => ({ id: line.id, points: series[i] })),
     ).map((row) => {
       const out: ChartRow = { t: row.t };
-      for (const m of markets) {
-        const v = row[m.id];
+      for (const line of lines) {
+        const v = row[line.id];
         if (typeof v !== "number") continue;
-        out[m.id] = v;
-        out[GHOST + m.id] = v; // ghost copy under the solid line
+        out[line.id] = v;
+        out[GHOST + line.id] = v; // ghost copy under the solid line
       }
       return out;
     });
@@ -88,19 +132,18 @@ export function HeroChart({
     const yMax = Math.ceil(peak / step) * step;
     const ySteps = Array.from({ length: yMax / step + 1 }, (_, i) => i * step);
     return { data: merged, xTicks: ticks, yTicks: ySteps };
-  }, [markets, now, history.byMarket]);
+  }, [lines, now, history.byMarket]);
 
   const lastIndex = data.length - 1;
   const yMax = yTicks[yTicks.length - 1] ?? 100;
 
-  const nameFor = (id: string) =>
-    markets.find((m) => m.id === id)?.groupItemTitle ?? "Yes";
+  const nameFor = (id: string) => lines.find((line) => line.id === id)?.label ?? "Yes";
 
-  const legendValue = (m: Market) => {
-    const v = hoverRow?.[m.id];
+  const legendValue = (line: ChartLine) => {
+    const v = hoverRow?.[line.id];
     // hovered legend rounds to whole percents, like the real site
     if (typeof v === "number") return `${Math.round(v)}%`;
-    return `${(parseFloat(m.outcomePrices[0]) * 100).toFixed(1)}%`;
+    return `${line.pct.toFixed(1)}%`;
   };
 
   return (
@@ -108,11 +151,11 @@ export function HeroChart({
       <ClipStyles id={clipId} />
       {/* legend tracks hover (integers while hovering, decimals at rest) */}
       <div className="flex gap-4">
-        {markets.map((m, i) => (
-          <span key={m.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
-            <span className="size-2 rounded-full" style={{ background: colors[i] }} />
-            <span className="text-secondary">{m.groupItemTitle ?? "Yes"}</span>
-            <span className="tabular-nums">{legendValue(m)}</span>
+        {lines.map((line) => (
+          <span key={line.id} className="flex items-center gap-1.5 text-[13px] font-semibold">
+            <span className="size-2 rounded-full" style={{ background: line.color }} />
+            <span className="text-secondary">{line.label}</span>
+            <span className="tabular-nums">{legendValue(line)}</span>
           </span>
         ))}
       </div>
@@ -167,13 +210,13 @@ export function HeroChart({
                 isAnimationActive={false}
               />
               {/* ghost layer: clipped to the right of the cursor while hovering */}
-              {markets.map((m, i) => (
+              {lines.map((line) => (
                 <Line
-                  key={GHOST + m.id}
+                  key={GHOST + line.id}
                   className={`${clipId}-g`}
-                  dataKey={GHOST + m.id}
+                  dataKey={GHOST + line.id}
                   type="stepAfter"
-                  stroke={colors[i]}
+                  stroke={line.color}
                   strokeWidth={2.75}
                   strokeOpacity={GHOST_OPACITY}
                   strokeLinecap="round"
@@ -184,29 +227,29 @@ export function HeroChart({
                 />
               ))}
               {/* solid layer: clipped to the left of the cursor while hovering */}
-              {markets.map((m, i) => (
+              {lines.map((line) => (
                 <Line
-                  key={m.id}
+                  key={line.id}
                   className={`${clipId}-s`}
-                  dataKey={m.id}
+                  dataKey={line.id}
                   type="stepAfter"
-                  stroke={colors[i]}
+                  stroke={line.color}
                   strokeWidth={2.75}
                   strokeLinecap="round"
                   strokeLinejoin="round"
                   isAnimationActive={false}
-                  activeDot={{ r: 4, fill: colors[i], strokeWidth: 0 }}
+                  activeDot={{ r: 4, fill: line.color, strokeWidth: 0 }}
                   dot={(props: { index?: number; cx?: number; cy?: number }) =>
                     props.index === lastIndex ? (
                       <EndDot
-                        key={`end-${m.id}`}
+                        key={`end-${line.id}`}
                         cx={props.cx}
                         cy={props.cy}
-                        color={colors[i]}
+                        color={line.color}
                         clip={`url(#${clipId}-solid)`}
                       />
                     ) : (
-                      <g key={`d-${m.id}-${props.index}`} />
+                      <g key={`d-${line.id}-${props.index}`} />
                     )
                   }
                 />

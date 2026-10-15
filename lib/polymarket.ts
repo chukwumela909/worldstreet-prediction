@@ -1,5 +1,5 @@
 import { unstable_cache } from "next/cache";
-import type { Category, Market, MarketEvent } from "@/types/market";
+import type { Category, GameState, Market, MarketEvent, SportType } from "@/types/market";
 import { CATEGORIES } from "@/types/market";
 import type { HistoryWindow, SeriesPoint } from "@/lib/series";
 import { deriveHotTopics, type HotTopic } from "@/lib/hot-topics";
@@ -102,6 +102,15 @@ interface GammaMarket {
   gameStartTime?: string;
 }
 
+interface GammaTeam {
+  name?: string;
+  abbreviation?: string;
+  logo?: string;
+  color?: string;
+  ordering?: string;
+  record?: string;
+}
+
 interface GammaEvent {
   id: string;
   slug: string;
@@ -114,6 +123,18 @@ interface GammaEvent {
   tags?: GammaTag[];
   markets?: GammaMarket[];
   series?: { title?: string }[];
+  /** The event's rules, as Polymarket words them. */
+  description?: string;
+  /** Where the result is checked, usually a URL. */
+  resolutionSource?: string;
+  /* sports game events */
+  live?: boolean;
+  ended?: boolean;
+  score?: string;
+  period?: string;
+  elapsed?: string;
+  startTime?: string;
+  teams?: GammaTeam[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -202,6 +223,7 @@ function toMarket(raw: GammaMarket): Market | null {
   const prices = parseStringArray(raw.outcomePrices);
   if (!prices || prices.length < 2) return null;
   const tokenIds = parseStringArray(raw.clobTokenIds);
+  const labels = parseStringArray(raw.outcomes);
   return {
     id: raw.id,
     question: raw.question,
@@ -209,12 +231,67 @@ function toMarket(raw: GammaMarket): Market | null {
     outcomePrices: [prices[0], prices[1]],
     volume: raw.volume ?? String(raw.volumeNum ?? 0),
     clobTokenId: tokenIds?.[0],
+    // no outcomeIds: international markets are display-only, so there is
+    // nothing a trade could name (the international house book is parked
+    // on the `international-book` branch)
+    // only when they aren't plain Yes/No ("Over"/"Under", "Hike"/"Cut"),
+    // so the buttons say what the position will be called
+    outcomeLabels:
+      labels && labels.length === 2 && !(labels[0] === "Yes" && labels[1] === "No")
+        ? [labels[0], labels[1]]
+        : undefined,
     conditionId: raw.conditionId,
     oneDayPriceChange:
       typeof raw.oneDayPriceChange === "number"
         ? raw.oneDayPriceChange
         : undefined,
+    sportsMarketType: raw.sportsMarketType || undefined,
   };
+}
+
+/** A logo URL on an allowed host, with spaces etc. escaped for next/image. */
+function safeLogoUrl(url: string | undefined): string | undefined {
+  if (!url) return undefined;
+  return safeIconUrl(encodeURI(url));
+}
+
+/** Two teams and a kickoff make a game; anything less is a future/prop. */
+function toGame(raw: GammaEvent): GameState | undefined {
+  const teams = (raw.teams ?? []).filter((t) => t.name);
+  if (teams.length < 2) return undefined;
+  return {
+    live: raw.live === true,
+    ended: raw.ended === true,
+    score: raw.score || undefined,
+    period: raw.period || undefined,
+    elapsed: raw.elapsed || undefined,
+    startTime: raw.startTime || undefined,
+    league: raw.series?.[0]?.title || undefined,
+    teams: teams.map((t) => ({
+      name: t.name!,
+      abbreviation: t.abbreviation || undefined,
+      logoUrl: safeLogoUrl(t.logo),
+      color: t.color && /^#[0-9a-f]{3,8}$/i.test(t.color) ? t.color : undefined,
+      side: t.ordering === "home" || t.ordering === "away" ? t.ordering : undefined,
+      record: t.record || undefined,
+    })),
+  };
+}
+
+/**
+ * The sports pill an event sits under. A game is a game; otherwise
+ * Polymarket's own tags say what it is, and a season-long question with
+ * no more specific tag is a future.
+ */
+function toSportType(raw: GammaEvent, game: GameState | undefined): SportType | undefined {
+  const slugs = (raw.tags ?? []).map((t) => t.slug);
+  if (!slugs.some((s) => s === "sports" || s === "esports")) return undefined;
+  if (game) return "Games";
+  if (slugs.includes("awards")) return "Awards";
+  if (slugs.some((s) => /prop/.test(s))) return "Props";
+  if (slugs.some((s) => /advance|qualif/.test(s))) return "To advance";
+  if (slugs.some((s) => /win-total/.test(s))) return "Win totals";
+  return "Futures";
 }
 
 /** Returns null when the event has no market with usable prices. */
@@ -227,6 +304,7 @@ export function toMarketEvent(raw: GammaEvent): MarketEvent | null {
   if (markets.length === 0) return null;
 
   const category = categoryFromTags(raw.tags);
+  const game = toGame(raw);
   const tagLabels = (raw.tags ?? [])
     .map((t) => t.label)
     .filter(
@@ -248,6 +326,10 @@ export function toMarketEvent(raw: GammaEvent): MarketEvent | null {
     // but Gamma sends a full ISO timestamp — keep just the date part
     endDate: (raw.endDate ?? "").slice(0, 10),
     markets,
+    description: raw.description?.trim() || undefined,
+    resolutionSource: raw.resolutionSource?.trim() || undefined,
+    game,
+    sportType: toSportType(raw, game),
   };
 }
 
@@ -303,9 +385,33 @@ export interface GetEventsOptions {
 }
 
 /**
+ * Most markets a listed event carries. A game event is ~330 markets
+ * (moneyline, spreads, totals, every player prop), so 36 NFL games
+ * normalize to ~3.6MB — past unstable_cache's 2MB entry limit, and all
+ * of it shipped to a page whose cards show two rows. A list keeps the
+ * who-wins markets and the leaders by price; the market page fetches
+ * the whole event (trimmed events stay out of the recent index).
+ */
+const LIST_MARKETS_MAX = 40;
+
+function trimForList(event: MarketEvent): MarketEvent {
+  if (event.markets.length <= LIST_MARKETS_MAX) return event;
+  // the sports rows read moneyline (or untyped) markets, so those go first
+  const rank = (m: Market) =>
+    m.sportsMarketType === undefined || m.sportsMarketType === "moneyline" ? 0 : 1;
+  const kept = event.markets
+    .map((m, i) => ({ m, i }))
+    .sort((a, b) => rank(a.m) - rank(b.m) || a.i - b.i)
+    .slice(0, LIST_MARKETS_MAX)
+    .sort((a, b) => a.i - b.i) // back to the price order cards expect
+    .map(({ m }) => m);
+  return { ...event, markets: kept, marketCount: event.markets.length };
+}
+
+/**
  * Open events sorted by 24h volume, normalized for the UI.
  * Cached (normalized output only) for DEFAULT_REVALIDATE_SECONDS,
- * keyed by options.
+ * keyed by options. Events are trimmed for listing (trimForList).
  */
 const getEventsCached = unstable_cache(
   async (options: GetEventsOptions = {}): Promise<MarketEvent[]> => {
@@ -322,7 +428,10 @@ const getEventsCached = unstable_cache(
       tag_slug: tagSlug,
     });
 
-    return raw.map(toMarketEvent).filter((e): e is MarketEvent => e !== null);
+    return raw
+      .map(toMarketEvent)
+      .filter((e): e is MarketEvent => e !== null)
+      .map(trimForList);
   },
   ["polymarket-events"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
@@ -350,6 +459,8 @@ const recentEvents = new Map<string, { event: MarketEvent; at: number }>();
 function rememberEvents(events: MarketEvent[]) {
   const at = Date.now();
   for (const event of events) {
+    // a list's trimmed copy isn't the whole event a market page needs
+    if (event.marketCount !== undefined) continue;
     recentEvents.delete(event.slug); // re-insert so Map order stays oldest-first
     recentEvents.set(event.slug, { event, at });
   }
@@ -400,7 +511,12 @@ export const getEventBySlug = unstable_cache(
 export const getEventsBySlugs = unstable_cache(
   async (slugs: string[]): Promise<MarketEvent[]> => {
     if (slugs.length === 0) return [];
-    const raw = await gammaFetch<GammaEvent[]>("/events", { slug: slugs });
+    // without an explicit limit Gamma answers with its default page of
+    // 20, silently dropping the rest of the slugs asked for
+    const raw = await gammaFetch<GammaEvent[]>("/events", {
+      slug: slugs,
+      limit: slugs.length,
+    });
     return raw.map(toMarketEvent).filter((e): e is MarketEvent => e !== null);
   },
   ["polymarket-events-by-slugs"],

@@ -8,10 +8,10 @@ import type { SeriesPoint } from "@/lib/series";
  * source behind the "Local" category tab: Nigerian/African prediction
  * markets displayed alongside the Polymarket feed.
  *
- * Display-only for now — Bayse events carry `source: "bayse"` so the UI
- * can skip affordances that assume a Polymarket slug (watchlist, live
- * price polling) and route their detail pages to /local/[slug].
- * Trading comes later via the partner API.
+ * Bayse events carry `source: "bayse"` so the UI can skip affordances
+ * that assume a Polymarket slug (watchlist, live price polling) and route
+ * their detail pages to /local/[slug], where they trade against
+ * WorldStreet in naira credit.
  *
  * Money figures are requested in naira (`currency=NGN`) — Bayse's own
  * UI leads with ₦, and the listing's `totalVolume` is 0 while
@@ -158,7 +158,7 @@ function toMarket(raw: BayseMarket, single: boolean, eventTitle: string): Market
     volume: "0",
     outcomeLabels: labels[0] !== "Yes" || labels[1] !== "No" ? labels : undefined,
     // both ids or neither — the trade panel treats a market without them
-    // as display-only rather than sending a half-formed order
+    // as not tradeable rather than sending a half-formed order
     outcomeIds:
       raw.outcome1Id && raw.outcome2Id
         ? [raw.outcome1Id, raw.outcome2Id]
@@ -267,6 +267,56 @@ export const getBayseEvents = unstable_cache(
       .filter((e): e is MarketEvent => e !== null);
   },
   ["bayse-events"],
+  { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
+);
+
+/** Relay's page size — it ignores any larger `size`. */
+export const BAYSE_PAGE_SIZE = 20;
+/** How deep "Load more" may page; Relay listed ~38 open pages when written. */
+export const BAYSE_MAX_PAGE = 100;
+
+export interface BayseEventsPage {
+  events: MarketEvent[];
+  /** Relay has a page after this one. */
+  hasMore: boolean;
+}
+
+interface BayseEventsResponse {
+  events?: BayseEvent[];
+  pagination?: { page?: number; lastPage?: number; totalCount?: number };
+}
+
+/**
+ * One Relay page of open events, normalized — what the Local tab's "Load
+ * more" reads after the two pages getBayseEvents put on the board.
+ *
+ * `hasMore` comes from Relay's own `pagination.lastPage` rather than the
+ * normalized count: an event with no open market is dropped here, so a
+ * page can come back short and still not be the last one. Without
+ * pagination metadata, a full raw page is taken to mean there may be more.
+ */
+export const getBayseEventsPage = unstable_cache(
+  async (page: number): Promise<BayseEventsPage> => {
+    if (!Number.isInteger(page) || page < 1 || page > BAYSE_MAX_PAGE) {
+      throw new RangeError(`Bayse page out of range: ${page}`);
+    }
+    const raw = await relayFetch<BayseEventsResponse>("/v1/pm/events", {
+      page,
+      size: BAYSE_PAGE_SIZE,
+      status: "open",
+      currency: "NGN",
+    });
+    const rows = raw.events ?? [];
+    const lastPage = raw.pagination?.lastPage;
+    const hasMore =
+      page < BAYSE_MAX_PAGE &&
+      (typeof lastPage === "number" ? page < lastPage : rows.length >= BAYSE_PAGE_SIZE);
+    return {
+      events: rows.map(toBayseMarketEvent).filter((e): e is MarketEvent => e !== null),
+      hasMore,
+    };
+  },
+  ["bayse-events-page"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
 );
 

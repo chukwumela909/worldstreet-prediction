@@ -15,6 +15,7 @@ import {
 import type { HeroIcon } from "@/components/icons";
 import { ProbabilityBar } from "@/components/market/outcome-quote";
 import { formatNaira, formatNairaSigned } from "@/lib/format";
+import { bookHref } from "@/lib/book";
 import { PAYOUT_PER_SHARE_KOBO, type LocalPosition } from "@/lib/local-trades";
 import {
   CARD,
@@ -193,7 +194,7 @@ export function OpenPositions({
 }
 
 function OpenRow({ position: p }: { position: LocalPosition }) {
-  const href = `/local/${p.eventSlug}`;
+  const href = bookHref(p.eventSlug, p.eventId);
   // kobo per ₦100 share is the implied chance at entry
   const entryPct = Math.round((p.priceKobo / PAYOUT_PER_SHARE_KOBO) * 100);
   const opened = formatDay(p.createdAt);
@@ -434,7 +435,7 @@ function SettlementReceipt({
       </header>
 
       <h3 className="mt-3 text-[15px] font-semibold leading-snug">
-        <Link href={`/local/${p.eventSlug}`} className="line-clamp-2 hover:underline">
+        <Link href={bookHref(p.eventSlug, p.eventId)} className="line-clamp-2 hover:underline">
           {p.eventTitle}
         </Link>
       </h3>
