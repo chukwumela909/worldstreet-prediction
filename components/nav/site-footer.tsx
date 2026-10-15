@@ -68,7 +68,7 @@ export function SiteFooter() {
             aria-label="WorldStreet Predict home"
             className="flex flex-wrap items-center gap-2 text-base text-primary sm:text-xl"
           >
-            <LogoMark className="size-8" />
+            <LogoMark className="h-8 w-auto" />
             <strong>WorldStreet</strong>
             <em className="text-base not-italic text-domain sm:ml-2">Predict</em>
           </Link>

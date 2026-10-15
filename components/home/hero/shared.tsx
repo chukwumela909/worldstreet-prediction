@@ -187,12 +187,13 @@ function heroDate(iso: string): string {
 }
 
 /**
- * The WorldStreet mark: black W on a lime rounded square (the same file is
- * app/icon.svg, the favicon). Full-colour asset, so it carries its own
- * contrast on both themes. SVG, so next/image serves it as-is.
+ * The Worldstreet badge (WorldStreet4.png): black W on a gold rounded
+ * square — the same artwork as app/icon.png, the favicon. Full-colour
+ * asset, so it carries its own contrast on both themes. Not square
+ * (372×339), so size it by height with `w-auto`.
  */
 export function LogoMark({
-  className = "size-3.5",
+  className = "h-3.5 w-auto",
   eager = false,
 }: {
   className?: string;
@@ -201,11 +202,10 @@ export function LogoMark({
 }) {
   return (
     <Image
-      src="/worldstreet-logo.svg"
+      src="/worldstreet-logo.png"
       alt=""
-      width={32}
-      height={32}
-      unoptimized
+      width={372}
+      height={339}
       loading={eager ? "eager" : "lazy"}
       className={className}
       aria-hidden

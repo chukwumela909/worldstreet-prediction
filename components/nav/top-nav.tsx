@@ -19,7 +19,7 @@ export function TopNav() {
         aria-label="WorldStreet predictions home"
         className="flex shrink-0 items-center gap-2 text-base font-bold md:text-xl"
       >
-        <LogoMark className="size-8" eager />
+        <LogoMark className="h-8 w-auto" eager />
         WorldStreet
       </Link>
 
