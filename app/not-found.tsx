@@ -1,12 +1,10 @@
 import Link from "next/link";
-import { SiteHeader } from "@/components/nav/site-header";
 
 /** Branded 404 — unknown routes and unknown event slugs land here. */
 export default function NotFound() {
   return (
     <>
-      <SiteHeader />
-      <main className="mx-auto flex w-full max-w-[1280px] flex-1 flex-col items-center justify-center gap-3 px-6 py-24 text-center">
+      <main className="mx-auto flex w-full max-w-[1400px] flex-1 flex-col items-center justify-center gap-3 px-4 py-24 sm:px-6 text-center">
         <p className="text-5xl">🔮</p>
         <h1 className="text-xl font-semibold tracking-tight">
           This market doesn&rsquo;t exist

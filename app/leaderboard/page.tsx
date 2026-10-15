@@ -1,14 +1,12 @@
 import type { Metadata } from "next";
-import { SiteHeader } from "@/components/nav/site-header";
 import { LeaderboardView } from "@/components/leaderboard/leaderboard-view";
 
-export const metadata: Metadata = { title: "Leaderboard | Worldstreet" };
+export const metadata: Metadata = { title: "Leaderboard | WorldStreet" };
 
 export default function LeaderboardPage() {
   return (
     <>
-      <SiteHeader />
-      <main className="mx-auto w-full max-w-[1280px] px-6 pb-16 pt-6">
+      <main className="mx-auto w-full max-w-[1400px] px-4 pb-16 pt-6 sm:px-6 sm:pt-8">
         <LeaderboardView />
       </main>
     </>

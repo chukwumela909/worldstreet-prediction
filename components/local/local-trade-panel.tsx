@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CheckCircle2, Loader2, Wallet } from "lucide-react";
+import { createPortal } from "react-dom";
+import {
+  CheckCircleIcon as CheckCircle2,
+  ArrowPathIcon as Loader2,
+  WalletIcon as Wallet,
+} from "@heroicons/react/24/outline";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { ApiError } from "@/lib/api-client";
 import { CREDIT, formatNaira } from "@/lib/format";
@@ -10,6 +15,7 @@ import { tradingStopsAt } from "@/lib/countdown";
 import { CloseCountdown } from "@/components/local/close-countdown";
 import { useAuth } from "@/components/auth/auth-context";
 import { useTradeSelection } from "@/components/event/trade-context";
+import { SideToggle } from "@/components/event/trade-panel";
 import { EventIcon } from "@/components/market/event-icon";
 import { FundNairaModal } from "@/components/local/fund-naira-modal";
 import {
@@ -30,6 +36,9 @@ import { payoutFor, placeLocalTrade, priceToKobo } from "@/lib/local-trades";
  * order carries the price it was shown at, the server re-prices live,
  * and anything that drifted past its tolerance comes back as an explicit
  * "confirm at the new price" step rather than a silent fill.
+ *
+ * Renders the body of the page's "Trade outcome" card; the card, its
+ * title and the narrow-screen sheet come from MarketDetail.
  */
 
 /** The book's floor, mirrored so the panel can explain it before submitting. */
@@ -170,8 +179,8 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   const disabled = stakeKobo < MIN_STAKE_KOBO || pending || closed || !tradeable;
 
   return (
-    <aside className="w-full lg:w-[306px] lg:shrink-0">
-      <div className="rounded-xl border border-border bg-surface p-4 shadow-card lg:sticky lg:top-[124px]">
+    <div>
+      <div>
         {/* what's being traded */}
         <div className="flex items-center gap-2.5">
           <EventIcon event={event} className="size-9 rounded-md text-lg" px={36} />
@@ -198,14 +207,14 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
         <div className="mt-4 flex gap-2">
           <SideToggle
             label={`${labels[0]} · ${formatNaira(priceToKobo(market.outcomePrices[0]))}`}
+            side="yes"
             active={side === "yes"}
-            activeClass="bg-yes-solid text-white"
             onClick={() => setSide("yes")}
           />
           <SideToggle
             label={`${labels[1]} · ${formatNaira(priceToKobo(market.outcomePrices[1]))}`}
+            side="no"
             active={side === "no"}
-            activeClass="bg-no-solid text-white"
             onClick={() => setSide("no")}
           />
         </div>
@@ -215,7 +224,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
           <div>
             <span className="text-base font-semibold">Stake</span>
             {user && (
-              <p className="text-xs font-medium text-tertiary">
+              <p className="text-xs font-medium text-secondary">
                 {balanceKobo === null ? "—" : formatNaira(balanceKobo)} available
               </p>
             )}
@@ -315,19 +324,25 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
         {user && balanceKobo !== null && !failure?.shortfallKobo && (
           <button
             onClick={() => setFunding(true)}
-            className="mt-3 w-full text-center text-xs font-semibold text-accent hover:underline"
+            className="mt-3 w-full text-center text-xs font-semibold text-accent-ink hover:underline"
           >
             Manage credit balance
           </button>
         )}
       </div>
 
-      <FundNairaModal
-        open={funding}
-        onClose={() => setFunding(false)}
-        neededKobo={failure?.shortfallKobo ?? undefined}
-      />
-    </aside>
+      {/* Portalled so the dialog escapes the sticky aside's stacking
+          context (which sits under the site header) and the sheet's. */}
+      {funding &&
+        createPortal(
+          <FundNairaModal
+            open={funding}
+            onClose={() => setFunding(false)}
+            neededKobo={failure?.shortfallKobo ?? undefined}
+          />,
+          document.body,
+        )}
+    </div>
   );
 }
 
@@ -336,31 +351,6 @@ function QuickChip({ label, onClick }: { label: string; onClick: () => void }) {
     <button
       onClick={onClick}
       className="h-[30px] rounded-md bg-element-2 px-2.5 text-xs font-semibold text-secondary hover:bg-element-3"
-    >
-      {label}
-    </button>
-  );
-}
-
-function SideToggle({
-  label,
-  active,
-  activeClass,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  activeClass: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className={`h-11 flex-1 rounded-sm text-sm font-semibold transition-colors ${
-        active
-          ? activeClass
-          : "bg-element-2 text-secondary hover:bg-element-3 hover:text-primary"
-      }`}
     >
       {label}
     </button>

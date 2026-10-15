@@ -1,105 +1,68 @@
+"use client";
+
 import Link from "next/link";
-import type { ReactNode } from "react";
-import { MapPin, TrendingUp, Zap } from "lucide-react";
-import { CATEGORY_TABS, DEFAULT_CATEGORY } from "@/lib/categories";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
+import { BAR_CATEGORIES, CATEGORY_TABS } from "@/lib/categories";
 import { ScrollStrip } from "@/components/scroll-strip";
+import { CategoryMenu } from "@/components/nav/category-menu";
+import { CATEGORY_ICONS, categoryHref } from "@/components/nav/category-icons";
+
+const TABS = BAR_CATEGORIES.map((p) => CATEGORY_TABS.find((t) => t.param === p)).filter(
+  (t) => t !== undefined,
+);
 
 /**
- * Category pill bar (~56px) below the top nav — a slider strip with
- * chevron pagers when the pills overflow. Each pill links to the home
- * page scoped to its own live query (`/?category=...`).
- * Inactive pills text-secondary, active text-primary; 16px bold.
- *
- * Tabs are addressed by param, never by position. This used to destructure
- * `[trending, worldCup, breaking, ...rest]` off CATEGORY_TABS, which had
- * since grown a `local` entry in second place — so every decoration sat one
- * tab to its left: Local wore the World Cup's football, the World Cup wore
- * Breaking's bolt, and Breaking fell through to the plain list with
- * nothing. Naming them means adding a tab can't shift anyone's identity.
+ * Category row under the top nav. It lives in the root layout, so it
+ * persists across navigations and reads the active tab from the URL
+ * itself: only the home route has a current tab (`/?category=…`);
+ * everywhere else — a market page, the leaderboard — none is current.
  */
-
-/** Pills that lead the strip, before the featured group. */
-const LEAD = ["trending", DEFAULT_CATEGORY] as const;
-/** The promoted cluster between the dividers. */
-const FEATURED = ["world-cup", "breaking"] as const;
-
-const ICONS: Record<string, ReactNode> = {
-  trending: <TrendingUp className="size-5" strokeWidth={2.75} />,
-  local: <MapPin className="size-5" strokeWidth={2.75} />,
-  "world-cup": <span className="text-lg leading-none">⚽</span>,
-  breaking: <Zap className="size-5 text-yellow-500" strokeWidth={2.75} />,
-};
+export function CategoryBar() {
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const active = pathname === "/" ? (params.get("category") ?? undefined) : undefined;
+  return <CategoryBarView active={active} />;
+}
 
 /**
- * Permanently tinted rather than active/inactive — it is a promoted
- * event, not a place you are. Local deliberately isn't on this list: it is
- * the landing tab, so it is the one pill that most needs to show whether
- * it's the current view.
+ * The row itself: one ghost tab per category with its icon, the active
+ * one in primary text over a 2px gold underline; the strip scrolls with
+ * edge pagers when it overflows, and the trailing menu lists every
+ * category. Hovering a tab warms its full page, so the click that
+ * follows usually has its data already.
  */
-const PROMOTED = new Set(["world-cup"]);
-
-export function CategoryBar({ active = DEFAULT_CATEGORY }: { active?: string }) {
-  const byParam = new Map(CATEGORY_TABS.map((t) => [t.param, t]));
-  const pick = (params: readonly string[]) =>
-    params.map((p) => byParam.get(p)).filter((t) => t !== undefined);
-
-  const lead = pick(LEAD);
-  const featured = pick(FEATURED);
-  const rest = CATEGORY_TABS.filter(
-    (t) =>
-      !(LEAD as readonly string[]).includes(t.param) &&
-      !(FEATURED as readonly string[]).includes(t.param),
-  );
-
-  const pill = (isActive: boolean, extra = "") =>
-    `flex items-center gap-2 whitespace-nowrap rounded-md px-3 py-1.5 text-base font-bold transition-colors ${
-      extra || (isActive ? "text-primary" : "text-secondary hover:text-primary")
-    }`;
-
-  // the default tab IS the bare "/", so it must not also be reachable at
-  // ?category=<default> — that would be two URLs for the landing page,
-  // and the pill would fail its own active check on one of them
-  const href = (param: string) =>
-    param === DEFAULT_CATEGORY ? "/" : `/?category=${param}`;
-
-  const tabLink = (param: string, label: string) => (
-    <Link
-      key={param}
-      href={href(param)}
-      className={pill(
-        active === param,
-        PROMOTED.has(param)
-          ? active === param
-            ? "text-yellow-500"
-            : "text-yellow-500 hover:text-yellow-600"
-          : "",
-      )}
-    >
-      {ICONS[param]}
-      {label}
-    </Link>
-  );
-
+export function CategoryBarView({ active }: { active?: string }) {
+  const router = useRouter();
   return (
-    <nav className="mx-auto flex h-14 w-full max-w-[1280px] items-center px-6">
-      {/* -ml pulls the first pill's padding back so its label lines up with
-          the logo and the page content, not the pill's hover box */}
-      <ScrollStrip className="-ml-3 items-center gap-1">
-        {lead.map((t) => tabLink(t.param, t.label))}
-
-        {/* featured group, then divider, like the real site */}
-        <span className="mx-1.5 flex items-center gap-1.5">
-          {/* borrows pill() so it cannot drift out of size with the links */}
-          <button className={pill(false)}>
-            <span className="text-lg leading-none">🎛️</span>
-            Combos
-          </button>
-          {featured.map((t) => tabLink(t.param, t.label))}
-          <span className="h-5 w-px bg-border-active/40" />
-        </span>
-
-        {rest.map((t) => tabLink(t.param, t.label))}
+    <nav
+      aria-label="Market categories"
+      className="mx-auto flex w-full max-w-[1400px] items-center gap-2 px-4 sm:px-6"
+    >
+      <ScrollStrip className="items-center gap-1">
+        {TABS.map(({ param, label }) => {
+          const Icon = CATEGORY_ICONS[param];
+          const current = active === param;
+          const href = categoryHref(param);
+          return (
+            <Link
+              key={param}
+              href={href}
+              aria-current={current ? "page" : undefined}
+              onPointerEnter={() => router.prefetch(href)}
+              onFocus={() => router.prefetch(href)}
+              className={`flex h-12 shrink-0 items-center gap-2 whitespace-nowrap border-b-2 px-3 text-sm font-medium transition-colors ${
+                current
+                  ? "border-accent text-primary"
+                  : "border-transparent text-secondary hover:text-primary"
+              }`}
+            >
+              {Icon && <Icon className="size-4" />}
+              {label}
+            </Link>
+          );
+        })}
       </ScrollStrip>
+      <CategoryMenu active={active} />
     </nav>
   );
 }

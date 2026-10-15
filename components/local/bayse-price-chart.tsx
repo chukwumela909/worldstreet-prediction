@@ -10,11 +10,15 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+  ChevronDownIcon as ChevronDown,
+  ChevronUpIcon as ChevronUp,
+} from "@heroicons/react/24/outline";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
 import { mergeSeries, type SeriesPoint } from "@/lib/series";
 import { BAYSE_TIMEFRAMES, type BayseTimeframe } from "@/lib/bayse";
+import { RangeToggles } from "@/components/event/price-chart";
 import {
   AnchoredPills,
   ClipStyles,
@@ -145,7 +149,7 @@ export function BaysePriceChart({ event }: { event: MarketEvent }) {
       )}
 
       <ClipStyles id={clipId} />
-      <div className="mt-2 h-[300px]">
+      <div className="mt-2 h-[240px] sm:h-[300px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data} margin={{ top: 20, right: 0, bottom: 0, left: 8 }}>
             <HoverClip id={clipId} />
@@ -212,19 +216,7 @@ export function BaysePriceChart({ event }: { event: MarketEvent }) {
         </ResponsiveContainer>
       </div>
 
-      <div className="mt-1 flex justify-end gap-1">
-        {BAYSE_TIMEFRAMES.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTf(t)}
-            className={`h-8 rounded-md px-2 text-sm font-semibold transition-colors duration-150 ease-in-out ${
-              tf === t ? "bg-element-2 text-primary" : "text-secondary hover:text-primary"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <RangeToggles options={BAYSE_TIMEFRAMES} value={tf} onChange={setTf} />
     </div>
   );
 }
@@ -282,9 +274,9 @@ function ChanceHeader({
           }`}
         >
           {delta > 0 ? (
-            <ChevronUp className="size-4" strokeWidth={3} />
+            <ChevronUp className="size-4" />
           ) : (
-            <ChevronDown className="size-4" strokeWidth={3} />
+            <ChevronDown className="size-4" />
           )}
           {Math.abs(delta)}%
         </span>

@@ -1,7 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import {
+  ExclamationTriangleIcon as AlertTriangle,
+  ShieldCheckIcon as ShieldCheck,
+} from "@heroicons/react/24/outline";
 import { formatNaira, formatNairaSigned } from "@/lib/format";
 import { fetchBookRisk, useAdminResource } from "@/lib/admin-api";
 

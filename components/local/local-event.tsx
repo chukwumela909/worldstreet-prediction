@@ -1,12 +1,24 @@
 "use client";
 
-import { BarChart3, Clock, Droplets } from "lucide-react";
+import {
+  ChartBarIcon as BarChart3,
+  ClockIcon as Clock,
+  CircleStackIcon as Droplets,
+} from "@heroicons/react/24/outline";
 import { isBinary, type Market, type MarketEvent } from "@/types/market";
 import { formatNaira, formatNairaCompact, toPercent } from "@/lib/format";
 import { priceToKobo } from "@/lib/local-trades";
-import { EventIcon } from "@/components/market/event-icon";
-import { BuySideButton } from "@/components/event/outcome-list";
+import { DetailBreadcrumb, EventLockup } from "@/components/event/event-header";
+import {
+  DetailCard,
+  MarketDetail,
+  StatusToken,
+  useRevealTicket,
+} from "@/components/event/market-detail";
+import { MarketInfo } from "@/components/event/market-info";
+import { OutcomeQuoteRow, OutcomesCard } from "@/components/event/outcome-list";
 import { TradeProvider, useTradeSelection } from "@/components/event/trade-context";
+import { YES_TONE, outcomeTone } from "@/components/market/outcome-quote";
 import { BaysePriceChart } from "@/components/local/bayse-price-chart";
 import { LocalTradePanel } from "@/components/local/local-trade-panel";
 import { CloseCountdown } from "@/components/local/close-countdown";
@@ -15,10 +27,11 @@ import { useTickingNow } from "@/lib/use-now";
 import { useLiveLocalEvent } from "@/lib/use-live-local";
 
 /**
- * Detail page body for a Local event of either origin: header with
- * naira stats, price chart, outcome rows, and rules, with the naira
- * trade panel on the right. Clicking a buy pill selects that
- * market+side in the panel, same as the Polymarket event page.
+ * Detail page body for a Local event of either origin, in the same frame
+ * as the Polymarket event page: lockup with naira stats, price chart,
+ * outcome rows, rules and timeline, with the naira trade panel in the
+ * "Trade outcome" card. Clicking a buy pill selects that market+side in
+ * the panel, same as the Polymarket event page.
  *
  * Prices poll from the server-rendered snapshot, so what the panel
  * stakes against stays close to what the API will re-price it at.
@@ -26,43 +39,62 @@ import { useLiveLocalEvent } from "@/lib/use-live-local";
  * The chart is Bayse-only. Our own markets are fixed odds — the price
  * is whatever the desk last set, so there is no history to draw and a
  * flat line would imply a market that traded there.
+ *
+ * No Save button and no social tabs: the watchlist and the comments /
+ * holders / activity feeds all resolve against Polymarket.
  */
 export function LocalEvent({ event: initial }: { event: MarketEvent }) {
   const event = useLiveLocalEvent(initial);
+  const status = useLocalStatus(event);
 
   return (
     <TradeProvider event={event}>
-      <main className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-4 pb-16 pt-4 lg:flex-row lg:items-start">
-        <div className="min-w-0 flex-1">
-          <LocalHeader event={event} />
-          {event.source === "bayse" && (
-            <div className="mt-5">
-              <BaysePriceChart event={event} />
-            </div>
-          )}
-          {/* With no chart to carry it, a fixed-odds event needs its
-              prices in the body — including a binary one, whose single
-              row would otherwise live only in the side panel. */}
-          {(event.source !== "bayse" || !isBinary(event)) && (
-            <div className="mt-5">
-              <LocalOutcomeList event={event} />
-            </div>
-          )}
-          <LocalRules event={event} />
-        </div>
-        <LocalTradePanel event={event} />
-      </main>
+      <MarketDetail
+        breadcrumb={<DetailBreadcrumb category="Local" />}
+        ticket={<LocalTradePanel event={event} />}
+      >
+        <EventLockup
+          event={event}
+          eyebrow={`Local · ${event.tags?.[0] ?? event.category}`}
+          status={status && <StatusToken status={status} />}
+          meta={<LocalStats event={event} />}
+        />
+
+        {event.source === "bayse" && (
+          <DetailCard title="Market probability">
+            <BaysePriceChart event={event} />
+          </DetailCard>
+        )}
+
+        <LocalOutcomeList event={event} />
+
+        <MarketInfo event={event} />
+      </MarketDetail>
     </TradeProvider>
   );
 }
 
-/* ---------- header ---------- */
+/**
+ * Open / Closed from the same facts the trade panel gates on: the desk's
+ * switch and the trading deadline. Null until the clock is known, rather
+ * than guessing "Open" for a market that may already have shut.
+ */
+function useLocalStatus(event: MarketEvent): "Open" | "Closed" | null {
+  const now = useTickingNow();
+  if (event.tradingOpen === false) return "Closed";
+  const stopsAt = tradingStopsAt(event);
+  if (stopsAt === null) return "Open";
+  if (now === null) return null;
+  return stopsAt <= now ? "Closed" : "Open";
+}
 
-function LocalHeader({ event }: { event: MarketEvent }) {
+/* ---------- stats ---------- */
+
+function LocalStats({ event }: { event: MarketEvent }) {
   const now = useTickingNow();
   const stopsAt = tradingStopsAt(event);
-  // decided here, not inside CloseCountdown, because the header has to
-  // know whether to fall back to the date
+  // decided here, not inside CloseCountdown, because the stats line has
+  // to know whether to fall back to the date
   const countingDown =
     stopsAt !== null &&
     now !== null &&
@@ -78,149 +110,94 @@ function LocalHeader({ event }: { event: MarketEvent }) {
     : null;
 
   return (
-    <div className="flex items-start gap-3.5">
-      <EventIcon event={event} className="size-14 rounded-lg text-3xl" px={56} />
-      <div className="min-w-0 flex-1">
-        <p className="text-xs font-semibold text-secondary">
-          Local · {event.tags?.[0] ?? event.category}
-        </p>
-        <h1 className="mt-0.5 text-xl font-semibold tracking-tight">
-          {event.title}
-        </h1>
-        <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[13px] font-medium text-tertiary">
-          {event.trades !== undefined && (
-            <span className="flex items-center gap-1">
-              <BarChart3 className="size-3.5" />
-              {event.trades.toLocaleString("en-US")} Trades
-            </span>
-          )}
-          {/* Bayse reports a pool; on our own markets the house is the
-              counterparty, so what there is to report is the stake. */}
-          {event.liquidityNgn ? (
-            <span className="flex items-center gap-1">
-              <Droplets className="size-3.5" />
-              {formatNairaCompact(parseFloat(event.liquidityNgn))}
-            </span>
-          ) : (
-            event.stakedNgn !== undefined && (
-              <span className="flex items-center gap-1">
-                <Droplets className="size-3.5" />
-                {formatNairaCompact(parseFloat(event.stakedNgn))} staked
-              </span>
-            )
-          )}
-          {/* the clock replaces the date once it's the useful one — a
-              15-minute market saying "Ends Jul 25" tells nobody anything */}
-          {countingDown ? (
-            <CloseCountdown event={event} className="text-[13px]" />
-          ) : (
-            endDate && (
-              <span className="flex items-center gap-1">
-                <Clock className="size-3.5" />
-                Ends {endDate}
-              </span>
-            )
-          )}
-        </div>
-      </div>
-    </div>
+    <>
+      {event.trades !== undefined && (
+        <span className="flex items-center gap-1">
+          <BarChart3 className="size-3.5" />
+          {event.trades.toLocaleString("en-US")} Trades
+        </span>
+      )}
+      {/* Bayse reports a pool; on our own markets the house is the
+          counterparty, so what there is to report is the stake. */}
+      {event.liquidityNgn ? (
+        <span className="flex items-center gap-1">
+          <Droplets className="size-3.5" />
+          {formatNairaCompact(parseFloat(event.liquidityNgn))}
+        </span>
+      ) : (
+        event.stakedNgn !== undefined && (
+          <span className="flex items-center gap-1">
+            <Droplets className="size-3.5" />
+            {formatNairaCompact(parseFloat(event.stakedNgn))} staked
+          </span>
+        )
+      )}
+      {/* the clock replaces the date once it's the useful one — a
+          15-minute market saying "Ends Jul 25" tells nobody anything */}
+      {countingDown ? (
+        <CloseCountdown event={event} className="text-xs" />
+      ) : (
+        endDate && (
+          <span className="flex items-center gap-1">
+            <Clock className="size-3.5" />
+            Ends {endDate}
+          </span>
+        )
+      )}
+    </>
   );
 }
 
-/* ---------- outcomes (multi) ---------- */
+/* ---------- outcomes ---------- */
 
 /** Outcome price as ₦ per ₦100 share, e.g. "₦58". */
 function nairaPrice(market: Market, side: 0 | 1): string {
   return formatNaira(priceToKobo(market.outcomePrices[side]));
 }
 
+/**
+ * Always shown, binary included: below 1024px the panel lives in a
+ * sheet, so these rows are where a side gets picked.
+ */
 function LocalOutcomeList({ event }: { event: MarketEvent }) {
-  // A binary event's one row would just repeat the h1 above it.
-  const named = !isBinary(event);
-  return (
-    <div className="divide-y divide-border border-t border-border">
-      {event.markets.map((m) => (
-        <LocalOutcomeRow key={m.id} market={m} named={named} />
-      ))}
-    </div>
-  );
-}
-
-function LocalOutcomeRow({ market, named }: { market: Market; named: boolean }) {
   const { marketId, side, select } = useTradeSelection();
-  const pct = toPercent(market.outcomePrices[0]);
-  const name = market.groupItemTitle ?? market.question;
-  const labels = market.outcomeLabels ?? ["Yes", "No"];
-  return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
-      {named ? (
-        <p className="min-w-0 flex-1 truncate text-[15px] font-semibold">{name}</p>
-      ) : (
-        <span className="flex-1" />
-      )}
-      <span className="text-[26px] font-semibold leading-none">{pct}%</span>
-      <div className="flex w-full gap-2 sm:w-auto">
-        <BuySideButton
-          side="yes"
-          label={`Buy ${labels[0]} ${nairaPrice(market, 0)}`}
-          selected={marketId === market.id && side === "yes"}
-          onClick={() => select(market.id, "yes")}
-        />
-        <BuySideButton
-          side="no"
-          label={`Buy ${labels[1]} ${nairaPrice(market, 1)}`}
-          selected={marketId === market.id && side === "no"}
-          onClick={() => select(market.id, "no")}
-        />
-      </div>
-    </div>
-  );
-}
-
-/* ---------- rules ---------- */
-
-/** Relay rules/description are lightly markdown-ish; render as plain text. */
-function plainText(raw: string): string {
-  return raw.replace(/\*\*/g, "").replace(/\r\n/g, "\n").trim();
-}
-
-function LocalRules({ event }: { event: MarketEvent }) {
+  const reveal = useRevealTicket();
   const binary = isBinary(event);
-  const sections = [
-    ...(event.description ? [{ id: "about", title: "About this market", body: event.description }] : []),
-    ...event.markets
-      .filter((m) => m.rules)
-      .map((m) => ({
-        id: m.id,
-        title: binary ? "Rules" : `Rules — ${m.groupItemTitle ?? m.question}`,
-        body: m.rules!,
-      })),
-  ];
-  if (sections.length === 0 && !event.resolutionSource) return null;
+  const choose = (id: string, s: "yes" | "no") => {
+    select(id, s);
+    reveal();
+  };
 
   return (
-    <div className="mt-8 flex flex-col gap-5">
-      {sections.map((s) => (
-        <section key={s.id}>
-          <h2 className="text-base font-semibold">{s.title}</h2>
-          <p className="mt-1.5 whitespace-pre-line text-sm leading-6 text-secondary">
-            {plainText(s.body)}
-          </p>
-        </section>
-      ))}
-      {event.resolutionSource && (
-        <p className="text-sm text-tertiary">
-          Resolution source:{" "}
-          <a
-            href={event.resolutionSource}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="break-all text-accent hover:underline"
-          >
-            {event.resolutionSource}
-          </a>
-        </p>
-      )}
-    </div>
+    <OutcomesCard>
+      {event.markets.map((m, i) => {
+        const labels = m.outcomeLabels ?? ["Yes", "No"];
+        // a binary event's one row would only repeat the title as its name
+        const name = binary ? labels[0] : (m.groupItemTitle ?? m.question);
+        const yes = `Buy ${labels[0]} ${nairaPrice(m, 0)}`;
+        const no = `Buy ${labels[1]} ${nairaPrice(m, 1)}`;
+        return (
+          <OutcomeQuoteRow
+            key={m.id}
+            label={name}
+            pct={toPercent(m.outcomePrices[0])}
+            tone={binary ? YES_TONE : outcomeTone(i)}
+            highlighted={!binary && marketId === m.id}
+            yes={{
+              text: yes,
+              label: binary ? yes : `${yes} · ${name}`,
+              pressed: marketId === m.id && side === "yes",
+              onClick: () => choose(m.id, "yes"),
+            }}
+            no={{
+              text: no,
+              label: binary ? no : `${no} · ${name}`,
+              pressed: marketId === m.id && side === "no",
+              onClick: () => choose(m.id, "no"),
+            }}
+          />
+        );
+      })}
+    </OutcomesCard>
   );
 }

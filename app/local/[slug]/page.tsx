@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import type { MarketEvent } from "@/types/market";
-import { SiteHeader } from "@/components/nav/site-header";
 import { LocalEvent } from "@/components/local/local-event";
 import { getBayseEventBySlug } from "@/lib/bayse";
 import { getWorldstreetEventBySlug } from "@/lib/worldstreet-markets";
@@ -29,7 +28,7 @@ async function loadEvent(slug: string): Promise<MarketEvent | null> {
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const event = await loadEvent(slug);
-  return { title: event ? `${event.title} | Worldstreet` : "Worldstreet" };
+  return { title: event ? `${event.title} | WorldStreet` : "WorldStreet" };
 }
 
 export default async function LocalEventPage({ params }: Props) {
@@ -39,7 +38,6 @@ export default async function LocalEventPage({ params }: Props) {
 
   return (
     <>
-      <SiteHeader activeCategory="local" />
       <LocalEvent event={event} />
     </>
   );

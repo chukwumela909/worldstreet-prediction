@@ -114,7 +114,7 @@ export default function TokensPage() {
           <span className="text-primary">text-primary</span>
           <span className="text-secondary">text-secondary</span>
           <span className="text-tertiary">text-tertiary</span>
-          <span className="text-accent">text-accent</span>
+          <span className="text-accent-ink">text-accent-ink</span>
         </div>
       </Section>
 

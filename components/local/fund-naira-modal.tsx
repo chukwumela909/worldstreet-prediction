@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, CheckCircle2, Loader2, X } from "lucide-react";
+import {
+  ArrowRightIcon as ArrowRight,
+  CheckCircleIcon as CheckCircle2,
+  ArrowPathIcon as Loader2,
+  XMarkIcon as X,
+} from "@heroicons/react/24/outline";
 import { ApiError } from "@/lib/api-client";
 import { CREDIT, formatNaira } from "@/lib/format";
 import {

@@ -3,19 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  Braces,
-  ChevronRight,
-  CircleDollarSign,
-  LogOut,
-  Menu,
-  Moon,
-  Trophy,
-  User,
-} from "lucide-react";
+  ArrowDownTrayIcon as ArrowDownToLine,
+  ArrowRightEndOnRectangleIcon as LogIn,
+  ArrowRightStartOnRectangleIcon as LogOut,
+  Bars3Icon as Menu,
+  MoonIcon as Moon,
+  SunIcon as Sun,
+  TrophyIcon as Trophy,
+  WalletIcon as Wallet,
+} from "@heroicons/react/24/outline";
 import { useAuth } from "@/components/auth/auth-context";
+import { FundNairaModal } from "@/components/local/fund-naira-modal";
 import { toggleTheme, useTheme } from "@/lib/theme-store";
 import { useWalletBalance } from "@/lib/use-wallet-balance";
 import { useNairaWallet } from "@/lib/naira-wallet";
+import { useLocalPortfolio } from "@/lib/local-trades";
 import { formatNaira } from "@/lib/format";
 
 /** Dollars with the cents the nav always shows. */
@@ -25,11 +27,22 @@ const usd = (n: number) =>
     maximumFractionDigits: 2,
   })}`;
 
+const BUTTON =
+  "flex h-9 shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-sm px-4 text-sm font-medium transition-colors";
+const PRIMARY = `${BUTTON} pressable bg-accent text-on-accent hover:bg-accent-hover`;
+const SECONDARY = `${BUTTON} border border-border bg-surface text-primary hover:border-border-active hover:bg-element-2`;
+
 /**
- * Right side of the top nav. Signed out: Log In / Sign Up pills.
- * Signed in: the two real balances (Cash in dollars, Naira) linking to
- * /portfolio, then the avatar dropdown.
- * Both states end with the hamburger dropdown.
+ * Right side of the top nav.
+ *
+ * Signed in, the reference's account strip: Portfolio and Cash stats, a
+ * gold Deposit, then the menu. Both stats are real: Portfolio is what's
+ * staked in open Local positions (held to settlement, so valued at cost —
+ * they have no live price), Cash is the central dollar wallet; the naira
+ * credit balance lives in the menu. Deposit opens the funding dialog the
+ * portfolio's "Manage credit" uses.
+ *
+ * Signed out there is no account to show, so it's Log in / Sign up.
  */
 export function NavActions() {
   const { user, openAuth } = useAuth();
@@ -39,17 +52,11 @@ export function NavActions() {
         <SignedInActions />
       ) : (
         <>
-          <button
-            onClick={openAuth}
-            className="h-8 shrink-0 whitespace-nowrap rounded-full border border-border px-3.5 text-sm font-semibold text-primary hover:border-border-hover"
-          >
-            Log In
+          <button onClick={openAuth} className={SECONDARY}>
+            Log in
           </button>
-          <button
-            onClick={openAuth}
-            className="h-8 shrink-0 whitespace-nowrap rounded-full bg-blue-400 px-3.5 text-sm font-semibold text-white hover:bg-blue-500"
-          >
-            Sign Up
+          <button onClick={openAuth} className={PRIMARY}>
+            Sign up
           </button>
         </>
       )}
@@ -59,29 +66,24 @@ export function NavActions() {
 }
 
 function SignedInActions() {
-  // Both balances are real: dollars from the central wallet, naira from
-  // this platform's ledger. There is no positions figure here because
-  // Local positions are held to settlement — "value" would have to be
-  // either their cost or their potential payout, and the portfolio page
-  // is where that distinction has room to be explained.
   const walletCash = useWalletBalance(true);
-  const { balanceKobo } = useNairaWallet(true);
+  const { positions, loading } = useLocalPortfolio(true);
+  const [funding, setFunding] = useState(false);
+  const openStakeKobo = positions
+    .filter((p) => p.status === "open")
+    .reduce((sum, p) => sum + p.stakeKobo, 0);
 
   return (
     <>
       <div className="hidden items-center sm:flex">
-        {walletCash !== null && (
-          <NavStat label="Cash" value={usd(walletCash)} tone="text-primary" />
-        )}
-        {balanceKobo !== null && (
-          <NavStat
-            label="Credit"
-            value={formatNaira(balanceKobo)}
-            tone="text-primary"
-          />
-        )}
+        <NavStat label="Portfolio" value={loading ? "—" : formatNaira(openStakeKobo)} />
+        <NavStat label="Cash" value={walletCash === null ? "—" : usd(walletCash)} />
       </div>
-      <AvatarDropdown />
+      <button onClick={() => setFunding(true)} className={PRIMARY}>
+        <ArrowDownToLine className="size-4" />
+        Deposit
+      </button>
+      <FundNairaModal open={funding} onClose={() => setFunding(false)} />
     </>
   );
 }
@@ -89,31 +91,34 @@ function SignedInActions() {
 function NavStat({
   label,
   value,
-  tone,
 }: {
   label: string;
   /** Pre-formatted — these stats aren't all the same currency. */
   value: string;
-  tone: string;
 }) {
   return (
     <Link
       href="/portfolio"
-      className="flex flex-col items-end rounded-md px-2.5 py-1 leading-tight hover:bg-element-2"
+      className="grid gap-0.5 rounded-md px-2 py-1 text-right text-xs text-primary hover:bg-element-2"
     >
-      <span className={`text-sm font-semibold ${tone}`}>{value}</span>
-      <span className="text-xs font-medium text-secondary">{label}</span>
+      {label}
+      <strong className="text-base font-semibold tabular-nums text-yes">{value}</strong>
     </Link>
   );
 }
 
-function AvatarDropdown() {
-  const { user, signOut } = useAuth();
+/**
+ * The account menu: who's signed in, where their things live, the theme
+ * switch, and sign out.
+ */
+function MenuDropdown() {
+  const { user, signOut, openAuth } = useAuth();
   const [open, setOpen] = useState(false);
+  const dark = useTheme() === "dark";
+  const { balanceKobo } = useNairaWallet(Boolean(user));
   const wrapRef = useRef<HTMLDivElement>(null);
   useDismiss(wrapRef, open, () => setOpen(false));
-
-  if (!user) return null;
+  const close = () => setOpen(false);
 
   return (
     <div ref={wrapRef} className="relative">
@@ -121,144 +126,95 @@ function AvatarDropdown() {
         aria-label="Account menu"
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
-        className="flex size-8 items-center justify-center rounded-full bg-accent/20 text-sm font-bold uppercase text-accent"
-      >
-        {user.name[0]}
-      </button>
-
-      {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-56 rounded-xl border border-border bg-surface p-2 shadow-popover">
-          <div className="px-3 py-2">
-            <p className="truncate text-sm font-semibold">{user.name}</p>
-            <p className="truncate text-xs text-secondary">{user.email}</p>
-          </div>
-          <div className="my-1 border-t border-border" />
-          <Link
-            href="/portfolio"
-            onClick={() => setOpen(false)}
-            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-[15px] font-medium transition-colors duration-150 ease-in-out hover:bg-element-2"
-          >
-            <User className="size-4.5 text-secondary" />
-            Portfolio
-          </Link>
-          <Link
-            href="/leaderboard"
-            onClick={() => setOpen(false)}
-            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-[15px] font-medium transition-colors duration-150 ease-in-out hover:bg-element-2"
-          >
-            <Trophy className="size-4.5 text-secondary" />
-            Leaderboard
-          </Link>
-          <div className="my-1 border-t border-border" />
-          <button
-            onClick={() => {
-              signOut();
-              setOpen(false);
-            }}
-            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-[15px] font-medium text-no transition-colors duration-150 ease-in-out hover:bg-element-2"
-          >
-            <LogOut className="size-4.5" />
-            Sign Out
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-const MENU_LINKS = [
-  "Accuracy",
-  "Status",
-  "Documentation",
-  "Help Center",
-  "Terms of Use",
-];
-
-function MenuDropdown() {
-  const { user, signOut } = useAuth();
-  const [open, setOpen] = useState(false);
-  const dark = useTheme() === "dark";
-  const wrapRef = useRef<HTMLDivElement>(null);
-  useDismiss(wrapRef, open, () => setOpen(false));
-
-  return (
-    <div ref={wrapRef} className="relative">
-      <button
-        aria-label="Menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-        className="p-1.5 text-primary hover:text-secondary"
+        className="flex size-9 items-center justify-center rounded-sm text-secondary transition-colors hover:bg-surface hover:text-primary"
       >
         <Menu className="size-5" />
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full z-50 mt-1.5 w-60 rounded-xl border border-border bg-surface p-2 shadow-popover">
-          <MenuItem
-            icon={<Trophy className="size-4.5 text-yellow-500" />}
-            label="Leaderboard"
-            href="/leaderboard"
-            onNavigate={() => setOpen(false)}
-          />
-          <MenuItem
-            icon={<CircleDollarSign className="size-4.5 text-yes" />}
-            label="Rewards"
-          />
-          <MenuItem
-            icon={<Braces className="size-4.5 text-promo-purple-text" />}
-            label="APIs"
-          />
-          <button
-            role="switch"
-            aria-checked={dark}
-            onClick={toggleTheme}
-            className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-[15px] font-medium transition-colors duration-150 ease-in-out hover:bg-element-2"
-          >
-            <Moon className="size-4.5 text-blue-600" />
-            Dark mode
-            <span
-              className={`ml-auto flex h-5 w-9 rounded-full p-0.5 transition-colors duration-150 ease-in-out ${
-                dark ? "bg-accent" : "bg-element-3"
-              }`}
-            >
-              <span
-                className={`size-4 rounded-full bg-white transition-transform duration-150 ease-in-out ${
-                  dark ? "translate-x-4" : ""
-                }`}
-              />
-            </span>
+        <div className="absolute right-0 top-full z-50 mt-1.5 w-60 rounded-lg border border-border bg-surface p-1.5 shadow-popover">
+          {user ? (
+            <>
+              <div className="px-3 py-2">
+                <p className="truncate text-sm font-semibold">{user.name}</p>
+                <p className="truncate text-xs text-secondary">{user.email}</p>
+                {balanceKobo !== null && (
+                  <p className="mt-1.5 flex items-center justify-between text-xs text-secondary">
+                    Credit
+                    <span className="font-semibold tabular-nums text-yes">
+                      {formatNaira(balanceKobo)}
+                    </span>
+                  </p>
+                )}
+              </div>
+              <div className="my-1 border-t border-border" />
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => {
+                  close();
+                  openAuth();
+                }}
+                className={MENU_ITEM}
+              >
+                <LogIn className="size-4 text-secondary" />
+                Log in
+              </button>
+              <div className="my-1 border-t border-border" />
+            </>
+          )}
+          <MenuLink href="/portfolio" icon={<Wallet className="size-4" />} onNavigate={close}>
+            Portfolio
+          </MenuLink>
+          <MenuLink href="/leaderboard" icon={<Trophy className="size-4" />} onNavigate={close}>
+            Leaderboard
+          </MenuLink>
+          <button onClick={toggleTheme} className={MENU_ITEM}>
+            {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
+            {dark ? "Light theme" : "Dark theme"}
           </button>
-
-          <div className="my-2 border-t border-border" />
-
-          {MENU_LINKS.map((label) => (
-            <MenuItem key={label} label={label} muted />
-          ))}
-          <MenuItem
-            icon={<span className="text-base leading-none">🌐</span>}
-            label="Language"
-            trailing={<ChevronRight className="size-4 text-tertiary" />}
-            muted
-          />
 
           {user && (
             <>
-              <div className="my-2 border-t border-border" />
+              <div className="my-1 border-t border-border" />
               <button
                 onClick={() => {
                   signOut();
-                  setOpen(false);
+                  close();
                 }}
-                className="flex h-10 w-full items-center gap-3 rounded-md px-3 text-[15px] font-medium text-no transition-colors duration-150 ease-in-out hover:bg-element-2"
+                className={`${MENU_ITEM} text-no`}
               >
-                <LogOut className="size-4.5" />
-                Sign Out
+                <LogOut className="size-4" />
+                Sign out
               </button>
             </>
           )}
         </div>
       )}
     </div>
+  );
+}
+
+const MENU_ITEM =
+  "flex h-9 w-full items-center gap-3 rounded-md px-3 text-sm font-medium text-primary transition-colors hover:bg-element-2";
+
+function MenuLink({
+  href,
+  icon,
+  children,
+  onNavigate,
+}: {
+  href: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  onNavigate: () => void;
+}) {
+  return (
+    <Link href={href} onClick={onNavigate} className={MENU_ITEM}>
+      <span className="text-secondary">{icon}</span>
+      {children}
+    </Link>
   );
 }
 
@@ -283,42 +239,4 @@ function useDismiss(
       document.removeEventListener("keydown", onKey);
     };
   }, [ref, open, onClose]);
-}
-
-function MenuItem({
-  icon,
-  label,
-  trailing,
-  muted = false,
-  href,
-  onNavigate,
-}: {
-  icon?: React.ReactNode;
-  label: string;
-  trailing?: React.ReactNode;
-  muted?: boolean;
-  href?: string;
-  onNavigate?: () => void;
-}) {
-  const className = `flex w-full items-center gap-3 rounded-md px-3 transition-colors duration-150 ease-in-out hover:bg-element-2 ${
-    muted
-      ? "h-9 text-sm font-medium text-secondary hover:text-primary"
-      : "h-10 text-[15px] font-medium text-primary"
-  }`;
-  if (href) {
-    return (
-      <Link href={href} onClick={onNavigate} className={className}>
-        {icon}
-        {label}
-        {trailing && <span className="ml-auto">{trailing}</span>}
-      </Link>
-    );
-  }
-  return (
-    <button className={className}>
-      {icon}
-      {label}
-      {trailing && <span className="ml-auto">{trailing}</span>}
-    </button>
-  );
 }

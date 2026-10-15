@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, RefreshCw, Search, Users } from "lucide-react";
+import {
+  ChevronDownIcon as ChevronDown,
+  ArrowPathIcon as RefreshCw,
+  MagnifyingGlassIcon as Search,
+  UsersIcon as Users,
+} from "@heroicons/react/24/outline";
 import { formatNaira, formatNairaSigned } from "@/lib/format";
 import { isApiConfigured, ApiError } from "@/lib/api-client";
 import {

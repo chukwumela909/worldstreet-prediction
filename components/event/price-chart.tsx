@@ -10,7 +10,10 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+  ChevronDownIcon as ChevronDown,
+  ChevronUpIcon as ChevronUp,
+} from "@heroicons/react/24/outline";
 import { isBinary, type MarketEvent } from "@/types/market";
 import { toPercent } from "@/lib/format";
 import { mergeSeries, TIMEFRAMES, type Timeframe } from "@/lib/series";
@@ -32,7 +35,8 @@ const MAX_LINES = 3;
 /**
  * Probability-over-time chart with timeframe toggles and the measured
  * crosshair behavior (recon §9): dashed cursor + timestamp, value pills,
- * legend / chance header live-updating to the hovered point.
+ * legend / chance header live-updating to the hovered point. Sits in the
+ * page's "Market probability" card, which supplies the frame and title.
  */
 export function PriceChart({ event }: { event: MarketEvent }) {
   const [tf, setTf] = useState<Timeframe>("ALL");
@@ -154,7 +158,7 @@ export function PriceChart({ event }: { event: MarketEvent }) {
 
       {/* chart */}
       <ClipStyles id={clipId} />
-      <div className="mt-2 h-[300px]">
+      <div className="mt-2 h-[240px] sm:h-[300px]">
         {endTime !== null && (
           <ResponsiveContainer width="100%" height="100%">
             <LineChart data={data} margin={{ top: 20, right: 0, bottom: 0, left: 8 }}>
@@ -226,19 +230,42 @@ export function PriceChart({ event }: { event: MarketEvent }) {
       </div>
 
       {/* timeframe toggles */}
-      <div className="mt-1 flex justify-end gap-1">
-        {TIMEFRAMES.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTf(t)}
-            className={`h-8 rounded-md px-2 text-sm font-semibold transition-colors duration-150 ease-in-out ${
-              tf === t ? "bg-element-2 text-primary" : "text-secondary hover:text-primary"
-            }`}
-          >
-            {t}
-          </button>
-        ))}
-      </div>
+      <RangeToggles options={TIMEFRAMES} value={tf} onChange={setTf} />
+    </div>
+  );
+}
+
+/** Range pills under a probability chart — shared with the Bayse chart. */
+export function RangeToggles<T extends string>({
+  options,
+  value,
+  onChange,
+}: {
+  options: readonly T[];
+  value: T;
+  onChange: (next: T) => void;
+}) {
+  return (
+    <div
+      role="group"
+      aria-label="Chart range"
+      className="mt-3 flex justify-end gap-1 border-t border-border pt-3"
+    >
+      {options.map((t) => (
+        <button
+          key={t}
+          type="button"
+          aria-pressed={value === t}
+          onClick={() => onChange(t)}
+          className={`h-7 rounded-full px-2.5 text-xs font-semibold transition-colors duration-150 ease-in-out ${
+            value === t
+              ? "bg-element-2 text-primary"
+              : "text-secondary hover:bg-element-2 hover:text-primary"
+          }`}
+        >
+          {t}
+        </button>
+      ))}
     </div>
   );
 }
@@ -256,9 +283,9 @@ function ChanceHeader({ pct, delta }: { pct: number; delta: number }) {
           }`}
         >
           {delta > 0 ? (
-            <ChevronUp className="size-4" strokeWidth={3} />
+            <ChevronUp className="size-4" />
           ) : (
-            <ChevronDown className="size-4" strokeWidth={3} />
+            <ChevronDown className="size-4" />
           )}
           {Math.abs(delta)}%
         </span>

@@ -3,14 +3,14 @@
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import {
-  ChevronDown,
-  ChevronRight,
-  Loader2,
-  Plus,
-  RefreshCw,
-  Trash2,
-  X,
-} from "lucide-react";
+  ChevronDownIcon as ChevronDown,
+  ChevronRightIcon as ChevronRight,
+  ArrowPathIcon as Loader2,
+  PlusIcon as Plus,
+  ArrowPathIcon as RefreshCw,
+  TrashIcon as Trash2,
+  XMarkIcon as X,
+} from "@heroicons/react/24/outline";
 import { CATEGORIES } from "@/types/market";
 import { CREDIT, formatNaira, formatNairaSigned } from "@/lib/format";
 import { isApiConfigured } from "@/lib/api-client";
@@ -154,7 +154,7 @@ export function MarketsDesk() {
 const STATUS_STYLE: Record<WsEventStatus, string> = {
   draft: "bg-element-2 text-secondary",
   open: "bg-yes-tint text-yes",
-  closed: "bg-accent/10 text-accent",
+  closed: "bg-accent/10 text-accent-ink",
   resolved: "bg-element-2 text-secondary",
   cancelled: "bg-no-tint text-no",
 };
@@ -227,7 +227,7 @@ function EventCard({
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => setOpen((v) => !v)}
-              className="flex min-w-0 items-center gap-1 text-left text-[15px] font-semibold hover:text-accent"
+              className="flex min-w-0 items-center gap-1 text-left text-[15px] font-semibold hover:text-accent-ink"
             >
               {open ? (
                 <ChevronDown className="size-4 shrink-0" />
@@ -335,7 +335,7 @@ function EventCard({
                 Live at{" "}
                 <Link
                   href={`/local/${event.slug}`}
-                  className="font-semibold text-accent hover:underline"
+                  className="font-semibold text-accent-ink hover:underline"
                 >
                   /local/{event.slug}
                 </Link>

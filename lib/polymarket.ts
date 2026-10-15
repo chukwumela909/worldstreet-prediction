@@ -307,7 +307,7 @@ export interface GetEventsOptions {
  * Cached (normalized output only) for DEFAULT_REVALIDATE_SECONDS,
  * keyed by options.
  */
-export const getEvents = unstable_cache(
+const getEventsCached = unstable_cache(
   async (options: GetEventsOptions = {}): Promise<MarketEvent[]> => {
     const { limit = 20, offset = 0, tagSlug, order = "volume24hr" } = options;
 
@@ -327,6 +327,59 @@ export const getEvents = unstable_cache(
   ["polymarket-events"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["polymarket"] },
 );
+
+/**
+ * Events that just came back in a list, by slug. A list and a single-
+ * event fetch go through the same mapper, so an event the board or a
+ * category page has just shown is already exactly what its market page
+ * needs — clicking a card shouldn't cost another Gamma round trip.
+ * In-memory and per server instance, bounded, and trusted for
+ * RECENT_TTL_MS.
+ */
+const RECENT_MAX = 600;
+/**
+ * How long a listed event stands in for its own fetch. Longer than the
+ * list cache's 60 s on purpose: a visitor's browser reuses the list page
+ * for a while without asking the server again, so the server's copy ages
+ * while the card is still on screen — and the market page re-polls its
+ * prices the moment it mounts, so only the static parts can be this old.
+ */
+const RECENT_TTL_MS = 5 * 60 * 1000;
+const recentEvents = new Map<string, { event: MarketEvent; at: number }>();
+
+function rememberEvents(events: MarketEvent[]) {
+  const at = Date.now();
+  for (const event of events) {
+    recentEvents.delete(event.slug); // re-insert so Map order stays oldest-first
+    recentEvents.set(event.slug, { event, at });
+  }
+  for (const slug of recentEvents.keys()) {
+    if (recentEvents.size <= RECENT_MAX) break;
+    recentEvents.delete(slug);
+  }
+}
+
+/**
+ * Open events sorted by 24h volume, normalized for the UI — the cached
+ * fetch above, plus noting each result in the recent-events index.
+ */
+export async function getEvents(options: GetEventsOptions = {}): Promise<MarketEvent[]> {
+  const events = await getEventsCached(options);
+  rememberEvents(events);
+  return events;
+}
+
+/**
+ * A market page's event: straight from a list fetched within the last
+ * cache period when there is one, otherwise its own (cached) fetch.
+ */
+export async function getEventForPage(slug: string): Promise<MarketEvent | null> {
+  const recent = recentEvents.get(slug);
+  if (recent && Date.now() - recent.at < RECENT_TTL_MS) {
+    return recent.event;
+  }
+  return getEventBySlug(slug);
+}
 
 /** Single event by its URL slug, or null when not found. Cached like getEvents. */
 export const getEventBySlug = unstable_cache(

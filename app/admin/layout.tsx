@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { AdminShell } from "@/components/admin/admin-shell";
 
-export const metadata: Metadata = { title: "Admin | Worldstreet" };
+export const metadata: Metadata = { title: "Admin | WorldStreet" };
 
 export default function AdminLayout({
   children,

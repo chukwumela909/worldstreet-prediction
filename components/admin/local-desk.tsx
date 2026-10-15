@@ -3,13 +3,13 @@
 import { useState } from "react";
 import Link from "next/link";
 import {
-  AlertTriangle,
-  CheckCircle2,
-  CloudOff,
-  Loader2,
-  Mail,
-  RefreshCw,
-} from "lucide-react";
+  ExclamationTriangleIcon as AlertTriangle,
+  CheckCircleIcon as CheckCircle2,
+  SignalSlashIcon as CloudOff,
+  ArrowPathIcon as Loader2,
+  EnvelopeIcon as Mail,
+  ArrowPathIcon as RefreshCw,
+} from "@heroicons/react/24/outline";
 import { CREDIT, formatNaira } from "@/lib/format";
 import { ApiError, isApiConfigured } from "@/lib/api-client";
 import {
@@ -372,7 +372,7 @@ const ATTENTION: Record<
     className: "bg-no-tint text-no",
   },
   cancelled: { label: "Cancelled — void", className: "bg-no-tint text-no" },
-  overdue: { label: "Overdue", className: "bg-accent/10 text-accent" },
+  overdue: { label: "Overdue", className: "bg-accent/10 text-accent-ink" },
   bayse_unreachable: {
     label: "Bayse unreachable",
     className: "bg-element-2 text-secondary",

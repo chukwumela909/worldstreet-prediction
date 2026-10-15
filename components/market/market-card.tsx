@@ -2,6 +2,8 @@ import Link from "next/link";
 import { WatchButton } from "./watch-button";
 import { EventIcon } from "./event-icon";
 import { OutcomeRow } from "./outcome-row";
+import { PrefetchArticle } from "./prefetch-article";
+import { NO_TONE, YES_TONE, outcomeTone } from "./outcome-quote";
 import { isBinary, isLocalBook, type MarketEvent } from "@/types/market";
 import {
   formatNairaCompact,
@@ -12,15 +14,14 @@ import {
 import { CloseCountdown } from "@/components/local/close-countdown";
 
 /**
- * Market card — the atomic unit of the home grid. Category strip, title,
- * then one buyable row per outcome (name · return multiple · probability)
- * over a stats footer.
+ * Market card — the atomic unit of the home grid. An identity strip (icon,
+ * section label, subcategory), the question and its close date, one quote
+ * row per outcome (name over a chance bar · payout multiple · price pill),
+ * and a footer of stats, outcome count and the watchlist toggle.
  *
- * The card is deliberately not fixed-height any more. It used to be 180px
- * with the outcome list scrolling inside it, which put rows behind a
- * scrollbar on a card small enough that they read as the whole story.
- * Rows are capped instead, and the title links to the event page where
- * the full set lives.
+ * Rows are capped so every card in a grid row has the same rhythm; the
+ * footer's outcome count links to the event page, where the full set
+ * lives.
  */
 export function MarketCard({
   event,
@@ -37,74 +38,118 @@ export function MarketCard({
 }) {
   // naira-book events live under /local, Polymarket under /event
   const local = isLocalBook(event);
-  const href = local ? `/local/${event.slug}` : `/event/${event.slug}`;
+  const href = eventHref(event);
+  const outcomes = isBinary(event) ? 2 : event.markets.length;
 
   return (
-    <article className="flex flex-col rounded-xl border border-border bg-surface p-4 shadow-card transition-colors hover:border-border-hover">
-      <header className="flex items-center justify-between gap-2">
-        <span className="flex min-w-0 items-center gap-2">
-          <EventIcon event={event} className="size-7 rounded-md text-sm" px={28} />
-          <span className="truncate text-[13px] font-semibold uppercase tracking-wider text-secondary sm:text-xs">
-            {label ?? event.category}
-          </span>
+    <PrefetchArticle
+      href={href}
+      className="flex min-h-[260px] flex-col gap-4 rounded-xl border border-border bg-surface p-4 shadow-card transition-colors hover:border-border-hover"
+    >
+      <header className="flex items-center gap-3">
+        <EventIcon event={event} className="size-8 rounded-md text-base" px={32} />
+        <span className="min-w-0 truncate text-[11px] font-semibold uppercase tracking-wider text-secondary">
+          {label ?? event.category}
         </span>
-        {/* watchlist resolves slugs against Polymarket — skip the Local book */}
-        {!local && <WatchButton slug={event.slug} />}
+        {event.subcategory && (
+          <span className="ml-auto shrink-0 text-xs text-secondary">
+            {event.subcategory}
+          </span>
+        )}
       </header>
 
-      <Link href={href} className="mt-3 block">
-        <h3 className="line-clamp-2 text-[17px] font-semibold leading-snug text-primary hover:underline sm:text-base">
-          {isBinary(event) ? event.markets[0].question : event.title}
-        </h3>
-      </Link>
-
-      <div className="mt-3 mb-3 flex flex-col">
-        <Outcomes event={event} />
+      <div>
+        <Link href={href} className="block">
+          <h3 className="line-clamp-2 text-[15px] font-semibold leading-snug text-primary hover:underline">
+            {isBinary(event) ? event.markets[0].question : event.title}
+          </h3>
+        </Link>
+        <CloseDate event={event} />
       </div>
 
-      {/* mt-auto pins the stats to the bottom edge: grid rows stretch every
-          card to the tallest in the row, so a two-outcome card next to a
-          three-outcome one would otherwise float its footer mid-card */}
-      <footer className="mt-auto flex items-center justify-between gap-2 border-t border-border pt-3 text-sm font-medium text-secondary sm:text-[13px]">
-        <Stats event={event} />
+      {/* my-auto centres the rows in whatever height the grid row hands
+          the card, so a two-row card beside a taller one doesn't leave
+          its footer floating mid-card */}
+      <div className="my-auto flex flex-col gap-3">
+        <Outcomes event={event} href={href} />
+      </div>
+
+      <footer className="flex items-center gap-3 text-xs text-secondary">
+        <span className="mr-auto min-w-0 truncate">
+          <Stats event={event} />
+        </span>
         {/* renders only when a Local market is closing — see CloseCountdown */}
-        <CloseCountdown event={event} className="text-sm sm:text-[13px]" />
+        <CloseCountdown event={event} className="text-xs" />
+        <Link href={href} className="shrink-0 hover:text-primary">
+          {outcomes} outcomes
+        </Link>
+        {/* watchlist resolves slugs against Polymarket — skip the Local book */}
+        {!local && <WatchButton slug={event.slug} />}
       </footer>
-    </article>
+    </PrefetchArticle>
+  );
+}
+
+export function eventHref(event: Pick<MarketEvent, "slug" | "source">): string {
+  return isLocalBook(event) ? `/local/${event.slug}` : `/event/${event.slug}`;
+}
+
+/** "Oct 15, 2026" — from the full close time when the source gives one. */
+export function formatCloseDate(event: Pick<MarketEvent, "endDate" | "closesAt">): string | null {
+  const iso = event.closesAt ?? event.endDate;
+  if (!iso) return null;
+  // Gamma's endDate is date-only; pin it to UTC so it doesn't slip a day
+  const at = Date.parse(iso.includes("T") ? iso : `${iso}T00:00:00Z`);
+  if (Number.isNaN(at)) return null;
+  return new Date(at).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+function CloseDate({ event }: { event: MarketEvent }) {
+  const date = formatCloseDate(event);
+  if (!date) return null;
+  return (
+    <time dateTime={event.closesAt ?? event.endDate} className="mt-1 block text-xs text-secondary">
+      {date}
+    </time>
   );
 }
 
 /**
  * Binary markets show both sides, so the two rows together are the whole
- * market. Multi-outcome markets show one row per outcome, each buying that
- * outcome — taking the other side of a single runner is an event-page
- * action, not a grid one.
+ * market. Multi-outcome markets show the first rows of the set, each
+ * buying that outcome — taking the other side of a single runner is an
+ * event-page action, not a grid one.
  */
-const MAX_ROWS = 3;
+const MAX_ROWS = 2;
 
-function Outcomes({ event }: { event: MarketEvent }) {
+function Outcomes({ event, href }: { event: MarketEvent; href: string }) {
   if (isBinary(event)) {
     const market = event.markets[0];
-    const pct = toPercent(market.outcomePrices[0]);
     const [yesLabel, noLabel] = market.outcomeLabels ?? ["Yes", "No"];
     return (
       <>
         <OutcomeRow
-          side="yes"
           label={yesLabel}
+          tone={YES_TONE}
+          pct={toPercent(market.outcomePrices[0])}
           multiplier={toMultiplier(market.outcomePrices[0])}
-          pct={pct}
-          tinted
+          href={href}
         />
         {/* The No price is quoted, not inferred: on a Polymarket or Bayse
             market the pair sums to 1 and the two are the same number, but
             a Worldstreet book is priced with an overround and 100 − yes
             would undercut the price the row's own multiple is built on. */}
         <OutcomeRow
-          side="no"
           label={noLabel}
-          multiplier={toMultiplier(market.outcomePrices[1])}
+          tone={NO_TONE}
           pct={toPercent(market.outcomePrices[1])}
+          multiplier={toMultiplier(market.outcomePrices[1])}
+          href={href}
         />
       </>
     );
@@ -112,14 +157,14 @@ function Outcomes({ event }: { event: MarketEvent }) {
 
   return (
     <>
-      {event.markets.slice(0, MAX_ROWS).map((m) => (
+      {event.markets.slice(0, MAX_ROWS).map((m, i) => (
         <OutcomeRow
           key={m.id}
-          side="yes"
           label={m.groupItemTitle ?? m.question}
-          multiplier={toMultiplier(m.outcomePrices[0])}
+          tone={outcomeTone(i)}
           pct={toPercent(m.outcomePrices[0])}
-          tinted
+          multiplier={toMultiplier(m.outcomePrices[0])}
+          href={href}
         />
       ))}
     </>
@@ -141,16 +186,12 @@ function Stats({ event }: { event: MarketEvent }) {
           ? `${formatNairaCompact(parseFloat(event.stakedNgn))} staked`
           : null;
     return (
-      <span className="truncate">
+      <>
         {[pool, event.trades !== undefined && `${event.trades} trades`]
           .filter(Boolean)
           .join(" · ")}
-      </span>
+      </>
     );
   }
-  return (
-    <span className="truncate">
-      {formatUsdCompact(parseFloat(event.volume) || 0)} vol
-    </span>
-  );
+  return <>{formatUsdCompact(parseFloat(event.volume) || 0)} vol</>;
 }

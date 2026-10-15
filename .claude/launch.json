@@ -12,6 +12,18 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev", "--", "-p", "3001"],
       "port": 3001
+    },
+    {
+      "name": "reference-marketplace",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["--prefix", "C:/Users/HP/Downloads/wordlstreet-prediction-marketplace-main/wordlstreet-prediction-marketplace-main", "run", "dev"],
+      "port": 3004
+    },
+    {
+      "name": "prod-3005",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "start", "--", "-p", "3005"],
+      "port": 3005
     }
   ]
 }

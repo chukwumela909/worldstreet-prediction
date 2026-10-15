@@ -38,7 +38,28 @@ export const CATEGORY_TABS: CategoryTab[] = [
   { param: "culture", label: "Culture", tagSlug: "pop-culture" },
   { param: "economy", label: "Economy", tagSlug: "economy" },
   { param: "weather", label: "Weather", tagSlug: "weather" },
+  { param: "social-media", label: "Social media", tagSlug: "social-media" },
 ];
+
+/**
+ * The tabs the header's category row shows, in the reference order.
+ * Local is not here because it IS the bare "/" — the "Markets" home —
+ * and World Cup, Breaking and Geopolitics live in the More menu and the
+ * all-categories dropdown; their `?category=` URLs still resolve.
+ */
+export const BAR_CATEGORIES = [
+  "trending",
+  "politics",
+  "sports",
+  "crypto",
+  "esports",
+  "finance",
+  "tech",
+  "culture",
+  "economy",
+  "weather",
+  "social-media",
+] as const;
 
 /**
  * The tab a bare `/` lands on. Local is the only book anyone can actually

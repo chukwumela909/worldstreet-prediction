@@ -1,7 +1,11 @@
 import type { Metadata } from "next";
-import { Geist_Mono, Inter } from "next/font/google";
+import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { AuthProvider } from "@/components/auth/auth-context";
+import { MobileDock } from "@/components/nav/mobile-dock";
+import { SiteChrome } from "@/components/nav/site-chrome";
+import { SiteHeader } from "@/components/nav/site-header";
+import { Toaster } from "@/components/toaster";
 import { SiteFooter } from "@/components/nav/site-footer";
 import {
   CLERK_DOMAIN,
@@ -13,19 +17,24 @@ import "./globals.css";
 /** Apply the persisted theme before first paint (inline, FOUC-safe). */
 const THEME_INIT = `try{var t=localStorage.getItem("ws-theme");if(t)document.documentElement.dataset.theme=t}catch(e){}`;
 
-const inter = Inter({
-  variable: "--font-inter",
+// The reference type pair: Instrument Sans for everything, IBM Plex Mono
+// for figures that need a fixed width. Neither carries ₦, so the stack in
+// globals.css falls back to Noto Sans / the system face for that glyph.
+const instrumentSans = Instrument_Sans({
+  variable: "--font-instrument-sans",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-ibm-plex-mono",
   subsets: ["latin"],
+  weight: ["400", "500", "600"],
 });
 
 export const metadata: Metadata = {
-  title: "Worldstreet | Prediction Markets",
-  description: "Trade on the world's most debated outcomes.",
+  title: "WorldStreet Prediction Markets",
+  description:
+    "WorldStreet Prediction Markets - High-precision probability desk, active forecasting, and binary contract settlement.",
 };
 
 export default function RootLayout({
@@ -38,13 +47,20 @@ export default function RootLayout({
       lang="en"
       data-theme="dark"
       suppressHydrationWarning
-      className={`${inter.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${instrumentSans.variable} ${plexMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <AuthProvider>
+          {/* in the layout, not each page: it stays mounted across every
+              navigation, so only the page below it swaps */}
+          <SiteChrome>
+            <SiteHeader />
+          </SiteChrome>
           {children}
           <SiteFooter />
+          <MobileDock />
+          <Toaster />
         </AuthProvider>
       </body>
     </html>

@@ -7,12 +7,16 @@ import type { EventComment, EventTrade, MarketHolder } from "@/lib/polymarket";
 import { timeAgo } from "@/lib/format";
 import { useAuth } from "@/components/auth/auth-context";
 
-const TABS = ["Rules", "Comments", "Top Holders", "Activity"] as const;
+const TABS = ["Comments", "Top Holders", "Activity"] as const;
 type Tab = (typeof TABS)[number];
 
-/** Rules / Comments / Top Holders / Activity tab strip + panels. */
+/**
+ * Comments / Top Holders / Activity — the body of the page's "Social &
+ * activity" card. Pill tabs over the panel. (The rules moved out to the
+ * "Market rules" block, see market-info.tsx.)
+ */
 export function EventTabs({ event }: { event: MarketEvent }) {
-  const [tab, setTab] = useState<Tab>("Rules");
+  const [tab, setTab] = useState<Tab>("Comments");
   const comments = useFetched<EventComment[]>(
     `/api/comments?eventId=${encodeURIComponent(event.id)}`,
     (body: { comments?: EventComment[] }) => body.comments ?? [],
@@ -24,16 +28,18 @@ export function EventTabs({ event }: { event: MarketEvent }) {
     comments.data === null ? null : comments.data.length + posted.length;
 
   return (
-    <section>
-      <div className="flex gap-6 overflow-x-auto border-b border-border">
+    <div>
+      <div role="tablist" className="flex gap-1.5 overflow-x-auto">
         {TABS.map((t) => (
           <button
             key={t}
+            role="tab"
+            aria-selected={tab === t}
             onClick={() => setTab(t)}
-            className={`shrink-0 border-b-2 pb-2.5 text-base font-semibold transition-colors ${
+            className={`h-8 shrink-0 rounded-full px-3.5 text-sm font-semibold transition-colors ${
               tab === t
-                ? "border-primary text-primary"
-                : "border-transparent text-secondary hover:text-primary"
+                ? "bg-accent/15 text-primary"
+                : "text-secondary hover:bg-element-2 hover:text-primary"
             }`}
           >
             {t}
@@ -44,8 +50,7 @@ export function EventTabs({ event }: { event: MarketEvent }) {
         ))}
       </div>
 
-      <div className="py-4">
-        {tab === "Rules" && <Rules event={event} />}
+      <div role="tabpanel" className="pt-4">
         {tab === "Comments" && (
           <Comments
             state={comments}
@@ -56,7 +61,7 @@ export function EventTabs({ event }: { event: MarketEvent }) {
         {tab === "Top Holders" && <TopHolders event={event} />}
         {tab === "Activity" && <ActivityFeed event={event} />}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -142,30 +147,6 @@ function TraderAvatar({
   );
 }
 
-/* ---------- rules ---------- */
-
-function Rules({ event }: { event: MarketEvent }) {
-  return (
-    <div className="text-sm leading-6 text-secondary">
-      <p>
-        This market will resolve to &ldquo;Yes&rdquo; if the outcome described in
-        &ldquo;{event.title}&rdquo; occurs by{" "}
-        {new Date(event.endDate + "T00:00:00Z").toLocaleDateString("en-US", {
-          month: "long",
-          day: "numeric",
-          year: "numeric",
-          timeZone: "UTC",
-        })}
-        . Otherwise, it will resolve to &ldquo;No&rdquo;.
-      </p>
-      <p className="mt-2">
-        The primary resolution source will be official announcements and a
-        consensus of credible reporting.
-      </p>
-    </div>
-  );
-}
-
 /* ---------- comments ---------- */
 
 function Comments({
@@ -191,7 +172,7 @@ function Comments({
     <div>
       {user ? (
         <div className="mb-5 flex gap-3">
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-bold uppercase text-accent">
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-accent/20 text-xs font-bold uppercase text-accent-ink">
             {user.name[0]}
           </span>
           <div className="flex-1">

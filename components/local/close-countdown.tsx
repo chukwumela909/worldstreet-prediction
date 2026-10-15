@@ -1,6 +1,8 @@
 "use client";
 
-import { Clock } from "lucide-react";
+import {
+  ClockIcon as Clock,
+} from "@heroicons/react/24/outline";
 import type { MarketEvent } from "@/types/market";
 import { useTickingNow } from "@/lib/use-now";
 import {

@@ -1,8 +1,8 @@
 @import "tailwindcss";
 
 /* ============================================================
-   Design tokens — two layers, mirroring Polymarket's own system.
-   Values extracted live from polymarket.com (see docs/polymarket-recon.md).
+   Design tokens — two layers. Values are the WorldStreet design
+   tokens v5.1 from the prediction marketplace reference app.
 
    Layer 1: PRIMITIVES  (--neutral-*, --brand-*, --green-*, ...)
    Layer 2: SEMANTIC    (--bg-page, --text-primary, --yes, ...)
@@ -10,101 +10,95 @@
    Components consume ONLY semantic tokens (via the Tailwind
    @theme mapping below). Rebrand = repoint primitives.
 
-   Default theme is DARK (html[data-theme="dark"], like Polymarket).
+   Default theme is DARK (html[data-theme="dark"]).
    ============================================================ */
 
-/* ---------- Layer 1: primitives — dark (default) ---------- */
+/* ---------- Layer 1: primitives — dark (default) ----------
+   Values from the WorldStreet design tokens v5.1 (the prediction
+   marketplace reference app). Dark uses that app's prediction-shell
+   surfaces, which sit a step darker than the base token sheet. */
 :root {
-  /* neutral: 0 = page-dark ... 950 = text-bright
+  /* neutral: 0 = page ... 950 = text-bright */
+  --neutral-0: #0f0f0f; /* canvas */
+  --neutral-25: #141414; /* featured hero card */
+  --neutral-50: #141414; /* surface.base — cards, inputs */
+  --neutral-100: #222222; /* surface.raised — chips, secondary buttons */
+  --neutral-150: #272727; /* border.default */
+  --neutral-200: #2e2e2e; /* raised hover */
+  --neutral-300: #404040;
+  --neutral-400: #535353;
+  --neutral-500: #727272; /* text.tertiary, border.strong */
+  --neutral-600: #d3d3d3; /* text.secondary */
+  --neutral-700: #dedede;
+  --neutral-800: #e6e6e6;
+  --neutral-900: #f0f0f0;
+  --neutral-950: #fafafa; /* text.primary */
 
-     Worldstreet warm greys. Each rung is the Polymarket original re-tinted
-     at MATCHED relative luminance — only the hue moved, so every contrast
-     ratio the recon measured survives the rebrand untouched (secondary
-     still 6.24:1, tertiary still 4.38:1 on surface). Warmth is strongest
-     at the dark end and fades toward the text rungs, where a warm tint
-     reads as yellowed rather than branded. */
-  --neutral-0: #1a1816;
-  --neutral-50: #25231f;
-  --neutral-100: #2c2a26;
-  --neutral-200: #393732;
-  --neutral-300: #696660;
-  --neutral-400: #7e7a74;
-  --neutral-500: #8a8781;
-  --neutral-600: #a6a39e;
-  --neutral-700: #bbb8b3;
-  --neutral-800: #c5c3be;
-  --neutral-900: #dad7d2;
-  --neutral-950: #e5e2de;
+  /* brand — WorldStreet gold (action.primary). 500 is the fill, 600 the
+     hover (gold.200: the reference lightens on hover); 50–400 are the
+     dark end of the ramp for washes. Gold carries near-black text, never
+     white — see --text-on-accent. */
+  --brand-50: #1b1405;
+  --brand-100: #302308;
+  --brand-200: #513b10;
+  --brand-300: #795815;
+  --brand-400: #a67b1e;
+  --brand-500: #e2b43f;
+  --brand-600: #f3da94;
+  --brand-700: #faefcf;
+  --brand-800: #fdf9ec;
+  --brand-900: #fdf9ec;
 
-  /* brand — Worldstreet gold (Trade button, links, active states).
-     500 is the brand value #fecc2f; 600 brightens for hover, matching the
-     dark theme's lighten-on-hover direction. 50–400 are gold-tinted darks
-     for washes. Gold is far too light to carry white text — solid gold
-     surfaces take --text-on-accent, see the semantic layer. */
-  --brand-50: #251d0f;
-  --brand-100: #2f2511;
-  --brand-200: #3b2e12;
-  --brand-300: #4a3914;
-  --brand-400: #7a5c15;
-  --brand-500: #fecc2f;
-  --brand-600: #ffd75c;
-  --brand-700: #ffe289;
-  --brand-800: #ffedb5;
-  --brand-900: #fff6dd;
+  /* blue — feedback.info (the "social" ramp) */
+  --blue-50: #172554;
+  --blue-100: #1e3a8a;
+  --blue-200: #1e40af;
+  --blue-300: #1d4ed8;
+  --blue-400: #2563eb;
+  --blue-500: #3182ce;
+  --blue-600: #60a5fa;
+  --blue-700: #93c5fd;
+  --blue-800: #bfdbfe;
+  --blue-900: #dbeafe;
 
-  /* bronze — secondary CTA (Sign Up button, hero game pills, info badges).
-     Occupies the old --blue-* slot: deep enough that white still clears AA
-     on 400/500, so it reads as the quieter sibling of the bright gold
-     primary instead of a second competing accent. */
-  --blue-50: #241a0c;
-  --blue-100: #3a2a0f;
-  --blue-200: #4a360f;
-  --blue-300: #6b4a11;
-  --blue-400: #8a5c14;
-  --blue-500: #9c6a17;
-  --blue-600: #bd8a2e;
-  --blue-700: #e0b970;
-  --blue-800: #ecd3a3;
-  --blue-900: #f7ecd5;
+  /* green — Yes (feedback.success, the "xstream" ramp) */
+  --green-50: #022c22;
+  --green-100: #064e3b;
+  --green-200: #065f46;
+  --green-300: #047857;
+  --green-400: #059669;
+  --green-500: #34a073;
+  --green-600: #34d399;
+  --green-700: #6ee7b7;
+  --green-800: #a7f3d0;
+  --green-900: #d1fae5;
 
-  /* green — Yes */
-  --green-50: #1d3539;
-  --green-100: #234f42;
-  --green-200: #2a684b;
-  --green-300: #308154;
-  --green-400: #359a5e;
-  --green-500: #3db468;
-  --green-600: #5fbe82;
-  --green-700: #83c89c;
-  --green-800: #a6d2b6;
-  --green-900: #c9ddd0;
+  /* red — No (feedback.danger) */
+  --red-50: #4b0406;
+  --red-100: #8a1216;
+  --red-200: #a70d12;
+  --red-300: #ca0b11;
+  --red-400: #f12229;
+  --red-500: #ff3138;
+  --red-600: #ff6267;
+  --red-700: #ff9b9e;
+  --red-800: #ffc4c6;
+  --red-900: #ffdfe0;
 
-  /* red — No */
-  --red-50: #2d2833;
-  --red-100: #4c2a32;
-  --red-200: #6b2d32;
-  --red-300: #8b2e32;
-  --red-400: #ac3031;
-  --red-500: #cb3131;
-  --red-600: #d05959;
-  --red-700: #d78282;
-  --red-800: #ddaaaa;
-  --red-900: #e2d1d1;
-
-  /* amber — binary-card gauge mid band (measured: Tailwind amber-500) */
+  /* amber — binary-card gauge mid band */
   --amber-500: #f59e0b;
 
-  /* yellow */
-  --yellow-50: #333c37;
-  --yellow-100: #5a5933;
-  --yellow-200: #81772e;
-  --yellow-300: #a9952a;
-  --yellow-400: #d0b226;
-  --yellow-500: #f7d022;
-  --yellow-600: #f8da52;
-  --yellow-700: #fae483;
-  --yellow-800: #fcefb5;
-  --yellow-900: #fef9e6;
+  /* yellow — feedback.warning sits at 500 */
+  --yellow-50: #2a2e0b;
+  --yellow-100: #454c12;
+  --yellow-200: #636d1a;
+  --yellow-300: #838f22;
+  --yellow-400: #a8b62c;
+  --yellow-500: #d4e745;
+  --yellow-600: #dcec6a;
+  --yellow-700: #e5f190;
+  --yellow-800: #eef6b7;
+  --yellow-900: #f7fbdd;
 
   /* alpha ladders (overlays, hovers) */
   --alpha-white-50: #ffffff05;
@@ -127,149 +121,166 @@
   --alpha-black-800: #000000a6;
   --alpha-black-900: #000000e0;
 
-  /* chart series (multi-outcome lines, sampled from legend).
-     1 leads in gold — it strokes the single price line on every binary
-     event page, the most-looked-at colour on the site after the accent.
-     2 and 3 are picked for hue distance from gold rather than family
-     resemblance: series are told apart by hue, and the old blue/yellow
-     pair put chart-3 (#fdc503) within a hair of the new brand value. */
-  --chart-1: #fecc2f;
-  --chart-2: #3fa896;
-  --chart-3: #c9a8ff;
-  --chart-4: #ff5952; /* hero series red (measured: hero chart stroke #FF5952) */
+  /* chart series — the reference outcome palette, in its order:
+     success, info, danger, primary. Outcome rows take the same tones
+     (components/market/outcome-quote.tsx), so row n and line n match. */
+  --chart-1: #34a073;
+  --chart-2: #3182ce;
+  --chart-3: #ff3138;
+  --chart-4: #e2b43f;
 
-  /* hero + promo-rail primitives (measured on homepage, re-tinted warm to
-     sit on the new neutrals — these are background inks, not brand) */
-  --neutral-25: #1e1c19; /* featured hero card bg */
-  --ink-0: #0d0c09; /* promo card gradient bottom */
-  --ink-50: #1a1815; /* promo gradient top + CTA pill */
-  --ink-100: #262420; /* promo card border */
-  --ink-text: #edeae6;
-  --purple-100: #230b37; /* combo CTA bg */
-  --purple-200: #30104c; /* combo card wash */
-  --purple-800: #b884e6; /* combo CTA text */
-  --orange-500: #fa5b39; /* flame icon */
+  /* legacy promo-rail inks — the home rail no longer uses them; kept so
+     the /tokens sheet and any stragglers still resolve */
+  --ink-0: #0b0b0b;
+  --ink-50: #1a1a1a;
+  --ink-100: #272727;
+  --ink-text: #fafafa;
+  --purple-100: #3b0764;
+  --purple-200: #581c87;
+  --purple-800: #c084fc;
+  --orange-500: #e05626;
+
+  /* prediction-domain accent (the reference's "Predict" purple) — marks
+     which WorldStreet product you're in; never carries meaning */
+  --predict-500: #a855f7;
 
   /* ---------- Layer 2: semantic ---------- */
+  --bg-sunken: #0b0b0b; /* footer, wells */
+  --bg-overlay: #535353; /* surface.overlay — toast entrance, neutral badge */
+  --domain-accent: var(--predict-500);
   --bg-page: var(--neutral-0);
-  --bg-surface: var(--neutral-50); /* cards, inputs, search */
+  --bg-surface: var(--neutral-50);
   --bg-element: var(--neutral-50);
-  --bg-element-2: var(--neutral-100); /* chips, secondary buttons */
-  --bg-element-3: var(--neutral-200); /* hover states */
+  --bg-element-2: var(--neutral-100);
+  --bg-element-3: var(--neutral-200);
 
-  --border-default: var(--neutral-100);
-  --border-hover: var(--neutral-200);
-  --border-active: var(--neutral-300);
+  --border-default: var(--neutral-150);
+  --border-hover: var(--neutral-300);
+  --border-active: var(--neutral-500);
 
   --text-primary: var(--neutral-950);
-  /* Both muted rungs sit one step brighter than Polymarket's measured values
-     (secondary 500→600, tertiary 300→500): at the originals, tertiary scored
-     2.74:1 on bg-surface — far below WCAG AA 4.5:1 — and the volume labels it
-     drives are 12px. Moving tertiary alone would have collided with secondary,
-     so both shift to keep the hierarchy. See recon §3. */
-  --text-secondary: var(--neutral-600); /* muted labels, inactive tabs — 6.24:1 */
-  --text-tertiary: var(--neutral-500); /* volume labels — 4.38:1 on surface */
+  --text-secondary: var(--neutral-600);
+  --text-tertiary: var(--neutral-500);
 
   --accent: var(--brand-500);
   --accent-hover: var(--brand-600);
-  /* Text/icons on a SOLID accent fill. Polymarket's accent was a mid blue,
-     so components hard-coded `text-white` on it and the pairing was never
-     given a token — which quietly made "rebrand = repoint primitives"
-     untrue for any accent lighter than mid. Worldstreet gold is one:
-     white on #fecc2f is 1.51:1. This ink lands at 12.11:1 on the rest
-     state and 13.18:1 on hover. */
-  --text-on-accent: #1a1408;
+  /* Gold as TEXT. Same as the fill in dark; light drops to a deep gold
+     stop, because #e2b43f on near-white is under 2:1. text-accent-ink for
+     gold copy, bg-accent for gold fills. */
+  --accent-ink: var(--brand-500);
+  /* Text/icons on a SOLID accent fill — near-black, never white (white on
+     gold is about 1.9:1). */
+  --text-on-accent: #0b0b0b;
+  /* top-down sheen on filled buttons (see the `pressable` utility) */
+  --sheen: color-mix(in srgb, #ffffff 16%, transparent);
 
-  /* Buy-button state model (see recon §7):
+  /* Buy-button state model (trade panels):
      rest = {yes|no} text on 15% tint · selected = white on {yes|no}-solid */
   --yes: var(--green-500);
   --yes-solid: var(--green-400);
   --yes-tint: color-mix(in oklab, var(--green-500) 15%, transparent);
-  /* --no is red-700, not the measured red-500: on the 15% tint red-500 scored
-     2.72:1 against Yes's 4.62:1, so the No pill read as the muddy one. red-700
-     lands at 5.01:1 — parity with Yes. Tint and solid stay keyed to red-500/400
-     so only the rest-state label changes. */
-  --no: var(--red-700);
+  --no: var(--red-500);
   --no-solid: var(--red-400);
   --no-tint: color-mix(in oklab, var(--red-500) 15%, transparent);
 }
 
 /* ---------- Layer 1 overrides: primitives — light ----------
-   Only values actually measured on polymarket.com light theme;
-   unmeasured ladders keep dark values until the light-theme slice. */
+   The reference app's light theme. Every ladder dark defines is pinned
+   here too, so nothing leaks from dark into light piecemeal. */
 [data-theme="light"] {
-  --neutral-0: #ffffff;
-  --neutral-50: #f4f5f6;
-  --neutral-100: #e6e8ea;
-  --neutral-200: #caced3;
-  --neutral-300: #aeb4bc;
-  --neutral-400: #939aa5;
-  --neutral-500: #77808d;
-  --neutral-600: #5f6772;
-  --neutral-700: #484e56;
-  --neutral-800: #31353a;
-  --neutral-900: #1a1c1f;
-  --neutral-950: #0e0f11;
+  --neutral-0: #fcfcfa; /* surface.base */
+  --neutral-25: #fcfcfa;
+  --neutral-50: #f7f7f5; /* canvas */
+  --neutral-100: #f2f2f0; /* surface.raised */
+  --neutral-150: #dadad7; /* card border */
+  --neutral-200: #e6e6e3; /* raised hover */
+  --neutral-300: #d2d2cf; /* border.default */
+  --neutral-400: #b8b8b5;
+  --neutral-500: #727272; /* text.tertiary */
+  --neutral-600: #404040; /* text.secondary */
+  --neutral-700: #333333;
+  --neutral-800: #272727;
+  --neutral-900: #202020;
+  --neutral-950: #1a1a1a; /* text.primary */
 
-  /* Light has NOT been rebranded — it stays on the measured Polymarket
-     palette until it gets its own pass. Because it is an override block
-     over a now-gold :root, every primitive it used to inherit has to be
-     pinned back explicitly, or light would pick up dark's gold ladders
-     piecemeal (a bronze Sign Up that hovers to blue, a gold chart line
-     on a white page). Pinning is what keeps "dark only" actually true. */
-  --brand-500: #1452f0; /* light-mode brand is the classic Polymarket blue */
-  --brand-600: #1043c9; /* approx darker hover */
-  --brand-50: #132533;
-  --brand-100: #112f45;
-  --brand-200: #103957;
-  --brand-300: #0e446b;
-  --brand-400: #0b568d;
-  --brand-700: #59b9fe;
-  --brand-800: #8ccefe;
-  --brand-900: #b8e1fe;
+  /* fill stays gold-400; hover is gold-300 here; washes use the pale end */
+  --brand-50: #fdf9ec;
+  --brand-100: #faefcf;
+  --brand-200: #f3da94;
+  --brand-300: #ecc76a;
+  --brand-400: #e9c35c;
+  --brand-500: #e2b43f;
+  --brand-600: #ecc76a;
+  --brand-700: #a67b1e;
+  --brand-800: #795815;
+  --brand-900: #513b10;
 
-  /* accent stays a mid blue here, so its solid fill still takes white */
-  --text-on-accent: #ffffff;
+  --blue-50: #eff6ff;
+  --blue-100: #dbeafe;
+  --blue-200: #bfdbfe;
+  --blue-300: #93c5fd;
+  --blue-400: #60a5fa;
+  --blue-500: #1d4ed8;
+  --blue-600: #1e40af;
+  --blue-700: #1e3a8a;
+  --blue-800: #172554;
+  --blue-900: #0f1a3d;
 
-  --blue-50: #1c2f4b;
-  --blue-100: #1a366c;
-  --blue-200: #193d8d;
-  --blue-300: #1744ae;
-  --blue-400: #164bcf;
-  --blue-500: #1652f0;
-  --blue-600: #4475f3;
-  --blue-700: #7398f6;
-  --blue-800: #a3bcf9;
-  --blue-900: #d3dffc;
+  /* 500 is the label colour, 400 the darker solid fill (white clears AA) */
+  --green-50: #ecfdf5;
+  --green-100: #d1fae5;
+  --green-200: #a7f3d0;
+  --green-300: #6ee7b7;
+  --green-400: #065f46;
+  --green-500: #047857;
+  --green-600: #059669;
+  --green-700: #064e3b;
+  --green-800: #022c22;
+  --green-900: #01170f;
 
-  --chart-1: #4378ff;
-  --chart-2: #87bfff;
-  --chart-3: #fdc503;
-  --chart-4: #ff5952;
+  --red-50: #fff1f1;
+  --red-100: #ffdfe0;
+  --red-200: #ffc4c6;
+  --red-300: #ff9b9e;
+  --red-400: #a70d12;
+  --red-500: #ca0b11;
+  --red-600: #f12229;
+  --red-700: #8a1216;
+  --red-800: #4b0406;
+  --red-900: #2a0203;
 
-  --ink-0: #0a0b10;
-  --ink-50: #17181c;
-  --ink-100: #202227;
-  --ink-text: #ecedee;
-  --green-500: #42c772;
-  --green-400: #30a159; /* measured as green-600; used as solid in light */
-  --red-500: #e23939;
-  --red-400: #c61d1d; /* measured as red-600; used as solid in light */
-  --yellow-500: #f8d743;
+  --yellow-50: #fbf5ec;
+  --yellow-100: #f0e4d7;
+  --yellow-200: #e3c9a6;
+  --yellow-300: #cf9a5c;
+  --yellow-400: #b8762a;
+  --yellow-500: #a25906;
+  --yellow-600: #86460d;
+  --yellow-700: #6b380b;
+  --yellow-800: #4f2a08;
+  --yellow-900: #331b05;
 
-  /* Light keeps the measured red-500 label. The dark theme repoints --no to
-     red-700 for AA, but this ladder never overrode red-700, so inheriting it
-     here would paint #d78282 on a near-white tint (2.12:1) — worse than the
-     3.21:1 we have. Light's Yes/No pills both need their own contrast pass
-     (Yes is 1.79:1); pin until then rather than regress. */
-  --no: var(--red-500);
+  --chart-1: #047857;
+  --chart-2: #1d4ed8;
+  --chart-3: #ca0b11;
+  --chart-4: #e2b43f;
+
+  --ink-0: #ffffff;
+  --ink-50: #f2f2f0;
+  --ink-100: #d2d2cf;
+  --ink-text: #1a1a1a;
+
+  --predict-500: #9333ea;
+  --bg-sunken: #eeeeec;
+  --bg-overlay: #ffffff;
 
   /* semantic flips: page vs surface invert in light mode */
   --bg-page: var(--neutral-50);
   --bg-surface: var(--neutral-0);
-
-  /* hero card bg follows surface in light (dark value is a one-off #181d21) */
-  --neutral-25: #ffffff;
+  --border-hover: var(--neutral-400);
+  --accent-ink: var(--brand-800);
+  /* light surfaces need a stronger sheen or the fill reads flat */
+  --sheen: color-mix(in srgb, #ffffff 62%, transparent);
 }
 
 /* ---------- Tailwind theme mapping ----------
@@ -280,6 +291,9 @@
   --color-*: initial;
 
   --color-page: var(--bg-page);
+  --color-sunken: var(--bg-sunken);
+  --color-overlay: var(--bg-overlay);
+  --color-domain: var(--domain-accent);
   --color-surface: var(--bg-surface);
   --color-element: var(--bg-element);
   --color-element-2: var(--bg-element-2);
@@ -295,6 +309,7 @@
 
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
   --color-on-accent: var(--text-on-accent);
 
   --color-yes: var(--yes);
@@ -312,6 +327,7 @@
   --color-neutral-0: var(--neutral-0);
   --color-neutral-50: var(--neutral-50);
   --color-neutral-100: var(--neutral-100);
+  --color-neutral-150: var(--neutral-150);
   --color-neutral-200: var(--neutral-200);
   --color-neutral-300: var(--neutral-300);
   --color-neutral-400: var(--neutral-400);
@@ -396,27 +412,59 @@
   --color-promo-purple-text: var(--purple-800);
   --color-flame: var(--orange-500);
 
-  /* radius — Polymarket base .7rem; buttons=sm, inputs/chips=md, cards=xl */
-  --radius-chip: 6px; /* filter chips (measured exactly 6px) */
-  --radius-xs: 0.325rem; /* 5.2px */
-  --radius-sm: 0.45rem; /* 7.2px — Buy Yes/No buttons */
-  --radius-md: 0.575rem; /* 9.2px — search, Trade btn, chips */
-  --radius-lg: 0.7rem; /* 11.2px — base */
-  --radius-xl: 0.95rem; /* 15.2px — grid cards */
-  --radius-2xl: 1rem;
-  --radius-3xl: 1.5rem;
+  /* radius — the reference 4px grid. Buttons and inputs are 8px (its
+     radius-md), cards 12px (its radius-lg); buttons=sm, inputs/chips=md,
+     cards=xl, so each role keeps its class and only the values move. */
+  --radius-chip: 8px;
+  --radius-xs: 4px;
+  --radius-sm: 8px; /* buttons */
+  --radius-md: 8px; /* inputs, chips */
+  --radius-lg: 12px;
+  --radius-xl: 12px; /* cards */
+  --radius-2xl: 16px;
+  --radius-3xl: 22px; /* sheets, modals */
 
-  /* shadows */
-  --shadow-card: 0 8px 16px rgba(0, 0, 0, 0.04);
-  --shadow-md: 0 8px 16px #0000000f;
-  --shadow-popover: 0 18px 60px #00000047;
+  /* type scale — the reference's six sizes on a 4px line grid:
+     caption 12/16 · ui 13.5/20 · body 15/20 · heading 19/28 · display 31/36.
+     Tailwind's names are remapped onto them, so text-sm IS the UI size. */
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13.5px;
+  --text-sm--line-height: 20px;
+  --text-base: 15px;
+  --text-base--line-height: 20px;
+  --text-lg: 17px;
+  --text-lg--line-height: 24px;
+  --text-xl: 19px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 24px;
+  --text-2xl--line-height: 32px;
+  --text-3xl: 31px;
+  --text-3xl--line-height: 36px;
+
+  /* shadows — the reference cards sit flat on a border; popovers get the
+     two-layer overlay shadow */
+  --shadow-card: 0 0 #0000;
+  --shadow-md: 0 1px 2px 0 #00000080, 0 12px 28px -8px #000000b3;
+  --shadow-popover: 0 1px 2px 0 #00000080, 0 12px 28px -8px #000000b3;
 
   /* fonts */
-  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-sans: var(--font-instrument-sans), "Noto Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), ui-monospace, "SF Mono", monospace;
 }
 
-/* ---------- motion (measured on polymarket.com, recon §9) ---------- */
+/* Filled buttons (gold primary, solid buy): a restrained top-down sheen
+   so the fill isn't flat, and a 1px sink on press. Shadowless, like the
+   reference — hierarchy comes from fill, border and colour. */
+@utility pressable {
+  background-image: linear-gradient(to bottom, var(--sheen), transparent 65%);
+  &:active:not(:disabled) {
+    background-image: none;
+    transform: translateY(1px);
+  }
+}
+
+/* ---------- motion ---------- */
 /* comments feed marquee: content rendered 3x, one third per loop */
 @keyframes marquee-vertical {
   to {
@@ -464,18 +512,17 @@
 body {
   background: var(--bg-page);
   color: var(--text-primary);
-  font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
-  /* Inter alternates exactly as Polymarket enables them */
-  font-feature-settings:
-    "liga" 1, "calt" 1, "cv01" 1, "cv02" 1, "cv03" 1, "cv04" 1,
-    "cv09" 0, "cv11" 1, "cv15" 1;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  letter-spacing: 0;
 }
 
 /* Keyboard focus ring. The UA default is `outline: auto` in `currentColor`,
-   which on the Buy pills draws green-on-green-tint / red-on-red-tint (2.7:1 —
-   effectively invisible). --accent is theme-aware (brand-500: #0093fd dark,
-   #1452f0 light) and clears 3:1 against page, surface and both buy tints; the
-   offset lifts the ring off the tint onto the card so it reads at any size. */
+   which on the Buy pills draws green-on-green-tint / red-on-red-tint —
+   effectively invisible. The gold accent clears 3:1 against page, surface
+   and both buy tints; the offset lifts the ring off the tint onto the card
+   so it reads at any size. */
 :focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;

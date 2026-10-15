@@ -1,53 +1,64 @@
 "use client";
 
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeftIcon as ChevronLeft,
+  ChevronRightIcon as ChevronRight,
+} from "@heroicons/react/24/outline";
 import type { FeaturedGame, GameLineGroup } from "@/lib/polymarket";
 import { useAuth } from "@/components/auth/auth-context";
-import { HeroFooter } from "./shared";
+import { toMultiplier } from "@/lib/format";
+import { OutcomeRow } from "@/components/market/outcome-row";
+import { PILL_TONE, QuotePill, outcomeTone } from "@/components/market/outcome-quote";
+import { HeroFooter, HeroHeader, QuoteColumnLabels, type SlideHeaderProps } from "./shared";
 
 /**
- * Sports game hero slide: three-way moneyline buttons, spread and total
- * pickers left; team badges + kickoff center-right. Layout from the
- * game-card hero observed on the live homepage; data is a live soccer
- * game picked server-side (see getFeaturedGame).
+ * Sports game hero slide: the three-way moneyline as quote rows, spread
+ * and total pickers under them; team badges + kickoff on the right. Data
+ * is a live soccer game picked server-side (see getFeaturedGame).
  */
-export function GameSlide({ game }: { game: FeaturedGame }) {
+export function GameSlide({
+  game,
+  headerExtra,
+  eager,
+}: { game: FeaturedGame } & SlideHeaderProps) {
   const { user, openAuth } = useAuth();
   const gate = () => {
     if (!user) openAuth();
   };
-  return (
-    <div className="flex h-full flex-col px-[21px] pb-[18px] pt-[23px]">
-      <div>
-        <p className="text-sm font-medium text-secondary">{game.breadcrumb}</p>
-        <h2 className="mt-1 text-2xl font-semibold leading-8">{game.title}</h2>
-      </div>
+  const href = `/event/${game.slug}`;
+  const moneyline = [
+    { label: game.home.name, pct: game.home.pct },
+    ...(game.draw ? [{ label: "Draw", pct: game.draw.pct }] : []),
+    { label: game.away.name, pct: game.away.pct },
+  ];
 
-      <div className="mt-4 flex min-h-0 flex-1 gap-10">
+  return (
+    <div className="flex h-full flex-col p-6">
+      <HeroHeader
+        headerExtra={headerExtra}
+        eager={eager}
+        icon=""
+        iconUrl={game.iconUrl}
+        crumb={game.breadcrumb}
+        title={game.title}
+        slug={game.slug}
+      />
+
+      <div className="mt-5 flex min-h-0 flex-1 gap-10">
         {/* left controls */}
         <div className="w-full min-w-0 md:w-[400px] md:shrink-0">
-          {/* moneyline */}
-          <div className="flex gap-2">
-            <button
-              onClick={gate}
-              className="h-11 min-w-0 flex-1 truncate rounded-sm bg-red-100 px-2 text-sm font-semibold text-red-700 transition-colors duration-[120ms] ease-out hover:bg-red-200"
-            >
-              {game.home.name} {game.home.pct}%
-            </button>
-            {game.draw && (
-              <button
-                onClick={gate}
-                className="h-11 w-24 shrink-0 rounded-sm border border-border text-sm font-semibold text-secondary transition-colors duration-[120ms] ease-out hover:border-border-hover"
-              >
-                DRAW {game.draw.pct}%
-              </button>
-            )}
-            <button
-              onClick={gate}
-              className="h-11 min-w-0 flex-1 truncate rounded-sm bg-blue-100 px-2 text-sm font-semibold text-blue-700 transition-colors duration-[120ms] ease-out hover:bg-blue-200"
-            >
-              {game.away.name} {game.away.pct}%
-            </button>
+          <QuoteColumnLabels />
+          <div className="flex flex-col gap-1">
+            {moneyline.map((o, i) => (
+              <OutcomeRow
+                key={o.label}
+                label={o.label}
+                tone={outcomeTone(i)}
+                pct={o.pct}
+                multiplier={toMultiplier(String(o.pct / 100))}
+                href={href}
+              />
+            ))}
           </div>
 
           {game.spread && (
@@ -82,9 +93,9 @@ function PickerRow({
   onPick: () => void;
 }) {
   return (
-    <div className="mt-4">
+    <div className="mt-3">
       <div className="flex items-center justify-between">
-        <span className="text-sm font-semibold">{label}</span>
+        <span className="text-[13px] font-semibold">{label}</span>
         <span className="flex items-center gap-2 text-sm font-semibold">
           <ChevronLeft className="size-4 cursor-pointer text-tertiary hover:text-secondary" />
           {group.lines.map((l) => (
@@ -98,15 +109,16 @@ function PickerRow({
           <ChevronRight className="size-4 cursor-pointer text-tertiary hover:text-secondary" />
         </span>
       </div>
-      <div className="mt-2 flex gap-2">
+      <div className="mt-1.5 flex gap-2">
         {group.options.map((o) => (
-          <button
+          <QuotePill
             key={o.label}
+            tone={PILL_TONE}
             onClick={onPick}
-            className="h-10 min-w-0 flex-1 truncate rounded-sm bg-element-2 px-2 text-sm font-semibold text-primary transition-colors duration-[120ms] ease-out hover:bg-element-3"
+            className="min-w-0 flex-1 truncate"
           >
             {o.label} · {Math.round(o.price * 100)}¢
-          </button>
+          </QuotePill>
         ))}
       </div>
     </div>

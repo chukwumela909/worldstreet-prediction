@@ -2,7 +2,12 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { ArrowLeft, Coins, PenSquare, Users } from "lucide-react";
+import {
+  ArrowLeftIcon as ArrowLeft,
+  BanknotesIcon as Coins,
+  PencilSquareIcon as PenSquare,
+  UsersIcon as Users,
+} from "@heroicons/react/24/outline";
 import { useAuth } from "@/components/auth/auth-context";
 
 const NAV = [

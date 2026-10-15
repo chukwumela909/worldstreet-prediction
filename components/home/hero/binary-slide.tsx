@@ -1,81 +1,86 @@
 "use client";
 
-import Link from "next/link";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import {
+  ChevronDownIcon as ChevronDown,
+  ChevronUpIcon as ChevronUp,
+} from "@heroicons/react/24/outline";
 import type { MarketEvent } from "@/types/market";
-import { toPercent } from "@/lib/format";
+import { toMultiplier, toPercent } from "@/lib/format";
 import { dayDelta } from "@/lib/series";
-import { useAuth } from "@/components/auth/auth-context";
+import { OutcomeRow } from "@/components/market/outcome-row";
+import { NO_TONE, YES_TONE } from "@/components/market/outcome-quote";
 import { HeroChart } from "./hero-chart";
-import { HeroFooter, HeroHeader } from "./shared";
+import { HeroFooter, HeroHeader, QuoteColumnLabels, type SlideHeaderProps } from "./shared";
 
-/** Binary market hero slide: chance % + buy buttons left, chart right. */
-export function BinarySlide({ event }: { event: MarketEvent }) {
+/** Binary market hero slide: chance + Yes/No quote rows left, chart right. */
+export function BinarySlide({
+  event,
+  headerExtra,
+  eager,
+}: { event: MarketEvent } & SlideHeaderProps) {
   const market = event.markets[0];
   const pct = toPercent(market.outcomePrices[0]);
   const delta = dayDelta(market);
-  const { user, openAuth } = useAuth();
-
-  // the whole slide is a Link; buy clicks must not navigate
-  const buy = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!user) openAuth();
-  };
+  const [yesLabel, noLabel] = market.outcomeLabels ?? ["Yes", "No"];
+  const href = `/event/${event.slug}`;
 
   return (
-    <Link
-      href={`/event/${event.slug}`}
-      className="block h-full px-[21px] pb-[18px] pt-[23px]"
-    >
-      <div className="flex h-full flex-col">
-        <HeroHeader
-          icon={event.icon}
-          iconUrl={event.iconUrl}
-          crumb={event.category}
-          title={event.title}
-        />
-        <div className="mt-5 flex min-h-0 flex-1 gap-8 lg:gap-[72px]">
-          <div className="flex min-w-0 flex-1 flex-col md:w-[318px] md:flex-none">
-            <div className="flex items-center gap-2">
-              <span className="text-[40px] font-semibold leading-none">{pct}%</span>
-              {delta !== 0 && (
-                <span
-                  className={`flex items-center text-sm font-semibold ${
-                    delta > 0 ? "text-yes" : "text-no"
-                  }`}
-                >
-                  {delta > 0 ? (
-                    <ChevronUp className="size-4" strokeWidth={3} />
-                  ) : (
-                    <ChevronDown className="size-4" strokeWidth={3} />
-                  )}
-                  {Math.abs(delta)}%
-                </span>
-              )}
-            </div>
-            <p className="mt-1 text-sm font-medium text-secondary">chance</p>
-            <div className="mt-6 flex gap-2">
-              <button
-                onClick={buy}
-                className="flex h-11 flex-1 items-center justify-center rounded-sm bg-yes-tint text-sm font-semibold text-yes transition-colors duration-[120ms] ease-out hover:bg-yes-solid hover:text-white"
+    <div className="flex h-full flex-col p-6">
+      <HeroHeader
+        headerExtra={headerExtra}
+        eager={eager}
+        source={event.source}
+        icon={event.icon}
+        iconUrl={event.iconUrl}
+        crumb={event.category}
+        title={event.title}
+        slug={event.slug}
+      />
+      <div className="mt-6 grid min-h-0 flex-1 gap-6 md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <div className="flex min-w-0 flex-col">
+          <div className="mb-5 flex items-end gap-2">
+            <span className="text-[40px] font-semibold leading-none tabular-nums">{pct}%</span>
+            <span className="pb-1 text-sm text-secondary">chance</span>
+            {delta !== 0 && (
+              <span
+                className={`flex items-center pb-1 text-sm font-semibold ${
+                  delta > 0 ? "text-yes" : "text-no"
+                }`}
               >
-                Buy Yes
-              </button>
-              <button
-                onClick={buy}
-                className="flex h-11 flex-1 items-center justify-center rounded-sm bg-no-tint text-sm font-semibold text-no transition-colors duration-[120ms] ease-out hover:bg-no-solid hover:text-white"
-              >
-                Buy No
-              </button>
-            </div>
+                {delta > 0 ? (
+                  <ChevronUp className="size-4" />
+                ) : (
+                  <ChevronDown className="size-4" />
+                )}
+                {Math.abs(delta)}%
+              </span>
+            )}
           </div>
-          <div className="hidden min-w-0 flex-1 md:block">
-            <HeroChart markets={[market]} colors={["var(--chart-1)"]} />
+          <QuoteColumnLabels />
+          <div className="flex flex-col gap-2">
+            <OutcomeRow
+              label={yesLabel}
+              tone={YES_TONE}
+              pct={pct}
+              multiplier={toMultiplier(market.outcomePrices[0])}
+              href={href}
+              size="md"
+            />
+            <OutcomeRow
+              label={noLabel}
+              tone={NO_TONE}
+              pct={toPercent(market.outcomePrices[1])}
+              multiplier={toMultiplier(market.outcomePrices[1])}
+              href={href}
+              size="md"
+            />
           </div>
         </div>
-        <HeroFooter volume={event.volume} endDate={event.endDate} />
+        <div className="hidden min-w-0 md:block">
+          <HeroChart markets={[market]} colors={[YES_TONE]} />
+        </div>
       </div>
-    </Link>
+      <HeroFooter volume={event.volume} endDate={event.endDate} />
+    </div>
   );
 }

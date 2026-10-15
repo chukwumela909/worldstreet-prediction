@@ -1,38 +1,32 @@
 import Link from "next/link";
-import { Info, Search } from "lucide-react";
 import { LogoMark } from "@/components/home/hero/shared";
 import { NavActions } from "@/components/nav/nav-actions";
+import { PrimaryNav } from "@/components/nav/primary-nav";
 import { SearchBox } from "@/components/nav/search-box";
 
 /**
- * Top navigation bar (~60px) — logged-out state.
- * Specs: docs/polymarket-recon.md §7 (search h40 rounded-md,
- * Log In ghost / Sign Up solid pills h32 radius-18).
+ * Top row of the header (80px on desktop): the WorldStreet lockup, the
+ * primary nav, the market search and the account actions. It wraps the
+ * way the reference header does: below lg the search takes its own
+ * full-width line, and below md the primary nav does too, so a phone gets
+ * brand + actions, then nav, then search.
  */
 export function TopNav() {
   return (
-    <div className="mx-auto flex h-[60px] w-full max-w-[1280px] items-center gap-4 px-6">
-      {/* Logo */}
-      <Link href="/" className="flex shrink-0 items-center gap-2">
-        <LogoMark className="h-5 w-auto" />
-        <span className="text-lg font-bold tracking-tight">Worldstreet</span>
+    <div className="mx-auto flex w-full max-w-[1400px] flex-wrap items-center gap-3 px-4 py-3 sm:px-6 lg:min-h-20 lg:flex-nowrap lg:py-0">
+      <Link
+        href="/"
+        aria-label="WorldStreet predictions home"
+        className="flex shrink-0 items-center gap-2 text-base font-bold md:text-xl"
+      >
+        <LogoMark className="size-8" eager />
+        WorldStreet
       </Link>
 
-      {/* Search — full input on ≥md, icon button below */}
+      <PrimaryNav />
       <SearchBox />
-      <button
-        aria-label="Search"
-        className="flex size-9 items-center justify-center rounded-md bg-surface text-secondary md:hidden"
-      >
-        <Search className="size-4.5" strokeWidth={2} />
-      </button>
 
-      {/* Right actions */}
-      <div className="ml-auto flex shrink-0 items-center gap-2.5">
-        <button className="hidden items-center gap-1.5 text-sm font-semibold text-accent sm:flex">
-          <Info className="size-4" strokeWidth={2.5} />
-          How it works
-        </button>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
         <NavActions />
       </div>
     </div>

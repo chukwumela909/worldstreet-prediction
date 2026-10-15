@@ -1,7 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronLeftIcon as ChevronLeft,
+  ChevronRightIcon as ChevronRight,
+} from "@heroicons/react/24/outline";
 import { isBinary, type MarketEvent } from "@/types/market";
 import type { FeaturedGame } from "@/lib/polymarket";
 import { useLivePrices } from "@/lib/use-live-prices";
@@ -17,7 +20,7 @@ import { MarketSlide } from "./hero/market-slide";
  * active slide and its immediate neighbors are `visibility: visible`.
  * No auto-advance: the real hero moves only via dots / pager pills.
  */
-const HERO_HEIGHT = "h-[471px]";
+const HERO_HEIGHT = "h-[480px]";
 
 /** Pager pills are narrow — trim long market questions to fit. */
 function shortLabel(title: string): string {
@@ -28,7 +31,8 @@ function shortLabel(title: string): string {
 interface Slide {
   key: string;
   label: string;
-  render: () => React.ReactNode;
+  /** `eager`: this slide is the one on screen at first paint. */
+  render: (eager: boolean) => React.ReactNode;
 }
 
 export function FeaturedHero({
@@ -53,21 +57,21 @@ export function FeaturedHero({
       list.push({
         key: "market",
         label: multi.title,
-        render: () => <MarketSlide event={multi} />,
+        render: (eager) => <MarketSlide event={multi} eager={eager} />,
       });
     }
     if (game) {
       list.push({
         key: "game",
         label: shortLabel(game.title),
-        render: () => <GameSlide game={game} />,
+        render: (eager) => <GameSlide game={game} eager={eager} />,
       });
     }
     if (binary) {
       list.push({
         key: "binary",
         label: shortLabel(binary.title),
-        render: () => <BinarySlide event={binary} />,
+        render: (eager) => <BinarySlide event={binary} eager={eager} />,
       });
     }
     return list;
@@ -90,7 +94,7 @@ export function FeaturedHero({
   return (
     <div className="min-w-0 flex-1">
       <div
-        className={`relative ${HERO_HEIGHT} overflow-hidden rounded-[18px] border border-border bg-hero-surface`}
+        className={`relative ${HERO_HEIGHT} overflow-hidden rounded-xl border border-border bg-surface shadow-card`}
       >
         <div className="absolute inset-0 overflow-hidden">
           {slides.map((s, i) => {
@@ -106,47 +110,48 @@ export function FeaturedHero({
                 }}
                 aria-hidden={d !== 0}
               >
-                {s.render()}
+                {s.render(i === 0)}
               </div>
             );
           })}
         </div>
       </div>
 
-      {/* dots + pagers strip */}
-      <div className="mt-2 flex h-14 items-center">
-        <div className="-mx-1.5 flex items-center pl-4">
+      {/* dots + arrows strip */}
+      <div className="mt-2 flex h-10 items-center">
+        <div className="-mx-1 flex items-center">
           {slides.map((s, i) => (
             <button
               key={s.key}
-              aria-label={`Go to ${s.label}`}
+              aria-label={`Show featured market: ${s.label}`}
+              aria-current={i === index ? "true" : undefined}
               onClick={() => setIndex(i)}
-              className="flex h-[30px] items-center px-1.5"
+              className="flex h-8 items-center px-1"
             >
               <span
                 className={`h-1.5 rounded-full transition-all duration-300 ease-in-out ${
                   i === index
-                    ? "w-[26px] bg-border-active"
+                    ? "w-4 bg-primary"
                     : "w-1.5 bg-element-3 hover:bg-border-active"
                 }`}
               />
             </button>
           ))}
         </div>
-        <div className="ml-auto hidden items-center gap-2 sm:flex">
+        <div className="ml-auto flex items-center gap-1">
           <button
             onClick={() => setIndex(prev)}
-            className="flex h-10 items-center gap-1.5 rounded-full bg-surface pl-3 pr-4 text-base text-primary transition-colors duration-[120ms] ease-out hover:bg-element-2"
+            aria-label={`Previous featured market: ${slides[prev].label}`}
+            className="flex size-8 items-center justify-center rounded-full text-secondary transition-colors hover:bg-element-2 hover:text-primary"
           >
-            <ChevronLeft className="size-4 text-secondary" />
-            {slides[prev].label}
+            <ChevronLeft className="size-5" />
           </button>
           <button
             onClick={() => setIndex(next)}
-            className="flex h-10 items-center gap-1.5 rounded-full bg-surface pl-4 pr-3 text-base text-primary transition-colors duration-[120ms] ease-out hover:bg-element-2"
+            aria-label={`Next featured market: ${slides[next].label}`}
+            className="flex size-8 items-center justify-center rounded-full text-secondary transition-colors hover:bg-element-2 hover:text-primary"
           >
-            {slides[next].label}
-            <ChevronRight className="size-4 text-secondary" />
+            <ChevronRight className="size-5" />
           </button>
         </div>
       </div>

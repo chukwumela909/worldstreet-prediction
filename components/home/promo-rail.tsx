@@ -1,120 +1,71 @@
-import { ChevronRight, Flame } from "lucide-react";
+import Link from "next/link";
+import {
+  CurrencyDollarIcon as Bitcoin,
+  ChevronRightIcon as ChevronRight,
+  ArrowTrendingUpIcon as TrendingUp,
+} from "@heroicons/react/24/outline";
 import type { HotTopic } from "@/lib/hot-topics";
+import { WatchlistPromo } from "./watchlist-promo";
 
 /**
- * Right rail (362px @1280): two promo cards (102px, radius 20, ink palette),
- * Hot topics ranked list, Explore all pill. Specs from homepage recon.
+ * Right rail beside the featured market: a Perpetuals promo, the visitor's
+ * watchlist, the Hot topics ranked list, and an Explore all link down to
+ * the board.
  *
  * `topics` carries live tag volume; the list section is simply omitted
  * when the ranking fetch failed (empty array).
  */
 export function PromoRail({ topics }: { topics: HotTopic[] }) {
   return (
-    <aside className="hidden w-[362px] shrink-0 flex-col lg:flex">
-      {/* Perps promo */}
-      <PromoCard
-        title="Perps are here"
-        body="Go long or short an asset with leverage up to 20x"
-        cta="Start trading"
-        ctaClass="bg-ink-50 text-ink-text"
-        art={<span>🪙</span>}
-      />
+    <aside aria-label="Discover" className="hidden min-w-0 flex-col gap-3 lg:flex">
+      <article className="relative overflow-hidden rounded-xl border border-border bg-surface p-4 shadow-card">
+        <span
+          aria-hidden="true"
+          className="absolute right-4 top-4 flex size-8 items-center justify-center rounded-full bg-accent text-on-accent"
+        >
+          <Bitcoin className="size-5" />
+        </span>
+        <h2 className="pr-10 text-[15px] font-semibold">Perpetuals</h2>
+        <p className="mt-1 text-sm text-secondary">Crypto, around the clock.</p>
+        <Link
+          href="/perps"
+          className="ml-auto mt-3 flex h-7 w-fit items-center gap-1.5 rounded-sm border border-border px-3 text-xs font-medium text-primary transition-colors hover:border-border-active hover:bg-element-2"
+        >
+          Explore perpetuals
+          <TrendingUp className="size-4" />
+        </Link>
+      </article>
 
-      {/* Combo promo */}
-      <div className="mt-3">
-        <PromoCard
-          title="Combo Cup"
-          body="Build a crazy combo, get paid up to $50K daily"
-          cta="Get started"
-          ctaClass="bg-promo-purple text-promo-purple-text"
-          art={<span>🏆</span>}
-          purple
-        />
-      </div>
+      <WatchlistPromo />
 
       {/* Hot topics — omitted entirely when the live ranking is unavailable */}
       {topics.length > 0 && (
-      <div className="mt-4">
-        <button className="flex w-full items-center gap-1 py-1 text-base font-semibold">
-          Hot topics
-          <ChevronRight className="size-4 text-secondary" strokeWidth={2.5} />
-        </button>
-        <ul>
-          {topics.map((t) => (
-            <li key={t.slug ?? t.rank}>
-              <button className="group flex h-[46px] w-full items-center gap-3 text-left">
-                <span className="w-4 text-sm font-semibold text-tertiary">
-                  {t.rank}
-                </span>
-                <span className="flex-1 truncate text-sm font-medium">
-                  {t.name}
-                </span>
-                <span className="text-[13px] font-medium tracking-tight text-secondary">
-                  {t.volumeToday} today
-                </span>
-                <Flame className="size-4 fill-flame text-flame" />
-                <ChevronRight className="size-4 text-tertiary group-hover:text-secondary" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
+        <section className="pt-2">
+          <h2 className="flex items-center gap-1 text-[15px] font-semibold">
+            Hot topics
+            <ChevronRight className="size-4 text-secondary" />
+          </h2>
+          <ol className="my-2">
+            {topics.map((t) => (
+              <li key={t.slug ?? t.rank}>
+                <button className="group -mx-2 grid min-h-10 w-[calc(100%+1rem)] grid-cols-[1.25rem_minmax(0,1fr)_auto_1rem] items-center gap-2 rounded-md px-2 text-left transition-colors hover:bg-element-2">
+                  <span className="text-xs text-secondary">{t.rank}</span>
+                  <span className="truncate text-sm font-medium">{t.name}</span>
+                  <span className="text-xs text-secondary">{t.volumeToday} today</span>
+                  <ChevronRight className="size-4 text-tertiary group-hover:text-secondary" />
+                </button>
+              </li>
+            ))}
+          </ol>
+        </section>
       )}
 
-      {/* Explore all */}
-      <button className="mt-4 h-10 w-full rounded-full border border-border text-sm font-semibold text-primary transition-colors hover:border-border-hover hover:bg-surface">
-        Explore all
-      </button>
-    </aside>
-  );
-}
-
-function PromoCard({
-  title,
-  body,
-  cta,
-  ctaClass,
-  art,
-  purple = false,
-}: {
-  title: string;
-  body: string;
-  cta: string;
-  ctaClass: string;
-  art: React.ReactNode;
-  purple?: boolean;
-}) {
-  return (
-    <div
-      className={`relative h-[102px] overflow-hidden rounded-[20px] border border-ink-100 ${
-        purple
-          ? "bg-[linear-gradient(105deg,var(--ink-0)_40%,var(--purple-200)_115%)]"
-          : "bg-gradient-to-t from-ink-0 to-ink-50"
-      }`}
-    >
-      {/* art peeks over the top edge, left of the CTA */}
-      <span
-        aria-hidden
-        className="absolute -top-1.5 right-[124px] rotate-12 text-3xl opacity-90"
+      <a
+        href="#markets"
+        className="flex h-10 w-full items-center justify-center rounded-md bg-element-2 text-sm font-semibold text-primary transition-colors hover:bg-element-3"
       >
-        {art}
-      </span>
-      <div className="relative flex h-full items-center justify-between px-[21px]">
-        <div>
-          <p className="flex items-center gap-1.5 text-base font-semibold tracking-tight text-ink-text">
-            {purple && <span className="text-sm leading-none">🟪</span>}
-            {title}
-          </p>
-          <p className="mt-1 max-w-[200px] text-sm leading-[18px] text-secondary">
-            {body}
-          </p>
-        </div>
-        <button
-          className={`h-8 shrink-0 self-center whitespace-nowrap rounded-full px-3.5 text-sm font-semibold ${ctaClass}`}
-        >
-          {cta}
-        </button>
-      </div>
-    </div>
+        Explore all
+      </a>
+    </aside>
   );
 }

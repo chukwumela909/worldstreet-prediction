@@ -1,7 +1,10 @@
-import { SiteHeader } from "@/components/nav/site-header";
+import { Suspense } from "react";
+import { after } from "next/server";
 import { FeaturedHero } from "@/components/home/featured-hero";
 import { MarketBrowser } from "@/components/home/market-browser";
 import { PromoRail } from "@/components/home/promo-rail";
+import { CategoryScreen } from "@/components/category/category-screen";
+import { CategorySkeleton, GridSkeleton, LeadSkeleton } from "@/components/skeletons";
 import {
   getEvents,
   getFeaturedGame,
@@ -10,20 +13,27 @@ import {
 } from "@/lib/polymarket";
 import { getBayseEvents } from "@/lib/bayse";
 import { getWorldstreetEvents } from "@/lib/worldstreet-markets";
-import { categoryTab } from "@/lib/categories";
+import { CATEGORY_TABS, categoryTab, type CategoryTab } from "@/lib/categories";
 import type { HotTopic } from "@/lib/hot-topics";
 import type { MarketEvent } from "@/types/market";
 
 /**
- * Everything on this page is live Gamma data — there is deliberately no
- * fixture fallback. The event grid is required (its failure surfaces as
- * an error state); the hot-topics rail and the game slide are optional
- * extras that simply don't render if their fetch fails.
+ * Everything on this page is live data — there is deliberately no fixture
+ * fallback. The event grid is required (its failure surfaces as an error
+ * state); the hot-topics rail and the game slide are optional extras that
+ * simply don't render if their fetch fails.
  *
- * `?category=` scopes the grid to its own live query (per-tag, or
- * newest-first for Breaking) — see lib/categories.ts. A bare `/` is the
- * Local book (DEFAULT_CATEGORY), the only tab anyone can trade on. The
- * hero always shows the global trending feed regardless of tab.
+ * `?category=` picks the view (see lib/categories.ts). A bare `/` is the
+ * Local book (DEFAULT_CATEGORY), the only tab anyone can trade on, and it
+ * and Trending get the home board; every Polymarket category gets its own
+ * category page.
+ *
+ * Nothing here awaits data before returning: each slow part sits behind
+ * its own Suspense boundary, so the page shell streams at once and every
+ * part fills in as its fetch lands. The boundaries are keyed by the view —
+ * a tab switch is a search-param change on the same route, and a freshly
+ * keyed boundary is what makes React show the skeleton immediately rather
+ * than keep the old tab frozen on screen until the new one has rendered.
  */
 
 async function loadHotTopics(): Promise<HotTopic[]> {
@@ -43,7 +53,7 @@ async function loadFeaturedGame(): Promise<FeaturedGame | null> {
 }
 
 /**
- * The Local tab is two books under one heading: markets Worldstreet
+ * The Local tab is two books under one heading: markets WorldStreet
  * wrote, which lead because they're ours and there are few of them, and
  * the Bayse feed behind them. Either source failing leaves the other on
  * the page; only both failing is an outage, since an empty naira book
@@ -59,72 +69,132 @@ async function loadLocalEvents(): Promise<MarketEvent[] | null> {
 }
 
 interface Props {
-  searchParams: Promise<{ category?: string }>;
+  searchParams: Promise<{ category?: string; group?: string }>;
+}
+
+/** Markets a category page loads — enough for its subgroups to be real. */
+const CATEGORY_LIMIT = 36;
+/** Markets the home board loads. */
+const BOARD_LIMIT = 24;
+
+const MAIN = "mx-auto w-full max-w-[1400px] px-4 pb-16 pt-6 sm:px-6 sm:pt-8";
+
+/**
+ * After the response is sent, refresh every other tab's feed in the
+ * background. The feeds are cached stale-while-revalidate, so once warm a
+ * tab never waits on Polymarket again — this makes sure no visitor is the
+ * one who pays a cold fetch (measured at 1–2 s) by clicking a tab first.
+ * A warm cache answers these from memory, so repeat runs cost nothing.
+ */
+function warmOtherTabs(current: string) {
+  after(async () => {
+    await Promise.allSettled([
+      getEvents({ limit: BOARD_LIMIT }),
+      ...CATEGORY_TABS.filter(
+        (t) => t.param !== current && t.param !== "trending" && t.source !== "local",
+      ).map((t) => getEvents({ limit: CATEGORY_LIMIT, tagSlug: t.tagSlug, order: t.order })),
+    ]);
+  });
 }
 
 export default async function Home({ searchParams }: Props) {
-  const { category } = await searchParams;
+  const { category, group = "" } = await searchParams;
   const tab = categoryTab(category);
-  const scoped = tab.param !== "trending";
+  warmOtherTabs(tab.param);
 
+  if (tab.param !== "trending" && tab.source !== "local") {
+    return (
+      <main className={MAIN}>
+        <Suspense key={`${tab.param}:${group}`} fallback={<CategorySkeleton />}>
+          <CategoryContent tab={tab} group={group} />
+        </Suspense>
+      </main>
+    );
+  }
+
+  return (
+    <main className={MAIN}>
+      {/* The hero and rail are the global Polymarket feed and don't change
+          between Local and Trending, so this boundary isn't keyed: switching
+          those two tabs keeps the hero on screen. A Gamma outage takes the
+          hero away, never the Local book under it. */}
+      <Suspense fallback={<LeadSkeleton />}>
+        <HomeLead />
+      </Suspense>
+      <Suspense key={tab.param} fallback={<GridSkeleton />}>
+        <HomeGrid tab={tab} />
+      </Suspense>
+    </main>
+  );
+}
+
+async function CategoryContent({ tab, group }: { tab: CategoryTab; group: string }) {
+  const events = await getEvents({
+    limit: CATEGORY_LIMIT,
+    tagSlug: tab.tagSlug,
+    order: tab.order,
+  }).catch(() => null);
+  if (events === null) return <Unavailable source="Polymarket’s public API" />;
+  if (events.length === 0) {
+    return (
+      <p className="py-16 text-center text-secondary">No live {tab.label} markets right now.</p>
+    );
+  }
+  return (
+    <CategoryScreen param={tab.param} label={tab.label} group={group} events={events} />
+  );
+}
+
+async function HomeLead() {
   // independent fetches — kick all off before awaiting any
-  const [trending, gridEvents, topics, game] = await Promise.all([
-    getEvents({ limit: 24 }).catch(() => null),
-    scoped
-      ? tab.source === "local"
-        ? loadLocalEvents()
-        : getEvents({ limit: 24, tagSlug: tab.tagSlug, order: tab.order }).catch(
-            () => null,
-          )
-      : null,
+  const [trending, topics, game] = await Promise.all([
+    getEvents({ limit: BOARD_LIMIT }).catch(() => null),
     loadHotTopics(),
     loadFeaturedGame(),
   ]);
-
-  const grid: MarketEvent[] | null = scoped ? gridEvents : trending;
-
+  if (!trending?.length) return null;
   return (
-    <>
-      <SiteHeader activeCategory={tab.param} />
-      <main className="mx-auto w-full max-w-[1280px] px-6 pb-16">
-        {/* Hero + rail are the global Polymarket feed. They used to gate the
-            whole page, which was the same thing as gating the grid back when
-            "/" was Trending. It isn't any more: the front door is the Local
-            book, and a Gamma outage must not take the one tradeable market
-            down with it. Optional chrome now — absent, not fatal. */}
-        {trending !== null && trending.length > 0 && (
-          <div className="flex gap-8 pt-1.5">
-            <FeaturedHero events={trending} game={game} />
-            <PromoRail topics={topics} />
-          </div>
-        )}
+    <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,2.5fr)_minmax(0,1fr)]">
+      <FeaturedHero events={trending} game={game} />
+      <PromoRail topics={topics} />
+    </div>
+  );
+}
 
-        {/* market grid, scoped to the active category tab */}
-        {grid === null ? (
-          <div className="flex min-h-[400px] flex-col items-center justify-center gap-2 text-center">
-            <p className="text-lg font-semibold">Live market data is unavailable</p>
-            <p className="max-w-md text-sm text-secondary">
-              We couldn&apos;t reach{" "}
-              {tab.source === "local"
-                ? "the Local market feed"
-                : "Polymarket’s public API"}
-              . Refresh in a moment — nothing is shown here unless it&apos;s
-              real market data.
-            </p>
-          </div>
-        ) : grid.length === 0 ? (
-          <p className="py-16 text-center text-sm text-secondary">
-            No live {tab.label} markets right now.
-          </p>
-        ) : (
-          <MarketBrowser
-            // key resets the chip/search state when the tab changes
-            key={tab.param}
-            events={grid}
-            heading={scoped ? `${tab.label} markets` : "All markets"}
-          />
-        )}
-      </main>
-    </>
+async function HomeGrid({ tab }: { tab: CategoryTab }) {
+  const local = tab.source === "local";
+  const grid = local
+    ? await loadLocalEvents()
+    : await getEvents({ limit: BOARD_LIMIT }).catch(() => null);
+
+  if (grid === null) {
+    return (
+      <Unavailable source={local ? "the Local market feed" : "Polymarket’s public API"} />
+    );
+  }
+  if (grid.length === 0) {
+    return (
+      <p className="py-16 text-center text-secondary">No live {tab.label} markets right now.</p>
+    );
+  }
+  return (
+    <MarketBrowser
+      // key resets the chip/search state when the tab changes
+      key={tab.param}
+      events={grid}
+      heading={local ? `${tab.label} markets` : "All markets"}
+    />
+  );
+}
+
+function Unavailable({ source }: { source: string }) {
+  return (
+    <div className="flex min-h-[400px] flex-col items-center justify-center gap-2 text-center">
+      <p className="text-lg font-semibold">Live market data is unavailable</p>
+      <p className="max-w-md text-secondary">
+        We couldn&apos;t reach {source}. Refresh in a moment — nothing is shown
+        here unless it&apos;s real market data.
+      </p>
+    </div>
   );
 }

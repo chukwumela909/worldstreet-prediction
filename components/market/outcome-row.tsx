@@ -1,70 +1,66 @@
 "use client";
 
 import { useAuth } from "@/components/auth/auth-context";
+import { PILL_TONE, ProbabilityBar, QuotePill } from "./outcome-quote";
 
 /**
- * One buyable outcome on a grid card: a colour bar, the outcome's name,
- * what a winning unit returns, and its probability.
+ * One outcome on a board surface (grid card, featured market): its name
+ * over a chance bar in the outcome's tone, what a winning unit returns,
+ * and an outlined price pill.
  *
- * The whole row is the buy control — the grid used to carry separate Buy
- * Yes/No buttons, which is a second target to aim at inside an already
- * dense card. Rest state keeps the row quiet so a card reads as
- * information; the probability pill goes solid on hover, the same
- * tint→solid model the event page's outcome list uses.
- *
- * Only the Yes pill is tinted at rest. On a binary market the two rows are
- * complements, so tinting both would present a derived number as a second
- * independent signal.
+ * The pill is the buy affordance. Trading happens on the event page, so
+ * for a signed-in user the pill opens it; signed out, it asks them to
+ * sign in first, the same gate the event page's trade panel applies.
  */
 export function OutcomeRow({
-  side,
   label,
-  multiplier,
+  tone,
   pct,
-  tinted = false,
+  multiplier,
+  href,
+  size = "sm",
 }: {
-  side: "yes" | "no";
   label: string;
-  multiplier: string;
+  /** Outcome colour — see outcomeTone / YES_TONE / NO_TONE. */
+  tone: string;
   pct: number;
-  /** Tint the pill at rest — the Yes row of a binary market. */
-  tinted?: boolean;
+  multiplier: string;
+  /** The event page, where this outcome is actually bought. */
+  href: string;
+  size?: "sm" | "md";
 }) {
   const { user, openAuth } = useAuth();
-
-  const rest = tinted
-    ? "bg-yes-tint text-yes"
-    : "bg-element-2 text-primary";
-  const hover =
-    side === "yes"
-      ? "group-hover:bg-yes-solid group-hover:text-white"
-      : "group-hover:bg-no-solid group-hover:text-white";
+  const pill = {
+    // the bar identifies the outcome; the pill is the buy action, in gold
+    tone: PILL_TONE,
+    size,
+    label: `Buy ${label} at ${pct}¢`,
+    children: `${pct}%`,
+  };
 
   return (
-    <button
-      onClick={() => {
-        if (!user) openAuth();
-      }}
-      aria-label={`Buy ${label}`}
-      className="group -mx-1.5 flex items-center gap-2.5 rounded-sm px-1.5 py-1.5 transition-colors hover:bg-element-2"
-    >
-      <span
-        aria-hidden="true"
-        className={`h-5 w-[3px] shrink-0 rounded-full sm:h-[18px] ${
-          side === "yes" ? "bg-yes" : "bg-no"
-        }`}
-      />
-      <span className="min-w-0 flex-1 truncate text-left text-base font-medium text-primary sm:text-[15px]">
-        {label}
-      </span>
-      <span className="shrink-0 text-[15px] font-medium tabular-nums text-secondary sm:text-sm">
-        {multiplier}
-      </span>
-      <span
-        className={`w-[58px] shrink-0 rounded-md py-1 text-center text-[15px] font-semibold tabular-nums transition-colors sm:w-[54px] sm:text-sm ${rest} ${hover}`}
+    <div className="flex min-h-10 items-center gap-3">
+      <div className="min-w-0 flex-1">
+        <p
+          className={`truncate font-medium text-primary ${
+            size === "md" ? "text-[15px]" : "text-sm"
+          }`}
+        >
+          {label}
+        </p>
+        <ProbabilityBar pct={pct} tone={tone} className="mt-1.5" />
+      </div>
+      <abbr
+        title="Gross payout per dollar at this price, before fees"
+        className="shrink-0 text-xs tabular-nums text-secondary no-underline"
       >
-        {pct}%
-      </span>
-    </button>
+        {multiplier}
+      </abbr>
+      {user ? (
+        <QuotePill {...pill} href={href} />
+      ) : (
+        <QuotePill {...pill} onClick={openAuth} />
+      )}
+    </div>
   );
 }

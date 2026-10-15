@@ -43,7 +43,7 @@ export function MarketFilters({
             onClick={() => onChange(f)}
             className={`h-8 shrink-0 whitespace-nowrap rounded-chip px-3 text-sm font-medium transition-colors duration-150 ease-in-out ${
               f === active
-                ? "bg-accent/20 text-accent"
+                ? "bg-accent/20 text-accent-ink"
                 : "text-secondary hover:bg-element-2 hover:text-primary"
             }`}
           >

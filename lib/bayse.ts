@@ -189,7 +189,10 @@ export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
     slug: raw.slug,
     title: raw.title,
     icon: "🌍",
-    iconUrl: safeIconUrl(raw.imageUrl, raw.image128Url),
+    // the 128px variant first: icons render at 56px at most (112 at 2x),
+    // and imageUrl is a 512px original — up to ~1 MB the optimizer would
+    // download just to shrink
+    iconUrl: safeIconUrl(raw.image128Url, raw.imageUrl),
     category,
     tags: tags.length > 0 ? tags.slice(0, 4) : undefined,
     volume: String(raw.totalVolume ?? 0),
