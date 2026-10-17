@@ -111,8 +111,10 @@ function LiveLabel({ event }: { event: MarketEvent }) {
 }
 
 function SportsQuoteRow({ event, row }: { event: MarketEvent; row: QuoteRow }) {
-  const { quoteKobo, quoteMultiplier } = useQuote();
+  const { quoteKobo, quoteMultiplier, international } = useQuote();
   const { ticket, pick } = useSportsTicket();
+  // on our book: Local always, international only while the API's switch is on
+  const tradeable = isLocalBook(event) || international;
   const pct = toPercent(row.price);
   const picked =
     ticket?.picked === true &&
@@ -147,7 +149,7 @@ function SportsQuoteRow({ event, row }: { event: MarketEvent; row: QuoteRow }) {
         pressed={picked}
         onClick={() => pick(event, row.market.id, row.side)}
         label={
-          isLocalBook(event)
+          tradeable
             ? `Buy ${row.label} at ${formatQuote(quoteKobo(event, row.price))}`
             : `${row.label}, ${pct}% chance`
         }

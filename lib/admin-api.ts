@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ApiError, apiFetch, isApiConfigured } from "@/lib/api-client";
+import { ADMIN_KEY_HEADER } from "@/lib/admin-key";
 
 /**
  * Client for the Local book's admin endpoints (services/api
@@ -127,6 +128,29 @@ export interface BookRisk {
     eventSlug: string;
     lossKobo: number;
   } | null;
+  /**
+   * The "Maximum loss per market" setting the flags below are measured
+   * against. Absent on an API older than the settings page.
+   */
+  maxMarketExposureKobo?: number;
+  /** Markets at 70%+ of that limit, worst first. Absent on an older API. */
+  limitFlags?: MarketLimitFlag[];
+}
+
+/**
+ * One market closing in on the per-market loss limit: `usedKobo` is what
+ * its open bets could win beyond their stakes, `share` that over the
+ * limit (can pass 1). "watch" from 70%, "critical" from 90%.
+ */
+export interface MarketLimitFlag {
+  marketId: string;
+  marketTitle: string;
+  eventTitle: string;
+  eventSlug: string;
+  usedKobo: number;
+  limitKobo: number;
+  share: number;
+  level: "watch" | "critical";
 }
 
 export async function fetchBookRisk(): Promise<BookRisk> {
@@ -423,6 +447,126 @@ export function useAdminResource<T>(
       setReloads((n) => n + 1);
     },
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* Book settings — how the book prices and limits bets                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Everything is stored in the API's own units — basis points, kobo,
+ * seconds — and converted to points / % / credit only on screen.
+ */
+export interface BookSettings {
+  /** Real-money betting on international (Polymarket) markets. */
+  internationalTrading: boolean;
+  /** Basis points of a 100-credit share added to Polymarket's price; 100 = 1 point. */
+  polymarketSpreadBps: number;
+  /** Dollar↔credit conversion margin each way; 100 = 1%. */
+  fxSpreadBps: number;
+  minStakeKobo: number;
+  maxStakeKobo: number;
+  /** The most the house may lose on one market. */
+  maxMarketExposureKobo: number;
+  /** How far a price may move before the user must re-confirm it. */
+  priceToleranceKobo: number;
+  /** Betting stops this long before a countdown market closes. */
+  countdownCutoffSeconds: number;
+}
+
+export type BookSettingKey = keyof BookSettings;
+
+/** The settings that are numbers — every one but the on/off switch. */
+export type NumericBookSettingKey = {
+  [K in BookSettingKey]: BookSettings[K] extends number ? K : never;
+}[BookSettingKey];
+
+export interface SettingLimit {
+  min: number;
+  max: number;
+}
+
+/** One saved edit, from the audit trail. */
+export interface BookSettingChange {
+  field: BookSettingKey;
+  from: number | boolean;
+  to: number | boolean;
+  by: string;
+  at: string;
+}
+
+export interface BookSettingsState {
+  settings: BookSettings;
+  defaults: BookSettings;
+  /** Allowed range per numeric setting, in the API's units. */
+  limits: Partial<Record<NumericBookSettingKey, SettingLimit>>;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  /** Newest first, up to 30. */
+  history: BookSettingChange[];
+}
+
+/**
+ * The API's envelope is `{ success, message, code }`, but the settings
+ * routes may answer `{ success, error: { code, message } }`. Re-raise
+ * the nested form as an ordinary ApiError so callers read `.message`
+ * and `.code` the same way either way.
+ */
+function unwrapNestedError(err: unknown): unknown {
+  if (!(err instanceof ApiError)) return err;
+  const data = err.data;
+  if (!data || typeof data !== "object" || !("error" in data)) return err;
+  const nested = (data as { error?: unknown }).error;
+  if (!nested || typeof nested !== "object") return err;
+  const { message, code } = nested as { message?: unknown; code?: unknown };
+  if (typeof message !== "string" || !message) return err;
+  return new ApiError(message, err.status, {
+    code: typeof code === "string" ? code : undefined,
+    message,
+  });
+}
+
+/**
+ * Check an access key with the API before the desk keeps it — the
+ * unlock form's one call. Resolves to the key's name ("josh"); throws
+ * the API's refusal (401 INVALID_ADMIN_KEY) for a wrong one.
+ */
+export async function verifyAdminKey(key: string): Promise<{ label: string }> {
+  const res = await apiFetch<{ data: { label: string; via: "key" | "clerk" } }>(
+    "/v1/admin/whoami",
+    { headers: { [ADMIN_KEY_HEADER]: key } },
+  );
+  // the API answers "key:<name>"; the desk shows the name
+  return { label: res.data.label.replace(/^key:/, "") };
+}
+
+export async function fetchBookSettings(): Promise<BookSettingsState> {
+  try {
+    const res = await apiFetch<{ data: BookSettingsState }>("/v1/admin/settings");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/**
+ * Send only the settings that changed. Returns the whole state as it
+ * now stands (history included), so the page re-renders from truth.
+ * A rejected combination — say a minimum above the maximum — comes back
+ * as 400 INVALID_SETTINGS with a message written for the admin.
+ */
+export async function updateBookSettings(
+  patch: Partial<BookSettings>,
+): Promise<BookSettingsState> {
+  try {
+    const res = await apiFetch<{ data: BookSettingsState }>("/v1/admin/settings", {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    });
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
 }
 
 /* ------------------------------------------------------------------ */

@@ -188,6 +188,11 @@
   --no: var(--red-500);
   --no-solid: var(--red-400);
   --no-tint: color-mix(in oklab, var(--red-500) 15%, transparent);
+  /* caution (the reference's feedback.warning): risk flags, "watch" states.
+     Not the gold accent — gold is the brand and the buy action. Light pins
+     its own yellow ladder, so this follows the theme with no override. */
+  --warning: var(--yellow-500);
+  --warning-tint: color-mix(in oklab, var(--yellow-500) 15%, transparent);
 }
 
 /* ---------- Layer 1 overrides: primitives — light ----------
@@ -325,6 +330,8 @@
   --color-no: var(--no);
   --color-no-solid: var(--no-solid);
   --color-no-tint: var(--no-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
 
   --color-white: #fff;
   --color-black: #000;

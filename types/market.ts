@@ -28,8 +28,10 @@ export interface Market {
   outcomeLabels?: [string, string];
   /**
    * Outcome ids, [yes, no] — what POST /v1/trades names when staking
-   * naira on this market. Local book only (UUIDs); absent = not
-   * tradeable, as every international (Polymarket) market is.
+   * naira on this market. UUIDs on the Local book, Polymarket's CLOB
+   * token ids on the international one. Absent = not tradeable; present
+   * on an international market still trades only while the API's
+   * international-trading switch is on (useQuote().international).
    */
   outcomeIds?: [string, string];
   /** Resolution criteria text (Bayse markets). */
@@ -166,9 +168,11 @@ export const CATEGORIES = [
 export type Category = (typeof CATEGORIES)[number];
 
 /**
- * True for the naira book — Bayse's feed and our own fixed-odds
- * markets. These are the events that trade at /local/[slug] against the
- * house, as opposed to the Polymarket events the site only mirrors.
+ * True for the Local book — Bayse's feed and our own fixed-odds
+ * markets, which always trade at /local/[slug] against the house. The
+ * Polymarket events are the international book: they trade only while
+ * the desk's international switch is on (`useQuote().international`),
+ * and are display-only mirrors otherwise.
  */
 export function isLocalBook(event: Pick<MarketEvent, "source">): boolean {
   return event.source === "bayse" || event.source === "worldstreet";

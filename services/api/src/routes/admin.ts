@@ -1,7 +1,7 @@
-import type { FastifyPluginAsync, FastifyRequest } from "fastify";
+import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { authenticate, type AuthenticatedUser } from "../auth.js";
+import { requireAdmin } from "../admin-auth.js";
 import { ApiError } from "../errors.js";
 import { getFxQuote } from "../trading/fx.js";
 import { FxRate, LedgerEntry, Position, Settlement } from "../trading/models.js";
@@ -10,31 +10,24 @@ import {
   adminVoidMarket,
 } from "../trading/settlement.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
+import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { getSettlementQueue } from "../trading/exposure.js";
 import { listTraders, TRADER_SORTS, type TraderSort } from "../trading/traders.js";
 import { getBookRisk } from "../trading/risk.js";
+import { getSettingsView, updateBookSettings } from "../trading/settings.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 
 /**
- * Admin surface for the Local markets book. Authorization is the
- * central Clerk role (publicMetadata.role === "admin") — the same
- * signal the rest of WorldStreet uses. Settlement here is manual and
- * final; the resolution desk should call GET /admin/markets/:eventId
- * first, which surfaces the source's own resolution to pre-fill the
- * form. Authoring Worldstreet's own markets lives next door in
- * admin-markets.ts.
+ * Admin surface for the Local markets book. Authorization is an admin
+ * access key or the central Clerk admin role — see admin-auth.ts.
+ * Settlement here is manual and final; the resolution desk should call
+ * GET /admin/markets/:eventId first, which surfaces the source's own
+ * resolution to pre-fill the form. Authoring Worldstreet's own markets
+ * lives next door in admin-markets.ts.
  */
 
-export async function requireAdmin(
-  request: FastifyRequest,
-): Promise<AuthenticatedUser> {
-  const user = await authenticate(request);
-  if (user.role !== "admin") {
-    throw new ApiError(403, "Admin access required", "FORBIDDEN");
-  }
-  return user;
-}
+export { requireAdmin } from "../admin-auth.js";
 
 const fxBody = z.object({
   /** Naira per USD mid rate. */
@@ -42,9 +35,9 @@ const fxBody = z.object({
 });
 
 const settleBody = z.object({
-  eventId: z.string().uuid(),
-  marketId: z.string().uuid(),
-  winningOutcomeId: z.string().uuid(),
+  eventId: eventOrMarketId,
+  marketId: eventOrMarketId,
+  winningOutcomeId: outcomeId,
 });
 
 const tradersQuery = z.object({
@@ -56,21 +49,70 @@ const tradersQuery = z.object({
   activeOnly: z.coerce.boolean().optional(),
 });
 
+/** Any subset of the book settings; bounds are checked in trading/settings.ts. */
+const settingsBody = z
+  .object({
+    internationalTrading: z.boolean(),
+    polymarketSpreadBps: z.number().int(),
+    fxSpreadBps: z.number().int(),
+    minStakeKobo: z.number().int(),
+    maxStakeKobo: z.number().int(),
+    maxMarketExposureKobo: z.number().int(),
+    priceToleranceKobo: z.number().int(),
+    countdownCutoffSeconds: z.number().int(),
+  })
+  .partial()
+  .strict();
+
 const voidBody = z.object({
-  eventId: z.string().uuid(),
-  marketId: z.string().uuid(),
+  eventId: eventOrMarketId,
+  marketId: eventOrMarketId,
   reason: z.string().min(3).max(500),
 });
 
 export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
+  /**
+   * Who the request is, as far as the desk is concerned — what the
+   * desk's unlock form calls to check a key before it keeps it.
+   */
+  app.get(
+    "/admin/whoami",
+    { config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
+    async (request) => {
+      const { label, via } = await requireAdmin(request);
+      return { success: true, data: { label, via } };
+    },
+  );
+
+  /** The book's pricing and limits, their defaults, bounds and change log. */
+  app.get("/admin/settings", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getSettingsView() };
+  });
+
+  /**
+   * Change any subset of the book's settings. Bounds and the min ≤ max
+   * stake rule are checked in trading/settings.ts (400 INVALID_SETTINGS);
+   * every value that actually moves is logged with the admin's email.
+   */
+  app.put("/admin/settings", { schema: { body: settingsBody } }, async (request) => {
+    const user = await requireAdmin(request);
+    const view = await updateBookSettings(request.body, user.label);
+    request.log.info(
+      { by: user.label, changed: Object.keys(request.body) },
+      "book settings updated",
+    );
+    return { success: true, data: view };
+  });
+
   /** Set the USD/NGN mid rate (history kept for audit). */
   app.post("/admin/fx-rate", { schema: { body: fxBody } }, async (request) => {
     const user = await requireAdmin(request);
     await FxRate.create({
       usdToNgn: request.body.usdToNgn,
-      setBy: user.authUserId,
+      setBy: user.id,
     });
     const fx = await getFxQuote();
     return { success: true, data: { fx } };
@@ -93,7 +135,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
         "Test alert",
         {
           note: "Triggered from the admin desk to check alert delivery.",
-          triggeredBy: user.email,
+          triggeredBy: user.label,
         },
       );
       return {
@@ -194,7 +236,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       eventId,
       marketId,
       winningOutcomeId,
-      actor: user.authUserId,
+      actor: user.id,
       log: request.log,
     });
     if (result.outcome === "already_settled") {
@@ -210,7 +252,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       eventId: request.body.eventId,
       marketId: request.body.marketId,
       reason: request.body.reason,
-      actor: user.authUserId,
+      actor: user.id,
       log: request.log,
     });
     if (result.outcome === "already_settled") {

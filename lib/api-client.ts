@@ -1,4 +1,5 @@
 import { API_BASE } from "@/lib/auth-config";
+import { ADMIN_KEY_HEADER, getAdminKey, setAdminKey } from "@/lib/admin-key";
 
 /**
  * Client-side helper for the standalone prediction API (services/api).
@@ -60,6 +61,12 @@ export async function apiFetch<T = unknown>(
     if (token) headers.Authorization = `Bearer ${token}`;
   }
 
+  // the admin desk's access key rides on admin calls only, and never
+  // replaces one the caller set itself (the unlock form checking a key)
+  const adminCall = url.startsWith("/v1/admin");
+  const adminKey = adminCall ? getAdminKey() : null;
+  if (adminKey && !headers[ADMIN_KEY_HEADER]) headers[ADMIN_KEY_HEADER] = adminKey.key;
+
   let res: Response;
   try {
     res = await fetch(target, {
@@ -102,6 +109,14 @@ export async function apiFetch<T = unknown>(
   }
 
   if (!res.ok) {
+    // the stored key was revoked or rotated: lock the desk so it asks again
+    if (
+      adminKey &&
+      res.status === 401 &&
+      readField<string>(data, "code", "string") === "INVALID_ADMIN_KEY"
+    ) {
+      setAdminKey(null);
+    }
     const message =
       (data && typeof data === "object" && "message" in data
         ? (data as { message?: string }).message

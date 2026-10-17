@@ -1,50 +1,83 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeftIcon as ArrowLeft,
   BanknotesIcon as Coins,
+  Cog6ToothIcon as Settings,
   PencilSquareIcon as PenSquare,
   UsersIcon as Users,
 } from "@heroicons/react/24/outline";
 import { useAuth } from "@/components/auth/auth-context";
+import { setAdminKey, useAdminKey } from "@/lib/admin-key";
+import { AdminUnlock } from "./admin-unlock";
 
 const NAV = [
   { href: "/admin", label: "Local book", icon: Coins },
   { href: "/admin/markets", label: "Markets", icon: PenSquare },
   { href: "/admin/traders", label: "Traders", icon: Users },
+  { href: "/admin/settings", label: "Settings", icon: Settings },
 ] as const;
 
 /**
  * Admin chrome: sidebar on desktop, horizontal tab row on mobile.
- * Signing in only gets you this far — every admin endpoint checks the
- * central Clerk `admin` role itself, and the desk renders that refusal
+ *
+ * The way in is an access key (AdminUnlock — kept for this tab, sent on
+ * every admin call) or, as before, an account with the central Clerk
+ * `admin` role. Either only gets you this far: every admin endpoint
+ * checks the key or the role itself, and the desk renders that refusal
  * rather than pretending the page works.
  */
 export function AdminShell({ children }: { children: React.ReactNode }) {
   const { user, openAuth } = useAuth();
+  const adminKey = useAdminKey();
   const pathname = usePathname();
+  // a logged-in account without the admin role can still switch to a key
+  const [unlocking, setUnlocking] = useState(false);
 
-  if (!user) {
+  // the stored key isn't readable until hydration — wait rather than
+  // flash the unlock form at an admin who already unlocked this tab
+  if (adminKey === undefined && !user) {
+    return <main className="min-h-screen" aria-busy="true" />;
+  }
+
+  if (!adminKey && (!user || unlocking)) {
     return (
-      <main className="flex min-h-screen items-center justify-center px-4">
-        <div className="w-full max-w-md rounded-xl border border-border bg-surface p-8 text-center shadow-card">
-          <h1 className="text-xl font-semibold">Worldstreet Admin</h1>
-          <p className="mt-2 text-sm text-secondary">
-            Log in to write markets and manage the Local book&rsquo;s rate and
-            settlements.
-          </p>
-          <button
-            onClick={openAuth}
-            className="mt-5 h-11 w-full rounded-md bg-accent text-base font-semibold text-on-accent transition-colors hover:bg-accent-hover"
-          >
-            Log In
-          </button>
-        </div>
-      </main>
+      <AdminUnlock
+        onLogIn={user ? undefined : openAuth}
+        onCancel={user ? () => setUnlocking(false) : undefined}
+      />
     );
   }
+
+  /** Who the desk is acting as, and the way to change it. */
+  const identity = adminKey ? (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate text-xs text-secondary">
+        Key: <span className="font-semibold text-primary">{adminKey.label}</span>
+      </span>
+      <button
+        type="button"
+        onClick={() => setAdminKey(null)}
+        className="shrink-0 text-xs font-semibold text-accent-ink hover:underline"
+      >
+        Lock
+      </button>
+    </span>
+  ) : (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate text-xs text-secondary">{user?.name}</span>
+      <button
+        type="button"
+        onClick={() => setUnlocking(true)}
+        className="shrink-0 text-xs font-semibold text-accent-ink hover:underline"
+      >
+        Use a key
+      </button>
+    </span>
+  );
 
   const nav = NAV.map(({ href, label, icon: Icon }) => {
     const active = href === "/admin" ? pathname === href : pathname.startsWith(href);
@@ -76,7 +109,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
         {nav}
         <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3">
-          <div className="truncate px-3 text-xs text-secondary">{user.name}</div>
+          <div className="px-3">{identity}</div>
           <Link
             href="/"
             className="flex items-center gap-2.5 rounded-md px-3 py-2 text-sm font-semibold text-secondary transition-colors hover:bg-element-2 hover:text-primary"
@@ -101,6 +134,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             Site
           </Link>
         </div>
+        {identity}
         <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{nav}</nav>
       </div>
 

@@ -5,8 +5,10 @@ import {
   ChevronDownIcon as ChevronDown,
   ChevronUpIcon as ChevronUp,
 } from "@heroicons/react/24/outline";
-import { isBinary, type MarketEvent } from "@/types/market";
+import { isBinary, isLocalBook, type MarketEvent } from "@/types/market";
 import { formatVolume, toCents, toPercent } from "@/lib/format";
+import { formatQuote } from "@/lib/book";
+import { useQuote } from "@/components/book-pricing";
 import { dayDelta } from "@/lib/series";
 import {
   NO_TONE,
@@ -24,11 +26,17 @@ import { DetailCard, useRevealTicket } from "./market-detail";
  * price pills. A pill selects that market+side, which the trade panel
  * and chart follow; on narrow screens it also opens the panel's sheet.
  *
- * The pills read "Yes 58¢" rather than "Buy Yes 58¢" because these
- * mirrored markets aren't tradeable here — see trade-panel.tsx. The
- * Local rows keep "Buy", since those orders are real.
+ * While the event trades on our book — the API's international-trading
+ * switch is on (`useQuote().international`) — the pills read "Buy Yes
+ * ₦63.00": what a share costs here, Polymarket's price plus the house
+ * spread (lib/book.ts). With it off the market is only mirrored, so
+ * they read "Yes 60¢", the source's price, with no "Buy" — see
+ * local-trade-panel.tsx.
  */
 export function OutcomeList({ event }: { event: MarketEvent }) {
+  const { quoteKobo, international } = useQuote();
+  // a Local event is always on our book; an international one only while the switch is on
+  const tradeable = isLocalBook(event) || international;
   const { marketId, side, select } = useTradeSelection();
   const reveal = useRevealTicket();
   const binary = isBinary(event);
@@ -43,8 +51,12 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
         // a binary event's one row would only repeat the title as its name
         const name = binary ? (m.outcomeLabels?.[0] ?? "Yes") : (m.groupItemTitle ?? m.question);
         const [yesLabel, noLabel] = m.outcomeLabels ?? ["Yes", "No"];
-        const yes = `${yesLabel} ${toCents(m.outcomePrices[0])}`;
-        const no = `${noLabel} ${toCents(m.outcomePrices[1])}`;
+        const pill = (label: string, i: 0 | 1) =>
+          tradeable
+            ? `Buy ${label} ${formatQuote(quoteKobo(event, m.outcomePrices[i]))}`
+            : `${label} ${toCents(m.outcomePrices[i])}`;
+        const yes = pill(yesLabel, 0);
+        const no = pill(noLabel, 1);
         return (
           <OutcomeQuoteRow
             key={m.id}
@@ -83,7 +95,7 @@ export function OutcomesCard({ children }: { children: ReactNode }) {
 }
 
 interface PillSpec {
-  /** Visible text, e.g. "Yes 58.2¢". */
+  /** Visible text, e.g. "Buy Yes ₦61.00", or "Yes 58.2¢" on a mirror. */
   text: string;
   /** Accessible name — starts with the visible text. */
   label: string;

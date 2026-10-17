@@ -6,6 +6,7 @@ import {
 } from "./bayse.js";
 import { PAYOUT_PER_SHARE_KOBO } from "./ledger.js";
 import { loadWorldstreetEvents } from "./worldstreet.js";
+import { fetchPolymarketEvent, isPolymarketId } from "./polymarket/index.js";
 import type { IWorldstreetEvent, IWorldstreetMarket } from "./models.js";
 
 /**
@@ -21,7 +22,7 @@ import type { IWorldstreetEvent, IWorldstreetMarket } from "./models.js";
  * 0-to-1 probabilities do not appear past this file.
  */
 
-export type MarketOrigin = "bayse" | "worldstreet";
+export type MarketOrigin = "bayse" | "worldstreet" | "polymarket";
 
 export interface TradableOutcome {
   id: string;
@@ -40,6 +41,12 @@ export interface TradableMarket {
   resolvedOutcomeId: string | null;
   /** What the source called the winner, for the audit trail. */
   resolvedOutcomeLabel: string | null;
+  /**
+   * The source settled this market as no-contest (Polymarket's 50/50):
+   * every position on it is refunded. Absent on the Local origins, whose
+   * voids come through a cancelled event or the desk.
+   */
+  voided?: boolean;
 }
 
 export interface TradableEvent {
@@ -112,13 +119,16 @@ export function fromWorldstreet(
 }
 
 /**
- * Fresh state for one event of either origin. Ours are checked first:
- * a Bayse id can never collide with a UUID we minted, and the local
- * lookup is a single indexed read against a Relay round trip.
+ * Fresh state for one event of any origin. An all-digit id is a Gamma
+ * event (international book) — ours and Bayse's are UUIDs, so the shape
+ * alone routes it. Otherwise ours are checked first: a Bayse id can
+ * never collide with a UUID we minted, and the local lookup is a single
+ * indexed read against a Relay round trip.
  */
 export async function fetchTradableEvent(
   eventId: string,
 ): Promise<TradableEvent> {
+  if (isPolymarketId(eventId)) return fetchPolymarketEvent(eventId);
   const ours = await loadWorldstreetEvents([eventId]);
   const mine = ours.get(eventId);
   if (mine) return fromWorldstreet(mine.event, mine.markets);
@@ -132,7 +142,7 @@ const FETCH_CONCURRENCY = 5;
  * Many events at once, keyed by id. A failed fetch is simply absent
  * from the map: callers report what they know rather than failing a
  * whole page over one unreachable event. Our own events are loaded in
- * a single query, so only Bayse ids cost round trips.
+ * a single query, so only Bayse and Polymarket ids cost round trips.
  */
 export async function fetchTradableEvents(
   eventIds: string[],
@@ -152,7 +162,12 @@ export async function fetchTradableEvents(
       cursor += 1;
       if (!eventId) continue;
       try {
-        out.set(eventId, fromBayse(await fetchBayseEvent(eventId)));
+        out.set(
+          eventId,
+          isPolymarketId(eventId)
+            ? await fetchPolymarketEvent(eventId)
+            : fromBayse(await fetchBayseEvent(eventId)),
+        );
       } catch {
         // absent from the map — reported as unreachable
       }

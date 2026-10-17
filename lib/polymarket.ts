@@ -231,9 +231,12 @@ function toMarket(raw: GammaMarket): Market | null {
     outcomePrices: [prices[0], prices[1]],
     volume: raw.volume ?? String(raw.volumeNum ?? 0),
     clobTokenId: tokenIds?.[0],
-    // no outcomeIds: international markets are display-only, so there is
-    // nothing a trade could name (the international house book is parked
-    // on the `international-book` branch)
+    // The CLOB token ids name the two outcomes on WorldStreet's book too:
+    // they're what a trade sends and what the API re-prices and settles
+    // against (services/api/src/trading/polymarket/). Having them doesn't
+    // make a market tradeable — that's the API's switch (lib/book-pricing.ts).
+    outcomeIds:
+      tokenIds && tokenIds.length === 2 ? [tokenIds[0], tokenIds[1]] : undefined,
     // only when they aren't plain Yes/No ("Over"/"Under", "Hike"/"Cut"),
     // so the buttons say what the position will be called
     outcomeLabels:

@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
+import { getBookSettings } from "../trading/settings.js";
 import { WorldstreetEvent, WorldstreetMarket } from "../trading/models.js";
 import { activityByEvent, serializeEvent } from "../trading/serialize.js";
 
@@ -20,6 +21,27 @@ const MAX_LISTED = 60;
 
 export const marketRoutes: FastifyPluginAsync = async (rawApp) => {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
+
+  /**
+   * What the web app needs to quote and gate trades: whether the
+   * international book is open, the spread added to Polymarket's price,
+   * and the stake bounds. All of it is admin-set (trading/settings.ts),
+   * so each number lives in one place and what a visitor is quoted is
+   * what the trade route will fill at. Public for the same reason as the
+   * feed below: any visitor sees these prices on the page.
+   */
+  app.get("/markets/pricing", async () => {
+    const s = await getBookSettings();
+    return {
+      success: true,
+      data: {
+        internationalTrading: s.internationalTrading,
+        polymarketSpreadBps: s.polymarketSpreadBps,
+        minStakeKobo: s.minStakeKobo,
+        maxStakeKobo: s.maxStakeKobo,
+      },
+    };
+  });
 
   /** Live markets, soonest to close first, undated ones last. */
   app.get("/markets", async () => {

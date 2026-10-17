@@ -117,6 +117,17 @@ const positionSchema = new Schema(
       default: "open",
       index: true,
     },
+    /**
+     * Which book the position is on: "local" (Bayse-fed or our own
+     * fixed odds) or "polymarket" (the international book). Positions
+     * written before the international book existed are all local.
+     */
+    source: {
+      type: String,
+      enum: ["local", "polymarket"],
+      default: "local",
+      index: true,
+    },
     /** Client idempotency key — a retried trade must not double-stake. */
     idempotencyKey: { type: String, required: true, unique: true },
     settledAt: { type: Date },
@@ -162,9 +173,65 @@ export const FxRate: Model<IFxRate> =
   (mongoose.models.FxRate as Model<IFxRate>) ??
   mongoose.model<IFxRate>("FxRate", fxRateSchema);
 
+/* ------------------------------------------------------------------ */
+/* Book settings (admin-set)                                           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The admin desk's overrides of the book's pricing and limits — one row,
+ * key "book". A field left unset falls back to its env default (see
+ * trading/settings.ts), so a fresh database behaves exactly like the env
+ * says until an admin changes something.
+ */
+const bookSettingsSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    internationalTrading: { type: Boolean },
+    polymarketSpreadBps: { type: Number },
+    fxSpreadBps: { type: Number },
+    minStakeKobo: { type: Number },
+    maxStakeKobo: { type: Number },
+    maxMarketExposureKobo: { type: Number },
+    priceToleranceKobo: { type: Number },
+    countdownCutoffSeconds: { type: Number },
+    /** Email of the admin behind the last change. */
+    updatedBy: { type: String },
+  },
+  { timestamps: true },
+);
+
+export type IBookSettings = InferSchemaType<typeof bookSettingsSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const BookSettingsDoc: Model<IBookSettings> =
+  (mongoose.models.BookSettings as Model<IBookSettings>) ??
+  mongoose.model<IBookSettings>("BookSettings", bookSettingsSchema);
+
+/** One row per changed field — who moved a money setting, from what, to what. */
+const settingsChangeSchema = new Schema(
+  {
+    field: { type: String, required: true },
+    from: { type: Schema.Types.Mixed },
+    to: { type: Schema.Types.Mixed },
+    by: { type: String, required: true },
+  },
+  { timestamps: true },
+);
+settingsChangeSchema.index({ createdAt: -1 });
+
+export type ISettingsChange = InferSchemaType<typeof settingsChangeSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const SettingsChange: Model<ISettingsChange> =
+  (mongoose.models.SettingsChange as Model<ISettingsChange>) ??
+  mongoose.model<ISettingsChange>("SettingsChange", settingsChangeSchema);
+
 export const SETTLEMENT_SOURCES = [
   "bayse-auto",
   "worldstreet-auto",
+  "polymarket-auto",
   "admin",
 ] as const;
 export type SettlementSource = (typeof SETTLEMENT_SOURCES)[number];
@@ -182,7 +249,7 @@ const settlementSchema = new Schema(
     source: { type: String, enum: SETTLEMENT_SOURCES, required: true },
     /** Clerk userId for admin settlements, "system" for the worker. */
     actor: { type: String, required: true },
-    /** Raw Bayse fields backing the decision, for disputes. */
+    /** Raw source fields (Bayse, Polymarket) backing the decision, for disputes. */
     evidence: { type: Schema.Types.Mixed, default: {} },
     positionsSettled: { type: Number, required: true, default: 0 },
     payoutTotalKobo: { type: Number, required: true, default: 0 },
@@ -338,6 +405,7 @@ export async function ensureTradingIndexes(): Promise<void> {
     LedgerEntry.init(),
     Position.init(),
     FxRate.init(),
+    BookSettingsDoc.init(),
     Settlement.init(),
     WorldstreetEvent.init(),
     WorldstreetMarket.init(),

@@ -1,10 +1,10 @@
-import { config } from "../config.js";
 import { ApiError } from "../errors.js";
 import { FxRate } from "./models.js";
+import { getBookSettings } from "./settings.js";
 
 /**
  * USD/NGN conversion pricing. The mid rate is admin-set (latest FxRate
- * row); the spread (basis points, config) is applied against the user
+ * row); the spread (basis points, a desk book setting) is applied against the user
  * in both directions, so a round trip costs 2× spread and conversion
  * can't be used to arb the house. No rate row → conversions are
  * unavailable (503), never a guessed rate.
@@ -30,12 +30,13 @@ export async function getFxQuote(): Promise<FxQuote> {
       "FX_UNAVAILABLE",
     );
   }
-  const spread = config.FX_SPREAD_BPS / 10_000;
+  const { fxSpreadBps } = await getBookSettings();
+  const spread = fxSpreadBps / 10_000;
   return {
     mid: row.usdToNgn,
     usdToNgn: row.usdToNgn * (1 - spread),
     ngnToUsd: row.usdToNgn * (1 + spread),
-    spreadBps: config.FX_SPREAD_BPS,
+    spreadBps: fxSpreadBps,
     asOf: row.createdAt,
   };
 }

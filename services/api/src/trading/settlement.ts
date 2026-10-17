@@ -195,7 +195,11 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
     try {
       const event = await fetchTradableEvent(eventId);
       const autoSource: SettlementSource =
-        event.origin === "bayse" ? "bayse-auto" : "worldstreet-auto";
+        event.origin === "bayse"
+          ? "bayse-auto"
+          : event.origin === "polymarket"
+            ? "polymarket-auto"
+            : "worldstreet-auto";
 
       if (event.status === "cancelled") {
         for (const market of event.markets) {
@@ -215,6 +219,21 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
 
       for (const market of event.markets) {
         if (market.status !== "resolved") continue;
+        // the source called it no-contest (Polymarket's 50/50): the book
+        // pays whole shares or nothing, so every stake goes back
+        if (market.voided) {
+          await settlePositions({
+            eventId,
+            marketId: market.id,
+            winningOutcomeId: null,
+            voided: true,
+            source: autoSource,
+            actor: "system",
+            evidence: { origin: event.origin, marketStatus: market.status, split: true },
+            log,
+          });
+          continue;
+        }
         if (!market.resolvedOutcomeId) {
           await sendAlert(
             log,

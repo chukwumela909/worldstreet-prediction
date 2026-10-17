@@ -113,7 +113,7 @@ export async function buildApp() {
     // Must be explicit: the default only advertises the "simple" methods
     // (GET/HEAD/POST), so browsers preflight-block DELETE and PATCH.
     methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key"],
+    allowedHeaders: ["Content-Type", "Authorization", "Idempotency-Key", "X-Admin-Key"],
     origin(origin, callback) {
       if (isAllowedOrigin(origin)) {
         callback(null, true);

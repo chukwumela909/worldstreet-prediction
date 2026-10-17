@@ -23,7 +23,8 @@ import { firstPick, matchesSport, type Side, type SportFilter } from "./sports-d
 /**
  * The sports page's trade ticket — the reference's `sports-ticket`: one
  * outcome picked from a card or the event rail, in our bet slip
- * (LocalTradePanel; display-only on international markets). From lg up it sits in a
+ * (LocalTradePanel — display-only on an international market until the
+ * desk's international switch is on). From lg up it sits in a
  * sticky aside beside the list (SportsBoard renders <SportsTicket/>); below
  * lg a pick opens it in a "Trade outcome" sheet instead.
  *

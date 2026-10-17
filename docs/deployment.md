@@ -68,6 +68,8 @@ CLERK_PUBLISHABLE_KEY=pk_live_...
 CLERK_SECRET_KEY=sk_live_...
 CLERK_AUTHORIZED_PARTIES=
 
+ADMIN_ACCESS_KEYS=josh:<32+ random chars>,wisdom:<32+ random chars>
+
 CORS_ORIGINS=https://prediction.worldstreetgold.com
 
 WALLET_API_URL=https://<wallet-domain>
@@ -92,6 +94,18 @@ Notes:
   request while web keeps working, which reads as "mobile auth is broken".
   If it is ever set, it must list every web origin whose session tokens this
   API accepts; a token minted by an origin not on the list is rejected.
+- `ADMIN_ACCESS_KEYS` is the interim way into the admin desk (`/admin`):
+  `name:key` pairs, comma-separated. An admin opens `/admin`, types their
+  key into the unlock form, and every admin request then carries it as
+  `X-Admin-Key`; the name is what the desk's change logs record
+  (`key:josh`). Keys must be 32+ characters — make each one with
+  `node -e "console.log(require('crypto').randomBytes(24).toString('base64url'))"`
+  and hand it over privately, never in a chat or a commit. A malformed or
+  short entry stops the API from booting (on purpose). To revoke one key,
+  remove its entry and redeploy; anyone using it is locked out on their
+  next request. Leave the variable empty to turn keys off entirely — the
+  Clerk `admin` role (step 4) then remains the only way in, which is the
+  planned end state.
 - `CORS_ORIGINS` only adds to the built-in allowlist in `src/app.ts`
   (`prediction.worldstreetgold.com`, `worldstreetgold.com`,
   `www.worldstreetgold.com`), so it can stay empty if those cover you.
@@ -261,6 +275,43 @@ dearer and the other side cheaper until new money comes in on the light side.
 It covers Bayse positions too — the house pays those out as well — and is
 served by `GET /v1/admin/risk`, computed from open positions alone (no Relay
 call). The arithmetic is asserted in `npm run smoke:worldstreet`.
+
+## 5d. International (Polymarket) trading — ships off
+
+Polymarket markets are mirrored on the site from the start, but they **trade
+only once an admin turns international trading on**. Until then — and any time
+the web app can't read the switch: `NEXT_PUBLIC_API_URL` unset, an API deployed
+before `GET /v1/markets/pricing` existed (it answers 404), or an error answer —
+they're display-only: Polymarket's prices in ¢, the amount locked, "Trading
+opens soon". The trade route refuses them too (`INTERNATIONAL_CLOSED`).
+
+To open the book:
+
+1. Deploy the API, then run the Polymarket smoke test from `services/api`. It
+   needs no database, credentials or money (in-memory Mongo, live Gamma) and
+   checks the spread, the statuses that stop trading, reading a final result,
+   and a full settlement pass against markets Polymarket has already resolved:
+
+   ```bash
+   npm run smoke:polymarket
+   ```
+
+2. On the web app's admin **Settings** page, set the spread, the stake limits
+   and the per-market exposure cap, then switch international trading on.
+
+The spread is in basis points of a ₦100 share, added to Polymarket's price on
+each side (300 = 3 points: a 60% Yes sells at ₦63, its 40% No at ₦43), capped
+at ₦99. The API re-prices every order with the same rule, so what a visitor is
+quoted is what fills. `POLYMARKET_SPREAD_BPS`, `TRADE_MAX_STAKE_KOBO` and
+`TRADE_MAX_MARKET_EXPOSURE_KOBO` are only the starting defaults the settings
+begin from — once an admin saves a value, that's the one in force. Nothing about
+it is configured in the web app.
+
+The web app reads the switch, the spread and the stake limits from
+`GET /v1/markets/pricing` (public) and caches them for about a minute, so a
+change reaches new page loads within a minute — no rebuild or redeploy of the
+web app. A page that's already open keeps what it loaded with until it's
+reloaded; the API checks the switch on every order regardless.
 
 ## 6. Deploying the web app (separate resource)
 

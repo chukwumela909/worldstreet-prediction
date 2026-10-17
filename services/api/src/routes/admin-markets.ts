@@ -249,7 +249,7 @@ export const adminMarketRoutes: FastifyPluginAsync = async (rawApp) => {
         status: body.status,
         closesAt: parseInstant(body.closesAt, "Closing time") ?? null,
         resolutionDate: parseInstant(body.resolutionDate, "Resolution date") ?? null,
-        createdBy: user.authUserId,
+        createdBy: user.id,
       });
 
       try {

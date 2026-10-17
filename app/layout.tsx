@@ -6,6 +6,8 @@ import { MobileDock } from "@/components/nav/mobile-dock";
 import { SiteChrome } from "@/components/nav/site-chrome";
 import { SiteHeader } from "@/components/nav/site-header";
 import { Toaster } from "@/components/toaster";
+import { BookPricingProvider } from "@/components/book-pricing";
+import { getBookPricing } from "@/lib/book-pricing";
 import { SiteFooter } from "@/components/nav/site-footer";
 import {
   CLERK_DOMAIN,
@@ -37,11 +39,17 @@ export const metadata: Metadata = {
     "WorldStreet Prediction Markets - High-precision probability desk, active forecasting, and binary contract settlement.",
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // The API's pricing and its international-trading switch, cached for a
+  // minute (lib/book-pricing.ts) — what every quoted price and stake limit
+  // on the site reads. Null (no API, an older one, an error) keeps
+  // international markets display-only.
+  const pricing = await getBookPricing();
+
   const page = (
     <html
       lang="en"
@@ -52,15 +60,17 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <script dangerouslySetInnerHTML={{ __html: THEME_INIT }} />
         <AuthProvider>
-          {/* in the layout, not each page: it stays mounted across every
-              navigation, so only the page below it swaps */}
-          <SiteChrome>
-            <SiteHeader />
-          </SiteChrome>
-          {children}
-          <SiteFooter />
-          <MobileDock />
-          <Toaster />
+          <BookPricingProvider pricing={pricing}>
+            {/* in the layout, not each page: it stays mounted across every
+                navigation, so only the page below it swaps */}
+            <SiteChrome>
+              <SiteHeader />
+            </SiteChrome>
+            {children}
+            <SiteFooter />
+            <MobileDock />
+            <Toaster />
+          </BookPricingProvider>
         </AuthProvider>
       </body>
     </html>

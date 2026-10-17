@@ -1,4 +1,5 @@
 import { Position } from "./models.js";
+import { getBookSettings } from "./settings.js";
 
 /**
  * What the house stands to win or lose on the open book.
@@ -46,7 +47,29 @@ export interface MarketRisk {
   /** The outcome that hurts most, or the smallest win on a balanced book. */
   worstCaseKobo: number;
   worstOutcomeId: string | null;
+  /**
+   * What the trade route weighs against the per-market cap: every open
+   * position's payout beyond its stake, summed across both sides.
+   */
+  limitUsedKobo: number;
 }
+
+/** A market close to its loss limit — the desk's early warning. */
+export interface LimitFlag {
+  marketId: string;
+  marketTitle: string;
+  eventTitle: string;
+  eventSlug: string;
+  usedKobo: number;
+  limitKobo: number;
+  /** usedKobo / limitKobo; past 1 once the cap was lowered under it. */
+  share: number;
+  level: "watch" | "critical";
+}
+
+/** Share of the cap that turns a market into a watch / critical flag. */
+const WATCH_SHARE = 0.7;
+const CRITICAL_SHARE = 0.9;
 
 export interface BookRisk {
   openPositions: number;
@@ -63,6 +86,10 @@ export interface BookRisk {
     eventSlug: string;
     lossKobo: number;
   } | null;
+  /** The desk's current per-market cap (book settings). */
+  maxMarketExposureKobo: number;
+  /** Markets at WATCH_SHARE of the cap or more, fullest first. */
+  limitFlags: LimitFlag[];
 }
 
 interface Row {
@@ -145,6 +172,7 @@ export async function openRiskByMarket(
       outcomes,
       worstCaseKobo: worst.profitIfWinsKobo,
       worstOutcomeId: worst.outcomeId,
+      limitUsedKobo: sides.reduce((sum, s) => sum + s.payoutKobo, 0) - stakeKobo,
     });
   }
 
@@ -158,10 +186,28 @@ export async function openRiskByMarket(
  * already collected.
  */
 export async function getBookRisk(): Promise<BookRisk> {
-  const markets = await openRiskByMarket();
+  const [markets, settings] = await Promise.all([openRiskByMarket(), getBookSettings()]);
   const worst = markets[0]; // sorted worst-first
+  const limitKobo = settings.maxMarketExposureKobo;
+
+  const limitFlags: LimitFlag[] = markets
+    .map((m) => ({ m, share: m.limitUsedKobo / limitKobo }))
+    .filter(({ share }) => share >= WATCH_SHARE)
+    .sort((a, b) => b.share - a.share)
+    .map(({ m, share }) => ({
+      marketId: m.marketId,
+      marketTitle: m.marketTitle,
+      eventTitle: m.eventTitle,
+      eventSlug: m.eventSlug,
+      usedKobo: m.limitUsedKobo,
+      limitKobo,
+      share,
+      level: share >= CRITICAL_SHARE ? "critical" : "watch",
+    }));
 
   return {
+    maxMarketExposureKobo: limitKobo,
+    limitFlags,
     openPositions: markets.reduce((sum, m) => sum + m.positions, 0),
     openMarkets: markets.length,
     openStakeKobo: markets.reduce((sum, m) => sum + m.stakeKobo, 0),

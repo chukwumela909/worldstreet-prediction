@@ -14,6 +14,10 @@
     "smoke:local": "tsx scripts/smoke-local-book.ts",
     "smoke:ledger": "tsx scripts/ledger-smoke.mts",
     "smoke:worldstreet": "tsx scripts/worldstreet-smoke.mts",
+    "smoke:polymarket": "tsx scripts/polymarket-smoke.mts",
+    "smoke:polymarket:quick": "tsx scripts/polymarket-quick.mts",
+    "smoke:settings": "tsx scripts/settings-smoke.mts",
+    "smoke:admin-keys": "tsx scripts/admin-keys-smoke.mts",
     "verify:leaderboard": "tsx scripts/verify-leaderboard.ts",
     "verify:traders": "tsx scripts/verify-traders.ts",
     "inspect:settlement": "tsx scripts/inspect-settlement.ts"

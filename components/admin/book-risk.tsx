@@ -5,9 +5,14 @@ import {
   ExclamationTriangleIcon as AlertTriangle,
   ShieldCheckIcon as ShieldCheck,
 } from "@heroicons/react/24/outline";
-import { formatNaira, formatNairaSigned } from "@/lib/format";
+import { formatNaira, formatNairaCompact, formatNairaSigned } from "@/lib/format";
 import { bookHref } from "@/lib/book";
-import { fetchBookRisk, useAdminResource } from "@/lib/admin-api";
+import {
+  fetchBookRisk,
+  useAdminResource,
+  type MarketLimitFlag,
+} from "@/lib/admin-api";
+import { FLAG_LEVEL, FLAG_TONE, FlagChip } from "@/components/admin/risk-flags";
 
 /**
  * The house's own position, across both desks.
@@ -27,6 +32,10 @@ import { fetchBookRisk, useAdminResource } from "@/lib/admin-api";
  * would keep quoting a book that no longer exists. `reloadKey` is how
  * the desk says it changed something — bump it wherever the desk
  * refreshes itself.
+ *
+ * Under it, the markets closing in on the "Maximum loss per market"
+ * setting — the API only reports those once it knows the setting, so on
+ * an older API that section simply isn't there.
  */
 export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
   const risk = useAdminResource(fetchBookRisk, true, reloadKey);
@@ -42,8 +51,15 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
     );
   }
 
-  const { openPositions, openMarkets, openStakeKobo, worstCaseKobo, worstMarket } =
-    risk.data;
+  const {
+    openPositions,
+    openMarkets,
+    openStakeKobo,
+    worstCaseKobo,
+    worstMarket,
+    limitFlags,
+    maxMarketExposureKobo,
+  } = risk.data;
 
   if (openPositions === 0) {
     return (
@@ -62,51 +78,142 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
   const exposed = netLoss || worstMarket !== null;
 
   return (
-    <section className="mt-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:grid-cols-3">
-      <Stat
-        label="Money held"
-        value={formatNaira(openStakeKobo)}
-        note={`${openPositions} open position${openPositions === 1 ? "" : "s"} across ${openMarkets} market${openMarkets === 1 ? "" : "s"}`}
-      />
-      <Stat
-        label={exposed ? "Worst case" : "Locked-in profit"}
-        value={formatNairaSigned(worstCaseKobo)}
-        valueClass={netLoss ? "text-no" : "text-yes"}
-        note={
-          exposed
-            ? "if every open market goes against us"
-            : "the book is balanced — this is ours whatever happens"
-        }
-      />
-      {worstMarket ? (
+    <>
+      <section className="mt-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:grid-cols-3">
         <Stat
-          label="Biggest single risk"
-          value={formatNairaSigned(worstMarket.lossKobo)}
-          valueClass="text-no"
+          label="Money held"
+          value={formatNaira(openStakeKobo)}
+          note={`${openPositions} open position${openPositions === 1 ? "" : "s"} across ${openMarkets} market${openMarkets === 1 ? "" : "s"}`}
+        />
+        <Stat
+          label={exposed ? "Worst case" : "Locked-in profit"}
+          value={formatNairaSigned(worstCaseKobo)}
+          valueClass={netLoss ? "text-no" : "text-yes"}
           note={
-            <Link
-              href={bookHref(worstMarket.eventSlug, worstMarket.marketId)}
-              className="hover:text-primary hover:underline"
-            >
-              {worstMarket.eventTitle || worstMarket.marketTitle}
-            </Link>
+            exposed
+              ? "if every open market goes against us"
+              : "the book is balanced — this is ours whatever happens"
           }
         />
-      ) : (
-        <Stat
-          label="Biggest single risk"
-          value="—"
-          note="no market is short either side"
-        />
+        {worstMarket ? (
+          <Stat
+            label="Biggest single risk"
+            value={formatNairaSigned(worstMarket.lossKobo)}
+            valueClass="text-no"
+            note={
+              <Link
+                href={bookHref(worstMarket.eventSlug, worstMarket.marketId)}
+                className="hover:text-primary hover:underline"
+              >
+                {worstMarket.eventTitle || worstMarket.marketTitle}
+              </Link>
+            }
+          />
+        ) : (
+          <Stat
+            label="Biggest single risk"
+            value="—"
+            note="no market is short either side"
+          />
+        )}
+        {exposed && (
+          <p className="flex items-start gap-1.5 text-[13px] font-medium text-tertiary sm:col-span-3">
+            <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-no" />
+            Move the price on the side the money is piling onto — make it dearer,
+            and the other side cheaper — until both sides pay for each other.
+          </p>
+        )}
+      </section>
+      {limitFlags && (
+        <MarketLimits flags={limitFlags} limitKobo={maxMarketExposureKobo} />
       )}
-      {exposed && (
-        <p className="flex items-start gap-1.5 text-[13px] font-medium text-tertiary sm:col-span-3">
-          <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-no" />
-          Move the price on the side the money is piling onto — make it dearer,
-          and the other side cheaper — until both sides pay for each other.
+    </>
+  );
+}
+
+/**
+ * Markets whose open bets could cost the house most of the per-market
+ * loss limit — "Watch" from 70%, "Critical" from 90%. At 100% the book
+ * refuses new bets on that market, so these are the ones that are about
+ * to start turning people away (or that need their price moved).
+ */
+function MarketLimits({
+  flags,
+  limitKobo,
+}: {
+  flags: MarketLimitFlag[];
+  limitKobo?: number;
+}) {
+  return (
+    <section className="mt-3 rounded-xl border border-border bg-surface p-4 shadow-card">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="text-base font-semibold">Markets near their limit</h2>
+        {limitKobo !== undefined && (
+          <p className="text-[13px] font-medium text-tertiary">
+            Maximum loss per market: {formatNaira(limitKobo)} ·{" "}
+            <Link
+              href="/admin/settings"
+              className="hover:text-primary hover:underline"
+            >
+              Change
+            </Link>
+          </p>
+        )}
+      </div>
+
+      {flags.length === 0 ? (
+        <p className="mt-2 flex items-center gap-2 text-sm font-semibold text-secondary">
+          <ShieldCheck className="size-4 shrink-0 text-yes" />
+          No market is near its loss limit.
         </p>
+      ) : (
+        <ul className="mt-3 flex flex-col gap-2">
+          {flags.map((flag) => (
+            <LimitRow key={flag.marketId} flag={flag} />
+          ))}
+        </ul>
       )}
     </section>
+  );
+}
+
+function LimitRow({ flag }: { flag: MarketLimitFlag }) {
+  const tone = FLAG_TONE[FLAG_LEVEL[flag.level].tone];
+  const pct = Math.round(flag.share * 100);
+  const title = flag.eventTitle || flag.marketTitle;
+  const subtitle =
+    flag.eventTitle && flag.marketTitle && flag.marketTitle !== flag.eventTitle
+      ? flag.marketTitle
+      : null;
+
+  return (
+    <li className="min-w-0 rounded-md border border-border bg-page px-3 py-2.5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <Link
+            href={bookHref(flag.eventSlug, flag.marketId)}
+            className="block truncate text-sm font-semibold hover:underline"
+          >
+            {title}
+          </Link>
+          {subtitle && (
+            <p className="truncate text-xs font-medium text-tertiary">{subtitle}</p>
+          )}
+        </div>
+        <FlagChip level={flag.level} />
+      </div>
+      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-element-3" aria-hidden>
+        <div
+          className={`h-full rounded-full ${tone.bar}`}
+          style={{ width: `${Math.min(Math.max(pct, 0), 100)}%` }}
+        />
+      </div>
+      <p className="mt-1.5 text-xs font-medium text-secondary">
+        {formatNairaCompact(flag.usedKobo / 100)} of{" "}
+        {formatNairaCompact(flag.limitKobo / 100)} used
+        <span className="text-tertiary"> · {pct}%</span>
+      </p>
+    </li>
   );
 }
 

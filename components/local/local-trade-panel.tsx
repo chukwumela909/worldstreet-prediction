@@ -63,11 +63,15 @@ import { TeamMark } from "@/components/sports/team-mark";
  *
  * WorldStreet is the counterparty every time: the stake leaves the naira
  * wallet now and a winning share pays ₦100 at settlement (lib/book.ts).
- * Only the Local book trades: on an international (Polymarket) market the
- * slip is display-only — the source's prices in cents, the amount locked
- * and no way to submit (the international house book is parked on the
- * `international-book` branch). Hold-to-settlement only, at the market — so Sell and Limit are drawn
- * where the reference has them but can't be picked yet.
+ * The Local book always trades, at its own price. An international
+ * (Polymarket) market trades the same way, at Polymarket's price plus the
+ * house spread, only while the API's international-trading switch is on
+ * (`useQuote().international`, read from GET /v1/markets/pricing). With
+ * it off — or no API, or one too old to say — the slip is a display-only
+ * mirror: the source's prices in cents, the amount locked and no way to
+ * submit. Stake limits are the API's too. Hold-to-settlement only, at
+ * the market — so Sell and Limit are drawn where the reference has them
+ * but can't be picked yet.
  *
  * Prices poll (see useLiveLocalEvent) but are never authoritative: every
  * order carries the price it was shown at, the server re-prices live,
@@ -78,10 +82,6 @@ import { TeamMark } from "@/components/sports/team-mark";
  * title and the narrow-screen sheet come from MarketDetail.
  */
 
-/** The book's floor, mirrored so the ticket can explain it before submitting. */
-const MIN_STAKE_KOBO = 10_000; // ₦100
-/** The most one ticket takes; typing more clamps to it. */
-const MAX_STAKE_KOBO = 50_000_000; // ₦500,000
 const QUICK_ADD_KOBO = [50_000, 100_000, 500_000]; // ₦500 / ₦1,000 / ₦5,000
 
 const ORDER_TYPES: SelectOption[] = [
@@ -134,7 +134,9 @@ interface Receipt {
 }
 
 export function LocalTradePanel({ event }: { event: MarketEvent }) {
-  const { quoteKobo } = useQuote();
+  // the stake limits are the API's: min so the ticket can explain the
+  // floor before submitting, max so typing more clamps to it
+  const { quoteKobo, international, minStakeKobo, maxStakeKobo } = useQuote();
   const { marketId, side, select, setSide } = useTradeSelection();
   const { user, openAuth } = useAuth();
   const { balanceKobo } = useNairaWallet(Boolean(user));
@@ -176,10 +178,10 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   const typedNaira = parseFloat(stakeText);
   const stakeKobo =
     Number.isFinite(typedNaira) && typedNaira > 0
-      ? Math.round(Math.min(typedNaira * 100, MAX_STAKE_KOBO))
+      ? Math.round(Math.min(typedNaira * 100, maxStakeKobo))
       : 0;
   const setStakeKobo = (kobo: number) =>
-    setStakeText(String(Math.min(kobo, MAX_STAKE_KOBO) / 100));
+    setStakeText(String(Math.min(kobo, maxStakeKobo) / 100));
 
   const binary = isBinary(event);
   const market = event.markets.find((m) => m.id === marketId) ?? event.markets[0];
@@ -210,13 +212,14 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   const shares = stakeKobo > 0 ? sharesFor(stakeKobo, priceKobo) : 0;
   const payoutKobo = stakeKobo > 0 ? payoutFor(stakeKobo, priceKobo) : 0;
 
-  // international markets are shown, not traded: nothing to submit
-  const mirror = !isLocalBook(event);
+  // an international market while the API's switch is off is shown, not
+  // traded: nothing to submit
+  const mirror = !isLocalBook(event) && !international;
   // no outcome ids or no quote: not on our book
   const tradeable = Boolean(market.outcomeIds) && shownPriceKobo > 0;
   // the team behind the picked outcome on a game, for the reference's crest
   const team = event.game?.teams.find((t) => t.name === market.groupItemTitle);
-  /** An answer pill's price: our quote on the Local book, the source's cents otherwise. */
+  /** An answer pill's price: our quote when it trades here, the source's cents on a mirror. */
   const answerPrice = (i: 0 | 1) =>
     mirror
       ? toCents(market.outcomePrices[i])
@@ -229,17 +232,24 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   // the clock — the server would refuse the trade, so say so first.
   const closed = (msLeft !== null && msLeft <= 0) || event.tradingOpen === false;
 
-  const belowMin = stakeKobo > 0 && stakeKobo < MIN_STAKE_KOBO;
+  const belowMin = stakeKobo > 0 && stakeKobo < minStakeKobo;
+  // typed past the cap: the stake is clamped to it, so say why
+  const aboveMax = Number.isFinite(typedNaira) && typedNaira * 100 > maxStakeKobo;
+  const stakeHint = belowMin
+    ? `Minimum stake is ${formatNaira(minStakeKobo)}`
+    : aboveMax
+      ? `Maximum stake is ${formatNaira(maxStakeKobo)}`
+      : null;
   // Caught before review, as the reference does: the button turns into
   // the way to top up. The server still checks (INSUFFICIENT_FUNDS).
   const insufficient =
     Boolean(user) &&
     balanceKobo !== null &&
-    stakeKobo >= MIN_STAKE_KOBO &&
+    stakeKobo >= minStakeKobo &&
     stakeKobo > balanceKobo;
 
   const submit = async () => {
-    if (!market.outcomeIds || stakeKobo < MIN_STAKE_KOBO || pending) return;
+    if (!market.outcomeIds || stakeKobo < minStakeKobo || pending) return;
     setPending(true);
     setAttempt(null);
     try {
@@ -439,7 +449,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
                   placeholder="Amount"
                   disabled={mirror}
                   value={stakeText}
-                  aria-describedby={belowMin ? `${amountId}-hint` : undefined}
+                  aria-describedby={stakeHint ? `${amountId}-hint` : undefined}
                   onChange={(e) =>
                     setStakeText(e.target.value.replace(/[^0-9.]/g, "").slice(0, 10))
                   }
@@ -455,9 +465,9 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
                   Credit
                 </span>
               </div>
-              {belowMin && (
+              {stakeHint && (
                 <p id={`${amountId}-hint`} className="text-xs text-tertiary">
-                  Minimum stake is {formatNaira(MIN_STAKE_KOBO)}
+                  {stakeHint}
                 </p>
               )}
             </div>
@@ -535,7 +545,7 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
           ) : (
             <button
               type="button"
-              disabled={stakeKobo < MIN_STAKE_KOBO || pending}
+              disabled={stakeKobo < minStakeKobo || pending}
               onClick={() => setStep("review")}
               className={PRIMARY_PILL}
             >

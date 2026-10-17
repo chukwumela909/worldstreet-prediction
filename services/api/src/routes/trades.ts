@@ -2,50 +2,57 @@ import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
-import { config } from "../config.js";
 import { ApiError } from "../errors.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
+import { isPolymarketId } from "../trading/polymarket/index.js";
+import { getBookSettings } from "../trading/settings.js";
 import {
   creditNaira,
   debitNaira,
   getNairaBalanceKobo,
   PAYOUT_PER_SHARE_KOBO,
 } from "../trading/ledger.js";
+import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { Position, type IPosition } from "../trading/models.js";
 
 /**
- * Hold-to-settlement trades on the Local book — Bayse-fed events and
- * Worldstreet's own fixed-odds ones alike. Worldstreet is the
- * counterparty either way: the stake debits the user's naira ledger and
- * the position pays ₦100/share if settlement declares its outcome the
- * winner. There is no sell-back in v1.
+ * Hold-to-settlement trades on both books — the Local one (Bayse-fed
+ * events and WorldStreet's own fixed-odds ones) and the international
+ * one (Polymarket events, priced at Polymarket plus the house spread —
+ * see trading/polymarket/). WorldStreet is the counterparty every time:
+ * the stake debits the user's naira ledger and the position pays
+ * ₦100/share if settlement declares its outcome the winner. There is no
+ * sell-back in v1.
  *
  * Price integrity: the client sends the price it showed the user
  * (`expectedPriceKobo`); the server re-reads the market at source —
- * Relay for a Bayse event, our own row for one of ours — and executes
+ * Relay for a Bayse event, Gamma for a Polymarket one, our own row for
+ * one of ours — and executes
  * at the fresh price only if it moved less than the tolerance,
  * otherwise 409 PRICE_MOVED with the fresh price for the client to
  * re-confirm. Fixed odds rarely trip that, but the desk can reprice
  * mid-session and this is what stops the stale quote filling.
  *
- * Countdown markets additionally close to new trades
- * `TRADE_COUNTDOWN_CUTOFF_SECONDS` before their closing time, since a
- * nearly-decided 15-minute market is pure adverse selection.
+ * Countdown markets additionally close to new trades a cut-off before
+ * their closing time, since a nearly-decided 15-minute market is pure
+ * adverse selection.
+ *
+ * Every limit here — stake bounds, the price tolerance, the countdown
+ * cut-off, the per-market exposure cap — and the international on/off
+ * switch are the desk's book settings (trading/settings.ts), read per
+ * order, so an admin's change applies to the next trade.
  */
 
 const tradeBody = z.object({
-  eventId: z.string().uuid(),
-  marketId: z.string().uuid(),
-  outcomeId: z.string().uuid(),
+  eventId: eventOrMarketId,
+  marketId: eventOrMarketId,
+  outcomeId,
   /** Stake in kobo. */
   stakeKobo: z.number().int().min(100 * 100), // ₦100 minimum, Bayse's own floor
   /** Price the user saw, kobo per share (1–9999). */
   expectedPriceKobo: z.number().int().min(1).max(9_999),
   idempotencyKey: z.string().min(8).max(128),
 });
-
-/** |fresh − expected| tolerated before requiring re-confirmation. */
-const PRICE_TOLERANCE_KOBO = 200; // ₦2 per ₦100 share = 2 percentage points
 
 export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
@@ -71,10 +78,29 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
         };
       }
 
-      if (body.stakeKobo > config.TRADE_MAX_STAKE_KOBO) {
+      const settings = await getBookSettings();
+      const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-US")}`;
+
+      // the international book opens only on the desk's switch — checked
+      // by id shape before anything is fetched from Polymarket
+      if (isPolymarketId(body.eventId) && !settings.internationalTrading) {
+        throw new ApiError(
+          409,
+          "International markets aren't open for betting yet",
+          "INTERNATIONAL_CLOSED",
+        );
+      }
+      if (body.stakeKobo < settings.minStakeKobo) {
         throw new ApiError(
           400,
-          `Maximum stake is ₦${(config.TRADE_MAX_STAKE_KOBO / 100).toLocaleString("en-US")}`,
+          `Minimum stake is ${naira(settings.minStakeKobo)}`,
+          "STAKE_TOO_SMALL",
+        );
+      }
+      if (body.stakeKobo > settings.maxStakeKobo) {
+        throw new ApiError(
+          400,
+          `Maximum stake is ${naira(settings.maxStakeKobo)}`,
           "STAKE_TOO_LARGE",
         );
       }
@@ -92,7 +118,7 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
       const closingMs = event.closingDate ? Date.parse(event.closingDate) : NaN;
       if (!Number.isNaN(closingMs)) {
         const cutoffMs =
-          (event.countdown ? config.TRADE_COUNTDOWN_CUTOFF_SECONDS : 0) * 1000;
+          (event.countdown ? settings.countdownCutoffSeconds : 0) * 1000;
         if (Date.now() >= closingMs - cutoffMs) {
           throw new ApiError(
             409,
@@ -113,7 +139,7 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
       if (freshPriceKobo < 1 || freshPriceKobo > 9_999) {
         throw new ApiError(409, "This outcome is not currently priceable", "MARKET_CLOSED");
       }
-      if (Math.abs(freshPriceKobo - body.expectedPriceKobo) > PRICE_TOLERANCE_KOBO) {
+      if (Math.abs(freshPriceKobo - body.expectedPriceKobo) > settings.priceToleranceKobo) {
         throw new ApiError(409, "The price moved — confirm the new price", "PRICE_MOVED", {
           freshPriceKobo,
         });
@@ -133,7 +159,7 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
       const shares = body.stakeKobo / freshPriceKobo;
       const potentialPayoutKobo = Math.floor(shares * PAYOUT_PER_SHARE_KOBO);
       const newExposure = potentialPayoutKobo - body.stakeKobo;
-      if ((agg?.exposure ?? 0) + newExposure > config.TRADE_MAX_MARKET_EXPOSURE_KOBO) {
+      if ((agg?.exposure ?? 0) + newExposure > settings.maxMarketExposureKobo) {
         throw new ApiError(
           409,
           "This market has reached its trading limit for now",
@@ -166,6 +192,7 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
           shares,
           potentialPayoutKobo,
           status: "open",
+          source: event.origin === "polymarket" ? "polymarket" : "local",
           idempotencyKey,
         });
         return {
@@ -238,6 +265,7 @@ function serializePosition(p: IPosition & { createdAt?: Date | null }) {
     shares: p.shares,
     potentialPayoutKobo: p.potentialPayoutKobo,
     status: p.status,
+    source: p.source ?? "local",
     createdAt: p.createdAt?.toISOString?.() ?? null,
     settledAt: p.settledAt?.toISOString() ?? null,
   };
