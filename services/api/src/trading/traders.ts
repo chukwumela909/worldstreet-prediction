@@ -20,7 +20,9 @@ import { NairaAccount, Position } from "./models.js";
 export const TRADER_SORTS = [
   "recent", // last trade, newest first — the default
   "staked",
-  "pnl",
+  "open", // most money in play right now
+  "pnl", // biggest winners
+  "losers", // biggest losers
   "balance",
   "trades",
   "joined",
@@ -263,7 +265,9 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
     {
       recent: (a, b) => time(b.lastTradeAt) - time(a.lastTradeAt),
       staked: (a, b) => b.stakedKobo - a.stakedKobo,
+      open: (a, b) => b.openStakeKobo - a.openStakeKobo,
       pnl: (a, b) => b.realizedPnlKobo - a.realizedPnlKobo,
+      losers: (a, b) => a.realizedPnlKobo - b.realizedPnlKobo,
       balance: (a, b) => b.balanceKobo - a.balanceKobo,
       trades: (a, b) => b.trades - a.trades,
       joined: (a, b) => time(b.joinedAt) - time(a.joinedAt),

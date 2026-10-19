@@ -16,6 +16,7 @@ import { listTraders, TRADER_SORTS, type TraderSort } from "../trading/traders.j
 import { getBookRisk } from "../trading/risk.js";
 import { getSettingsView, updateBookSettings } from "../trading/settings.js";
 import { getProfitAndLoss } from "../trading/pnl.js";
+import { getAdminOverview } from "../trading/overview.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 
@@ -47,7 +48,12 @@ const tradersQuery = z.object({
   sort: z.enum(TRADER_SORTS).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
-  activeOnly: z.coerce.boolean().optional(),
+  // not z.coerce.boolean(): that reads ANY non-empty string — "false"
+  // included — as true, so the desk could never turn the filter off
+  activeOnly: z
+    .enum(["true", "false", "1", "0"])
+    .transform((v) => v === "true" || v === "1")
+    .optional(),
 });
 
 /** Any subset of the book settings; bounds are checked in trading/settings.ts. */
@@ -87,6 +93,29 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       return { success: true, data: { label, via } };
     },
   );
+
+  /**
+   * The desk's headline numbers — money staked, profit / loss, margin,
+   * active traders, money in play, credit held, and the FX mid for the
+   * desk's ₦/$ switch (trading/overview.ts).
+   */
+  app.get("/admin/overview", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getAdminOverview() };
+  });
+
+  /**
+   * The current conversion quote, for the desk — the users' wallet
+   * endpoint needs a Clerk login, which an access-key admin doesn't have.
+   */
+  app.get("/admin/fx", async (request) => {
+    await requireAdmin(request);
+    const fx = await getFxQuote().catch((err: unknown) => {
+      if (err instanceof ApiError && err.code === "FX_UNAVAILABLE") return null;
+      throw err;
+    });
+    return { success: true, data: { fx } };
+  });
 
   /**
    * What the book has actually made or lost on finished markets — all

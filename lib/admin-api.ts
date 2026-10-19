@@ -189,6 +189,79 @@ export async function fetchBookRisk(): Promise<BookRisk> {
   return res.data;
 }
 
+/* ------------------------------------------------------------------ */
+/* Overview — the owner's headline numbers                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One window of the book. Two clocks run here: the "placed" figures
+ * (`stakedKobo`, `bets`, `traders`, `averageStakeKobo`) count bets when
+ * they are placed, whatever became of them; the "finished" figures
+ * (`settledStakesKobo`, `payoutsKobo`, `profitKobo`, `marginPct`) count
+ * bets whose market finished (won or lost) in the window.
+ */
+export interface PeriodStats {
+  /** Money staked on bets PLACED in the period (all bets, any status). */
+  stakedKobo: number;
+  /** Bets placed in the period. */
+  bets: number;
+  /** Distinct people who placed a bet in the period. */
+  traders: number;
+  /** stakedKobo / bets (0 when no bets). */
+  averageStakeKobo: number;
+  /** Stakes on bets that FINISHED (won/lost) in the period. */
+  settledStakesKobo: number;
+  /** Paid to winners on bets that finished in the period. */
+  payoutsKobo: number;
+  /** settledStakesKobo − payoutsKobo — the house's profit (negative = loss). */
+  profitKobo: number;
+  /** profitKobo / settledStakesKobo × 100, null when nothing finished. */
+  marginPct: number | null;
+}
+
+export interface AdminOverview {
+  periods: {
+    last24h: PeriodStats;
+    last7Days: PeriodStats;
+    last30Days: PeriodStats;
+    allTime: PeriodStats;
+  };
+  /** Money in play right now. */
+  open: {
+    bets: number;
+    markets: number;
+    stakeKobo: number;
+    potentialPayoutKobo: number;
+  };
+  /** Everyone who has ever staked. */
+  tradersWithStakes: number;
+  /** Every account, staked or not. */
+  accounts: number;
+  /** Users' unspent credit balances. */
+  creditHeldKobo: number;
+  /** Naira per $1 mid rate; null if never set. */
+  fx: { usdToNgnMid: number; asOf: string } | null;
+}
+
+export async function fetchAdminOverview(): Promise<AdminOverview> {
+  const res = await apiFetch<{ success: boolean; data: AdminOverview }>(
+    "/v1/admin/overview",
+  );
+  return res.data;
+}
+
+/**
+ * The current conversion rate, read as an admin — the desk's own way to
+ * it, so a desk unlocked with an access key (no user session) can read
+ * it too. `null` until a rate has ever been set.
+ */
+export async function fetchAdminFx(): Promise<FxQuote | null> {
+  const res = await apiFetch<{ success: boolean; data: { fx: FxQuote | null } }>(
+    "/v1/admin/fx",
+  );
+  return res.data.fx ?? null;
+}
+
 export async function fetchSettlements(): Promise<SettlementRecord[]> {
   const res = await apiFetch<{ data: { settlements: SettlementRecord[] } }>(
     "/v1/admin/settlements",
@@ -418,6 +491,8 @@ export interface AdminResource<T> {
   error: string | null;
   /** API error code, e.g. "FORBIDDEN" — the desk branches on this. */
   errorCode: string | null;
+  /** HTTP status of the last failure (0 for network), e.g. 404 on an older API. */
+  errorStatus: number | null;
   refresh: () => void;
 }
 
@@ -439,7 +514,8 @@ export function useAdminResource<T>(
     loading: boolean;
     error: string | null;
     errorCode: string | null;
-  }>({ data: null, loading: true, error: null, errorCode: null });
+    errorStatus: number | null;
+  }>({ data: null, loading: true, error: null, errorCode: null, errorStatus: null });
   const [reloads, setReloads] = useState(0);
 
   const active = enabled && isApiConfigured();
@@ -451,7 +527,13 @@ export function useAdminResource<T>(
     void load()
       .then((data) => {
         if (!cancelled) {
-          setState({ data, loading: false, error: null, errorCode: null });
+          setState({
+            data,
+            loading: false,
+            error: null,
+            errorCode: null,
+            errorStatus: null,
+          });
         }
       })
       .catch((err: unknown) => {
@@ -461,6 +543,7 @@ export function useAdminResource<T>(
           loading: false,
           error: err instanceof Error ? err.message : "Request failed",
           errorCode: err instanceof ApiError ? err.code : null,
+          errorStatus: err instanceof ApiError ? err.status : null,
         }));
       });
 
@@ -606,10 +689,17 @@ export async function updateBookSettings(
 /* Traders — who is playing the book                                   */
 /* ------------------------------------------------------------------ */
 
+/**
+ * `recent` last bet, newest first · `staked` most staked · `open` most
+ * money in play now · `pnl` biggest winners · `losers` biggest losers
+ * (realized P&L ascending) · `balance` · `trades` · `joined` newest.
+ */
 export const TRADER_SORTS = [
   "recent",
   "staked",
+  "open",
   "pnl",
+  "losers",
   "balance",
   "trades",
   "joined",

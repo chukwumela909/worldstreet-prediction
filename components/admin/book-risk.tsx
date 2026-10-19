@@ -5,14 +5,15 @@ import {
   ExclamationTriangleIcon as AlertTriangle,
   ShieldCheckIcon as ShieldCheck,
 } from "@heroicons/react/24/outline";
-import { formatNaira, formatNairaCompact, formatNairaSigned } from "@/lib/format";
 import { bookHref } from "@/lib/book";
+import { useAdminMoney } from "@/lib/admin-money";
 import {
   fetchBookRisk,
   useAdminResource,
   type MarketLimitFlag,
 } from "@/lib/admin-api";
 import { FLAG_LEVEL, FLAG_TONE, FlagChip } from "@/components/admin/risk-flags";
+import { UsdRateNote } from "@/components/admin/currency-switch";
 
 /**
  * The house's own position, across both desks.
@@ -36,9 +37,12 @@ import { FLAG_LEVEL, FLAG_TONE, FlagChip } from "@/components/admin/risk-flags";
  * Under it, the markets closing in on the "Maximum loss per market"
  * setting — the API only reports those once it knows the setting, so on
  * an older API that section simply isn't there.
+ *
+ * Amounts follow the desk's ₦/$ switch (useAdminMoney).
  */
 export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
   const risk = useAdminResource(fetchBookRisk, true, reloadKey);
+  const money = useAdminMoney();
 
   // A 403 is a non-admin, which the desks around this already explain;
   // don't stack a second refusal on top of theirs.
@@ -81,13 +85,13 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
     <>
       <section className="mt-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:grid-cols-3">
         <Stat
-          label="Money held"
-          value={formatNaira(openStakeKobo)}
-          note={`${openPositions} open position${openPositions === 1 ? "" : "s"} across ${openMarkets} market${openMarkets === 1 ? "" : "s"}`}
+          label="Money in play"
+          value={money.format(openStakeKobo)}
+          note={`${openPositions} open bet${openPositions === 1 ? "" : "s"} across ${openMarkets} market${openMarkets === 1 ? "" : "s"}`}
         />
         <Stat
           label={exposed ? "Worst case" : "Locked-in profit"}
-          value={formatNairaSigned(worstCaseKobo)}
+          value={money.formatSigned(worstCaseKobo)}
           valueClass={netLoss ? "text-no" : "text-yes"}
           note={
             exposed
@@ -98,7 +102,7 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
         {worstMarket ? (
           <Stat
             label="Biggest single risk"
-            value={formatNairaSigned(worstMarket.lossKobo)}
+            value={money.formatSigned(worstMarket.lossKobo)}
             valueClass="text-no"
             note={
               <Link
@@ -123,6 +127,7 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
             and the other side cheaper — until both sides pay for each other.
           </p>
         )}
+        <UsdRateNote className="sm:col-span-3" />
       </section>
       {limitFlags && (
         <MarketLimits flags={limitFlags} limitKobo={maxMarketExposureKobo} />
@@ -144,13 +149,14 @@ function MarketLimits({
   flags: MarketLimitFlag[];
   limitKobo?: number;
 }) {
+  const money = useAdminMoney();
   return (
     <section className="mt-3 rounded-xl border border-border bg-surface p-4 shadow-card">
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 className="text-base font-semibold">Markets near their limit</h2>
         {limitKobo !== undefined && (
           <p className="text-[13px] font-medium text-tertiary">
-            Maximum loss per market: {formatNaira(limitKobo)} ·{" "}
+            Maximum loss per market: {money.format(limitKobo)} ·{" "}
             <Link
               href="/admin/settings"
               className="hover:text-primary hover:underline"
@@ -178,6 +184,7 @@ function MarketLimits({
 }
 
 function LimitRow({ flag }: { flag: MarketLimitFlag }) {
+  const money = useAdminMoney();
   const tone = FLAG_TONE[FLAG_LEVEL[flag.level].tone];
   const pct = Math.round(flag.share * 100);
   const title = flag.eventTitle || flag.marketTitle;
@@ -209,8 +216,8 @@ function LimitRow({ flag }: { flag: MarketLimitFlag }) {
         />
       </div>
       <p className="mt-1.5 text-xs font-medium text-secondary">
-        {formatNairaCompact(flag.usedKobo / 100)} of{" "}
-        {formatNairaCompact(flag.limitKobo / 100)} used
+        {money.formatCompact(flag.usedKobo)} of{" "}
+        {money.formatCompact(flag.limitKobo)} used
         <span className="text-tertiary"> · {pct}%</span>
       </p>
     </li>
@@ -229,7 +236,7 @@ export function Stat({
   note: React.ReactNode;
 }) {
   return (
-    <div className="rounded-md border border-border bg-page px-3 py-2">
+    <div className="min-w-0 rounded-md border border-border bg-page px-3 py-2">
       <p className="text-xs font-medium text-secondary">{label}</p>
       <p className={`mt-0.5 text-xl font-semibold ${valueClass ?? ""}`}>{value}</p>
       <p className="mt-0.5 truncate text-[13px] font-medium text-tertiary">{note}</p>

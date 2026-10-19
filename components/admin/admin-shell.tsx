@@ -13,6 +13,7 @@ import {
 import { useAuth } from "@/components/auth/auth-context";
 import { setAdminKey, useAdminKey } from "@/lib/admin-key";
 import { AdminUnlock } from "./admin-unlock";
+import { CurrencySwitch } from "./currency-switch";
 
 const NAV = [
   { href: "/admin", label: "Local book", icon: Coins },
@@ -22,7 +23,9 @@ const NAV = [
 ] as const;
 
 /**
- * Admin chrome: sidebar on desktop, horizontal tab row on mobile.
+ * Admin chrome: sidebar on desktop, horizontal tab row on mobile. Both
+ * carry the "₦ | $" switch (CurrencySwitch) every amount on the desk
+ * follows.
  *
  * The way in is an access key (AdminUnlock — kept for this tab, sent on
  * every admin call) or, as before, an account with the central Clerk
@@ -107,6 +110,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             Admin
           </div>
         </div>
+        <div className="mb-3 flex flex-col gap-1.5 px-3">
+          <span className="text-xs font-medium text-secondary">Show amounts in</span>
+          <CurrencySwitch explainMissingRate />
+        </div>
         {nav}
         <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3">
           <div className="px-3">{identity}</div>
@@ -134,7 +141,10 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             Site
           </Link>
         </div>
-        {identity}
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0 pt-2">{identity}</div>
+          <CurrencySwitch align="end" />
+        </div>
         <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{nav}</nav>
       </div>
 

@@ -10,7 +10,6 @@ import {
   EnvelopeIcon as Mail,
   ArrowPathIcon as RefreshCw,
 } from "@heroicons/react/24/outline";
-import { CREDIT, formatNaira } from "@/lib/format";
 import { bookHref } from "@/lib/book";
 import { ApiError, isApiConfigured } from "@/lib/api-client";
 import {
@@ -23,16 +22,22 @@ import {
   voidMarket,
   type AlertTestResult,
   type Attention,
-  type FxQuote,
   type QueueEvent,
   type QueueMarket,
 } from "@/lib/admin-api";
-import { useNairaWallet } from "@/lib/naira-wallet";
+import {
+  publishAdminFx,
+  refreshAdminFx,
+  useAdminFx,
+  useAdminMoney,
+} from "@/lib/admin-money";
 import { BookRiskStrip } from "@/components/admin/book-risk";
-import { PnlCard } from "@/components/admin/pnl-card";
+import { BookOverview } from "@/components/admin/book-overview";
 
 /**
- * The Local (naira) book's operating desk. Two jobs:
+ * The Local (naira) book's operating desk. It opens on the owner's
+ * headline numbers (BookOverview: profit or loss, money staked, paid
+ * out, in play), then the open book's risk, then its two jobs:
  *
  *  - the FX rate, which nothing else can set and without which the
  *    whole book is inert (no rate → conversions 503 → nobody can fund)
@@ -48,17 +53,21 @@ import { PnlCard } from "@/components/admin/pnl-card";
  *
  * Settling pays out every open position on the market, so both actions
  * ask for confirmation and neither is undoable.
+ *
+ * Amounts follow the desk's naira/dollar switch (useAdminMoney).
  */
 export function LocalDesk() {
+  const money = useAdminMoney();
   const queue = useAdminResource(fetchSettlementQueue, true);
   const settlements = useAdminResource(fetchSettlements, true);
-  // The risk strip reads its own endpoint; settling here empties part
-  // of the book, so it has to re-read with the rest of the desk.
+  // The overview and the risk strip read their own endpoints; settling
+  // here empties part of the book, so they re-read with the rest of the desk.
   const [bookVersion, setBookVersion] = useState(0);
   const refresh = () => {
     queue.refresh();
     settlements.refresh();
     setBookVersion((v) => v + 1);
+    void refreshAdminFx();
   };
 
   if (!isApiConfigured()) {
@@ -105,9 +114,9 @@ export function LocalDesk() {
         </div>
       </div>
 
-      <BookRiskStrip reloadKey={bookVersion} />
+      <BookOverview reloadKey={bookVersion} />
 
-      <PnlCard reloadKey={bookVersion} />
+      <BookRiskStrip reloadKey={bookVersion} />
 
       <FxCard />
 
@@ -174,8 +183,8 @@ export function LocalDesk() {
                   {s.createdAt && ` · ${fmtDateTime(s.createdAt)}`}
                 </p>
               </div>
-              <p className="text-sm font-semibold text-yes">
-                {formatNaira(s.payoutTotalKobo)}
+              <p className="shrink-0 text-sm font-semibold text-yes">
+                {money.format(s.payoutTotalKobo)}
               </p>
             </li>
           ))}
@@ -254,15 +263,14 @@ function describeAlertResult(r: AlertTestResult): string {
 /* ---------- FX rate ---------- */
 
 function FxCard() {
-  // the public wallet endpoint carries the quote, and the desk needs no
-  // more privilege than a user to read it
-  const { fx } = useNairaWallet(true);
+  // the admin endpoint, not the user wallet's: a desk unlocked with an
+  // access key has no user session to read the wallet with
+  const { fx: current, status, error: loadError } = useAdminFx();
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
-  const [saved, setSaved] = useState<FxQuote | null>(null);
+  const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const current = saved ?? fx;
   const parsed = parseFloat(draft);
   const valid = Number.isFinite(parsed) && parsed >= 1;
 
@@ -270,8 +278,13 @@ function FxCard() {
     if (!valid || pending) return;
     setPending(true);
     setError(null);
+    setSaved(false);
     try {
-      setSaved(await setFxRate(parsed));
+      // show the new rate at once, then re-read it so every amount on
+      // the desk (the $ view included) moves to the rate the API holds
+      publishAdminFx(await setFxRate(parsed));
+      void refreshAdminFx();
+      setSaved(true);
       setDraft("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not set the rate");
@@ -281,13 +294,17 @@ function FxCard() {
   };
 
   return (
-    <section className="mt-6 rounded-xl border border-border bg-surface p-4 shadow-card">
+    <section
+      id="conversion-rate"
+      className="mt-6 scroll-mt-6 rounded-xl border border-border bg-surface p-4 shadow-card"
+    >
       <div className="flex flex-wrap items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold">Conversion rate</h2>
           <p className="mt-0.5 text-sm text-secondary">
-            The mid rate for dollar↔credit funding. Until one is set, nobody
-            can fund a credit balance.
+            How many naira one dollar buys, for funding credit balances. Until a
+            rate is set nobody can fund a balance, and the desk can&rsquo;t show
+            amounts in dollars.
           </p>
         </div>
         {current && (
@@ -299,16 +316,26 @@ function FxCard() {
 
       {current ? (
         <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Stat label="Mid" value={`${CREDIT}${current.mid.toFixed(2)}`} />
-          <Stat
-            label="Users buy credit at"
-            value={`${CREDIT}${current.usdToNgn.toFixed(2)}`}
-          />
-          <Stat
-            label="Users sell credit at"
-            value={`${CREDIT}${current.ngnToUsd.toFixed(2)}`}
-          />
+          <Stat label="Mid rate" value={`${nairaRate(current.mid)} per $1`} />
+          <Stat label="Users buy credit at" value={`${nairaRate(current.usdToNgn)} per $1`} />
+          <Stat label="Users cash out at" value={`${nairaRate(current.ngnToUsd)} per $1`} />
         </div>
+      ) : status === "idle" || status === "loading" ? (
+        <div className="mt-4 h-[62px] animate-pulse rounded-md bg-element-2" />
+      ) : status === "failed" ? (
+        <p className="mt-4 flex items-center gap-2 rounded-md bg-warning-tint px-3 py-2.5 text-sm font-semibold text-warning">
+          <AlertTriangle className="size-4 shrink-0" />
+          <span className="min-w-0">
+            Couldn&rsquo;t load the current rate{loadError ? ` (${loadError})` : ""}.{" "}
+            <button
+              type="button"
+              onClick={() => void refreshAdminFx()}
+              className="underline"
+            >
+              Try again
+            </button>
+          </span>
+        </p>
       ) : (
         <p className="mt-4 flex items-center gap-2 rounded-md bg-no-tint px-3 py-2.5 text-sm font-semibold text-no">
           <AlertTriangle className="size-4 shrink-0" />
@@ -321,7 +348,7 @@ function FxCard() {
           New mid rate
         </label>
         <div className="flex h-10 items-center gap-1 rounded-md border border-border bg-page px-3">
-          <span className="text-sm font-semibold text-tertiary">{CREDIT}</span>
+          <span className="text-sm font-semibold text-tertiary">₦</span>
           <input
             id="fx-rate"
             inputMode="decimal"
@@ -330,6 +357,7 @@ function FxCard() {
             onChange={(e) => {
               setDraft(e.target.value.replace(/[^0-9.]/g, "").slice(0, 10));
               setError(null);
+              setSaved(false);
             }}
             className="w-28 bg-transparent text-sm font-semibold outline-none placeholder:text-tertiary"
           />
@@ -338,7 +366,7 @@ function FxCard() {
         <button
           disabled={!valid || pending}
           onClick={() => void save()}
-          className="flex h-10 items-center gap-2 rounded-md bg-accent px-4 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
+          className="pressable flex h-10 items-center gap-2 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent transition-colors hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-accent"
         >
           {pending && <Loader2 className="size-4 animate-spin" />}
           Set rate
@@ -361,6 +389,11 @@ function FxCard() {
   );
 }
 
+/** 1532.5 → "₦1,532.50" — a rate, so always to the kobo. */
+function nairaRate(n: number): string {
+  return `₦${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
 /* ---------- settlement queue ---------- */
 
 const ATTENTION: Record<
@@ -376,7 +409,8 @@ const ATTENTION: Record<
     className: "bg-no-tint text-no",
   },
   cancelled: { label: "Cancelled — void", className: "bg-no-tint text-no" },
-  overdue: { label: "Overdue", className: "bg-accent/10 text-accent-ink" },
+  // caution, not the gold accent — gold is the brand and the buy action
+  overdue: { label: "Overdue", className: "bg-warning-tint text-warning" },
   bayse_unreachable: {
     label: "Bayse unreachable",
     className: "bg-element-2 text-secondary",
@@ -393,6 +427,7 @@ function QueueCard({
   onDone: () => void;
 }) {
   const flag = event.attention ? ATTENTION[event.attention] : null;
+  const money = useAdminMoney();
 
   return (
     <article className="rounded-xl border border-border bg-surface p-4 shadow-card">
@@ -424,8 +459,8 @@ function QueueCard({
           <p className="mt-0.5 text-[13px] font-medium text-tertiary">
             {event.openPositions} open position
             {event.openPositions === 1 ? "" : "s"} ·{" "}
-            {formatNaira(event.openStakeKobo)} staked · pays up to{" "}
-            {formatNaira(event.maxPayoutKobo)}
+            {money.format(event.openStakeKobo)} staked · pays up to{" "}
+            {money.format(event.maxPayoutKobo)}
             {event.resolutionDate && ` · resolves ${fmtDateTime(event.resolutionDate)}`}
             {event.attention === "overdue" && ` (over ${overdueHours}h ago)`}
           </p>
@@ -462,10 +497,11 @@ function MarketRow({
   const [pending, setPending] = useState<"settle" | "void" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<string | null>(null);
+  const money = useAdminMoney();
 
   const run = async (action: "settle" | "void") => {
     if (pending) return;
-    const stake = formatNaira(market.openStakeKobo);
+    const stake = money.format(market.openStakeKobo);
     const confirmed = window.confirm(
       action === "settle"
         ? `Settle "${market.marketTitle}" as ${
@@ -495,7 +531,7 @@ function MarketRow({
         `${action === "settle" ? "Settled" : "Voided"} ${
           res.positionsSettled ?? 0
         } position(s)${
-          res.payoutTotalKobo ? `, paid ${formatNaira(res.payoutTotalKobo)}` : ""
+          res.payoutTotalKobo ? `, paid ${money.format(res.payoutTotalKobo)}` : ""
         }`,
       );
       onDone();
@@ -517,8 +553,8 @@ function MarketRow({
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-semibold">{market.marketTitle}</p>
         <p className="mt-0.5 text-[13px] font-medium text-tertiary">
-          {market.openPositions} open · {formatNaira(market.openStakeKobo)} staked
-          · pays up to {formatNaira(market.maxPayoutKobo)}
+          {market.openPositions} open · {money.format(market.openStakeKobo)} staked
+          · pays up to {money.format(market.maxPayoutKobo)}
           {market.upstreamStatus && ` · ${market.upstreamStatus}`}
           {market.resolvedOutcomeLabel && ` → ${market.resolvedOutcomeLabel}`}
         </p>
@@ -577,7 +613,7 @@ function MarketRow({
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-border bg-page px-3 py-2">
+    <div className="min-w-0 rounded-md border border-border bg-page px-3 py-2">
       <p className="text-xs font-medium text-secondary">{label}</p>
       <p className="mt-0.5 text-base font-semibold">{value}</p>
     </div>
