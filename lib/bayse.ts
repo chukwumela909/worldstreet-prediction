@@ -92,6 +92,8 @@ interface BayseEvent {
   /** Either flag marks one of the automated short-cycle series. */
   displayCountdown?: boolean;
   countdownType?: string;
+  /** Set on a game's events: the game in /v1/pm/sports/games. */
+  sportGameId?: string;
   hashtags?: string[];
   markets?: BayseMarket[];
   /** Trades across the event. */
@@ -167,8 +169,45 @@ function toMarket(raw: BayseMarket, single: boolean, eventTitle: string): Market
   };
 }
 
+/* ---------- kickoff ---------- */
+
+/*
+ * Bayse keeps a game open until three hours after kickoff; our book
+ * stops it at kickoff (services/api trading/bayse.ts, which the API
+ * enforces on every order). The same two sources here: the games
+ * list's start time and the kickoff in the market rules, earliest wins.
+ */
+
+/** Keep in step with services/api/src/trading/bayse.ts. */
+const RULES_KICKOFF = /scheduled for ([A-Z][a-z]+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2} ?[AP]M) UTC/;
+
+/** Game id → kickoff (epoch ms). */
+export type GameStarts = Record<string, number>;
+
+/**
+ * When the event's game kicks off, epoch ms: undefined for an event
+ * that isn't a game, NaN for a game no source gives a time for.
+ */
+function kickoffMs(raw: BayseEvent, starts: GameStarts): number | undefined {
+  if (!raw.sportGameId) return undefined;
+  const times = [
+    starts[raw.sportGameId] ?? NaN,
+    ...(raw.markets ?? []).map((m) => {
+      const hit = RULES_KICKOFF.exec(m.rules ?? "");
+      return hit ? Date.parse(`${hit[1]} ${hit[2]} UTC`) : NaN;
+    }),
+  ].filter((t) => !Number.isNaN(t));
+  return times.length > 0 ? Math.min(...times) : NaN;
+}
+
+/** A game that has kicked off — no longer bought here, so off the boards. */
+function hasKickedOff(raw: BayseEvent, starts: GameStarts): boolean {
+  const kickoff = kickoffMs(raw, starts);
+  return kickoff !== undefined && !Number.isNaN(kickoff) && Date.now() >= kickoff;
+}
+
 /** Returns null when the event has no open market with usable prices. */
-export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
+export function toBayseMarketEvent(raw: BayseEvent, starts: GameStarts = {}): MarketEvent | null {
   const single = raw.type === "SINGLE_MARKET";
   const markets = (raw.markets ?? [])
     .filter((m) => (m.status ?? "open") === "open")
@@ -183,6 +222,15 @@ export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
     ...(raw.category ? [titleCase(raw.category)] : []),
     ...(raw.hashtags ?? []).filter((h) => h.toLowerCase() !== "general"),
   ];
+  // a game closes at kickoff, not at Bayse's closingDate three hours on
+  const kickoff = kickoffMs(raw, starts);
+  const bayseCloses = raw.closingDate || raw.resolutionDate || undefined;
+  const closesAt =
+    kickoff !== undefined &&
+    !Number.isNaN(kickoff) &&
+    (!bayseCloses || kickoff < Date.parse(bayseCloses))
+      ? new Date(kickoff).toISOString()
+      : bayseCloses;
 
   return {
     id: raw.id,
@@ -197,7 +245,9 @@ export function toBayseMarketEvent(raw: BayseEvent): MarketEvent | null {
     tags: tags.length > 0 ? tags.slice(0, 4) : undefined,
     volume: String(raw.totalVolume ?? 0),
     endDate: (raw.closingDate || raw.resolutionDate || "").slice(0, 10),
-    closesAt: raw.closingDate || raw.resolutionDate || undefined,
+    closesAt,
+    // a game with no stated kickoff: the API won't take bets on it
+    ...(kickoff !== undefined && Number.isNaN(kickoff) && { tradingOpen: false }),
     countdown: Boolean(raw.displayCountdown || raw.countdownType) || undefined,
     markets,
     source: "bayse",
@@ -244,15 +294,48 @@ async function relayFetch<T>(
   return res.json();
 }
 
+const GAMES_REVALIDATE_SECONDS = 300;
+const MAX_GAME_PAGES = 10;
+
+/**
+ * Every listed game's kickoff — Relay's games list, ~80 games over a
+ * couple of pages. Kickoffs rarely move, so it's kept five minutes.
+ */
+const fetchGameStarts = unstable_cache(
+  async (): Promise<GameStarts> => {
+    const starts: GameStarts = {};
+    for (let page = 1; page <= MAX_GAME_PAGES; page++) {
+      const res = await relayFetch<{
+        games?: { id?: string; startDate?: string }[];
+        pagination?: { lastPage?: number };
+      }>("/v1/pm/sports/games", { page });
+      for (const g of res.games ?? []) {
+        const at = Date.parse(g.startDate ?? "");
+        if (g.id && !Number.isNaN(at)) starts[g.id] = at;
+      }
+      const last = res.pagination?.lastPage;
+      if (typeof last !== "number" || page >= last) break;
+    }
+    return starts;
+  },
+  ["bayse-game-starts"],
+  { revalidate: GAMES_REVALIDATE_SECONDS, tags: ["bayse"] },
+);
+
+/** The games list, or none when it's down — the rules text still gives most kickoffs. */
+const getGameStarts = (): Promise<GameStarts> => fetchGameStarts().catch(() => ({}));
+
 /**
  * Open Bayse events in the API's own (trending-ish) order, normalized
  * for the UI. Relay caps pages at 20, so two pages are fetched to fill
  * the grid. Cached (normalized output only) like the Polymarket layer.
+ * Games that have kicked off are left out: they no longer take bets here.
  */
 export const getBayseEvents = unstable_cache(
   async (): Promise<MarketEvent[]> => {
-    const pages = await Promise.all(
-      [1, 2].map((page) =>
+    const [starts, ...pages] = await Promise.all([
+      getGameStarts(),
+      ...[1, 2].map((page) =>
         relayFetch<{ events?: BayseEvent[] }>("/v1/pm/events", {
           page,
           size: 20,
@@ -260,10 +343,11 @@ export const getBayseEvents = unstable_cache(
           currency: "NGN",
         }),
       ),
-    );
+    ]);
     return pages
       .flatMap((p) => p.events ?? [])
-      .map(toBayseMarketEvent)
+      .filter((raw) => !hasKickedOff(raw, starts))
+      .map((raw) => toBayseMarketEvent(raw, starts))
       .filter((e): e is MarketEvent => e !== null);
   },
   ["bayse-events"],
@@ -300,19 +384,25 @@ export const getBayseEventsPage = unstable_cache(
     if (!Number.isInteger(page) || page < 1 || page > BAYSE_MAX_PAGE) {
       throw new RangeError(`Bayse page out of range: ${page}`);
     }
-    const raw = await relayFetch<BayseEventsResponse>("/v1/pm/events", {
-      page,
-      size: BAYSE_PAGE_SIZE,
-      status: "open",
-      currency: "NGN",
-    });
+    const [starts, raw] = await Promise.all([
+      getGameStarts(),
+      relayFetch<BayseEventsResponse>("/v1/pm/events", {
+        page,
+        size: BAYSE_PAGE_SIZE,
+        status: "open",
+        currency: "NGN",
+      }),
+    ]);
     const rows = raw.events ?? [];
     const lastPage = raw.pagination?.lastPage;
     const hasMore =
       page < BAYSE_MAX_PAGE &&
       (typeof lastPage === "number" ? page < lastPage : rows.length >= BAYSE_PAGE_SIZE);
     return {
-      events: rows.map(toBayseMarketEvent).filter((e): e is MarketEvent => e !== null),
+      events: rows
+        .filter((r) => !hasKickedOff(r, starts))
+        .map((r) => toBayseMarketEvent(r, starts))
+        .filter((e): e is MarketEvent => e !== null),
       hasMore,
     };
   },
@@ -324,6 +414,7 @@ export const getBayseEventsPage = unstable_cache(
 export const getBayseEventBySlug = unstable_cache(
   async (slug: string): Promise<MarketEvent | null> => {
     let raw: BayseEvent;
+    const starts = getGameStarts();
     try {
       raw = await relayFetch<BayseEvent>(
         `/v1/pm/events/slug/${encodeURIComponent(slug)}`,
@@ -333,7 +424,7 @@ export const getBayseEventBySlug = unstable_cache(
       if (err instanceof BayseApiError && err.status === 404) return null;
       throw err;
     }
-    return toBayseMarketEvent(raw);
+    return toBayseMarketEvent(raw, await starts);
   },
   ["bayse-event-by-slug"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
@@ -348,6 +439,7 @@ export const getBayseEventBySlug = unstable_cache(
 export const getBayseEventLive = unstable_cache(
   async (slug: string): Promise<MarketEvent | null> => {
     let raw: BayseEvent;
+    const starts = getGameStarts();
     try {
       raw = await relayFetch<BayseEvent>(
         `/v1/pm/events/slug/${encodeURIComponent(slug)}`,
@@ -357,7 +449,7 @@ export const getBayseEventLive = unstable_cache(
       if (err instanceof BayseApiError && err.status === 404) return null;
       throw err;
     }
-    return toBayseMarketEvent(raw);
+    return toBayseMarketEvent(raw, await starts);
   },
   ["bayse-event-live"],
   { revalidate: LIVE_REVALIDATE_SECONDS, tags: ["bayse"] },

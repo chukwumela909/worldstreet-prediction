@@ -61,10 +61,17 @@ export interface TradableEvent {
   /** Bayse's automated short-cycle series; never true for our own. */
   countdown: boolean;
   markets: TradableMarket[];
+  /**
+   * A Bayse game's kickoff, ISO — betting stops there. Absent when the
+   * event isn't a game; null when it is one with no known kickoff, which
+   * the trade route refuses rather than guess (bayse.ts kickoffOf).
+   */
+  kickoff?: string | null;
 }
 
 function fromBayse(event: BayseEventLive): TradableEvent {
   return {
+    ...(event.kickoff !== undefined && { kickoff: event.kickoff }),
     origin: "bayse",
     id: event.id,
     slug: event.slug,

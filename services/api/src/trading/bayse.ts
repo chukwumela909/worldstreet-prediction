@@ -2,7 +2,8 @@ import { ApiError } from "../errors.js";
 
 /**
  * Backend Bayse Relay client — the pricing and resolution oracle for
- * the Local markets book. Every call here is FRESH (no caching): a
+ * the Local markets book. Every event read here is FRESH (no caching;
+ * only the games list behind kickoff times is kept a few minutes): a
  * stale price on the execution path is money out of the house wallet,
  * unlike the web app's display fetches (lib/bayse.ts) which cache for
  * a minute. Public endpoints, no auth.
@@ -40,6 +41,12 @@ export interface BayseEventLive {
   /** True on the automated short-cycle series (15-min crypto etc.). */
   countdown: boolean;
   markets: BayseMarketLive[];
+  /**
+   * Kickoff of the game the event is about, ISO. Absent when it isn't a
+   * game (a future, a politics market); null when it is one but neither
+   * source gave a time. See kickoffOf.
+   */
+  kickoff?: string | null;
 }
 
 interface RawMarket {
@@ -54,6 +61,8 @@ interface RawMarket {
   outcome2Price?: number;
   resolvedOutcome?: string;
   resolvedOutcomeId?: string;
+  /** "…originally scheduled for October 20, 2026 at 7:00 PM UTC…" on a game. */
+  rules?: string;
 }
 
 interface RawEvent {
@@ -65,7 +74,14 @@ interface RawEvent {
   resolutionDate?: string;
   displayCountdown?: boolean;
   countdownType?: string;
+  /** Set on a game's events (1X2, totals, …): the game in /v1/pm/sports/games. */
+  sportGameId?: string;
   markets?: RawMarket[];
+}
+
+interface RawGamesPage {
+  games?: { id?: string; startDate?: string }[];
+  pagination?: { lastPage?: number };
 }
 
 function toLive(raw: RawEvent): BayseEventLive {
@@ -121,12 +137,87 @@ async function relayGet<T>(path: string): Promise<T> {
   return (await res.json()) as T;
 }
 
-/** Fresh event state by id — prices, statuses, resolution. */
+/** Fresh event state by id — prices, statuses, resolution, kickoff. */
 export async function fetchBayseEvent(eventId: string): Promise<BayseEventLive> {
   const raw = await relayGet<RawEvent>(
     `/v1/pm/events/${encodeURIComponent(eventId)}`,
   );
-  return toLive(raw);
+  const live = toLive(raw);
+  const kickoff = await kickoffOf(raw);
+  return kickoff === undefined ? live : { ...live, kickoff };
+}
+
+/* ---------------- kickoff ---------------- */
+
+/*
+ * Bayse keeps a game's markets open until three hours after kickoff, so
+ * its own closingDate lets bets in all through the match and past full
+ * time — when anyone watching knows more than the price we copy. The
+ * book stops a game at kickoff instead (routes/trades.ts), as the
+ * international book already does with Polymarket's gameStartTime.
+ *
+ * Two sources, which agreed on every open game when this was written:
+ * the start time in Bayse's games list (/v1/pm/sports/games, ~80 games
+ * over two pages), and the kickoff written into each market's rules.
+ * The earlier one wins — closing early only costs volume.
+ */
+
+/** Keep in step with lib/bayse.ts on the web. */
+const RULES_KICKOFF = /scheduled for ([A-Z][a-z]+ \d{1,2}, \d{4}) at (\d{1,2}:\d{2} ?[AP]M) UTC/;
+
+/** Kickoff from a market's rules text, epoch ms; NaN when it states none. */
+export function kickoffFromRules(rules: string): number {
+  const m = RULES_KICKOFF.exec(rules);
+  return m ? Date.parse(`${m[1]} ${m[2]} UTC`) : NaN;
+}
+
+const GAMES_TTL_MS = 5 * 60_000;
+/** After a failed refresh, how soon to try again (keeping what we had). */
+const GAMES_RETRY_MS = 30_000;
+const MAX_GAME_PAGES = 10;
+
+let games: { starts: Map<string, number>; at: number; ok: boolean } | null = null;
+let gamesLoading: Promise<Map<string, number>> | null = null;
+
+/** Game id → kickoff (epoch ms), from Bayse's games list, cached per process. */
+async function gameStarts(): Promise<Map<string, number>> {
+  if (games && Date.now() - games.at < (games.ok ? GAMES_TTL_MS : GAMES_RETRY_MS)) {
+    return games.starts;
+  }
+  gamesLoading ??= (async () => {
+    const starts = new Map<string, number>();
+    let ok = true;
+    try {
+      for (let page = 1; page <= MAX_GAME_PAGES; page++) {
+        const res = await relayGet<RawGamesPage>(`/v1/pm/sports/games?page=${page}`);
+        for (const g of res.games ?? []) {
+          const at = Date.parse(g.startDate ?? "");
+          if (g.id && !Number.isNaN(at)) starts.set(g.id, at);
+        }
+        const last = res.pagination?.lastPage;
+        if (typeof last !== "number" || page >= last) break;
+      }
+    } catch {
+      ok = false; // the rules text still stands in
+    }
+    games = { starts: ok ? starts : (games?.starts ?? starts), at: Date.now(), ok };
+    return games.starts;
+  })().finally(() => {
+    gamesLoading = null;
+  });
+  return gamesLoading;
+}
+
+/**
+ * When the event's game kicks off, ISO: undefined for an event that
+ * isn't a game, null for a game no source gives a time for.
+ */
+async function kickoffOf(raw: RawEvent): Promise<string | null | undefined> {
+  if (!raw.sportGameId) return undefined;
+  const listed = (await gameStarts()).get(raw.sportGameId) ?? NaN;
+  const times = [listed, ...(raw.markets ?? []).map((m) => kickoffFromRules(m.rules ?? ""))]
+    .filter((t) => !Number.isNaN(t));
+  return times.length > 0 ? new Date(Math.min(...times)).toISOString() : null;
 }
 
 /**

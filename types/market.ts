@@ -141,8 +141,9 @@ export interface MarketEvent {
   resolutionSource?: string;
   /**
    * False when the desk has closed the book but the result isn't in
-   * yet (Worldstreet events). Bayse events leave it unset and are
-   * gated on `closesAt` alone.
+   * yet (Worldstreet events), or on a Bayse game whose kickoff no source
+   * states — the API refuses those. Other Bayse events leave it unset
+   * and are gated on `closesAt` alone (a game's is its kickoff).
    */
   tradingOpen?: boolean;
   /** Sports game state — present on game events (two teams, a kickoff). */

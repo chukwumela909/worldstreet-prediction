@@ -39,7 +39,8 @@ import { Position, type IPosition } from "../trading/models.js";
  *
  * Countdown markets additionally close to new trades a cut-off before
  * their closing time, since a nearly-decided 15-minute market is pure
- * adverse selection.
+ * adverse selection. A Bayse game closes at kickoff (409 GAME_STARTED),
+ * not at Bayse's own closing time three hours later.
  *
  * Money integrity: a market fills one order at a time, from the
  * loss-limit check to the position write (trading/market-lock.ts), so
@@ -155,6 +156,20 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
   const market = requireMarket(event, body.marketId);
   if (market.status !== "open") {
     throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
+  }
+
+  // A game stops taking bets at kickoff: in play, anyone watching knows
+  // more than the price we copy. One whose kickoff no source states is
+  // refused rather than guessed (trading/bayse.ts).
+  if (event.kickoff === null) {
+    throw new ApiError(
+      409,
+      "We can't confirm when this game kicks off, so betting on it is paused",
+      "GAME_START_UNKNOWN",
+    );
+  }
+  if (event.kickoff && Date.now() >= Date.parse(event.kickoff)) {
+    throw new ApiError(409, "This game has started — betting on it is closed", "GAME_STARTED");
   }
 
   const closingMs = event.closingDate ? Date.parse(event.closingDate) : NaN;
