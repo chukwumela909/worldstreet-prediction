@@ -231,6 +231,30 @@ export const SettingsChange: Model<ISettingsChange> =
   (mongoose.models.SettingsChange as Model<ISettingsChange>) ??
   mongoose.model<ISettingsChange>("SettingsChange", settingsChangeSchema);
 
+/* ------------------------------------------------------------------ */
+/* Per-market order lock                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One row per market that has taken an order: held while an order is
+ * checked against the market's loss limit and filled, so two orders
+ * can't both pass the check (trading/market-lock.ts). `expiresAt` frees
+ * a lock whose holder died; a free lock reads as expired.
+ */
+const marketLockSchema = new Schema({
+  marketId: { type: String, required: true, unique: true },
+  token: { type: String },
+  expiresAt: { type: Date, required: true },
+});
+
+export type IMarketLock = InferSchemaType<typeof marketLockSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const MarketLock: Model<IMarketLock> =
+  (mongoose.models.MarketLock as Model<IMarketLock>) ??
+  mongoose.model<IMarketLock>("MarketLock", marketLockSchema);
+
 export const SETTLEMENT_SOURCES = [
   "bayse-auto",
   "worldstreet-auto",
@@ -409,6 +433,7 @@ export async function ensureTradingIndexes(): Promise<void> {
     Position.init(),
     FxRate.init(),
     BookSettingsDoc.init(),
+    MarketLock.init(),
     Settlement.init(),
     WorldstreetEvent.init(),
     WorldstreetMarket.init(),

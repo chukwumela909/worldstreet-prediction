@@ -1,4 +1,4 @@
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { authenticate } from "../auth.js";
@@ -10,10 +10,12 @@ import { baseMarginBps, quotedPriceKobo, risesFor } from "../trading/margin.js";
 import {
   creditNaira,
   debitNaira,
+  findExistingEntry,
   getNairaBalanceKobo,
   PAYOUT_PER_SHARE_KOBO,
 } from "../trading/ledger.js";
 import { eventOrMarketId, outcomeId } from "../trading/ids.js";
+import { withMarketLock } from "../trading/market-lock.js";
 import { Position, type IPosition } from "../trading/models.js";
 
 /**
@@ -38,6 +40,13 @@ import { Position, type IPosition } from "../trading/models.js";
  * Countdown markets additionally close to new trades a cut-off before
  * their closing time, since a nearly-decided 15-minute market is pure
  * adverse selection.
+ *
+ * Money integrity: a market fills one order at a time, from the
+ * loss-limit check to the position write (trading/market-lock.ts), so
+ * orders arriving together can't overrun the limit. If the position
+ * write fails, the stake is returned; a retry of that order is refused
+ * with 409 ORDER_REFUNDED instead of filling with no stake, and the bet
+ * slip starts a fresh order.
  *
  * Every limit here — stake bounds, the price tolerance, the countdown
  * cut-off, the per-market exposure cap — and the international on/off
@@ -67,178 +76,7 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
     },
     async (request) => {
       const { authUserId } = await authenticate(request);
-      const body = request.body;
-
-      // a retried request returns the original position, no new stake
-      const existing = await Position.findOne({
-        idempotencyKey: `${authUserId}:${body.idempotencyKey}`,
-      });
-      if (existing) {
-        return {
-          success: true,
-          data: { position: serializePosition(existing), alreadyProcessed: true },
-        };
-      }
-
-      const settings = await getBookSettings();
-      const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-US")}`;
-
-      // the international book opens only on the desk's switch — checked
-      // by id shape before anything is fetched from Polymarket
-      if (isPolymarketId(body.eventId) && !settings.internationalTrading) {
-        throw new ApiError(
-          409,
-          "International markets aren't open for betting yet",
-          "INTERNATIONAL_CLOSED",
-        );
-      }
-      if (body.stakeKobo < settings.minStakeKobo) {
-        throw new ApiError(
-          400,
-          `Minimum stake is ${naira(settings.minStakeKobo)}`,
-          "STAKE_TOO_SMALL",
-        );
-      }
-      if (body.stakeKobo > settings.maxStakeKobo) {
-        throw new ApiError(
-          400,
-          `Maximum stake is ${naira(settings.maxStakeKobo)}`,
-          "STAKE_TOO_LARGE",
-        );
-      }
-
-      // fresh state at source — never the cached display feed
-      const event = await fetchTradableEvent(body.eventId);
-      if (event.status !== "open") {
-        throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
-      }
-      const market = requireMarket(event, body.marketId);
-      if (market.status !== "open") {
-        throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
-      }
-
-      const closingMs = event.closingDate ? Date.parse(event.closingDate) : NaN;
-      if (!Number.isNaN(closingMs)) {
-        const cutoffMs =
-          (event.countdown ? settings.countdownCutoffSeconds : 0) * 1000;
-        if (Date.now() >= closingMs - cutoffMs) {
-          throw new ApiError(
-            409,
-            event.countdown
-              ? "This market is too close to closing to trade"
-              : "This market has closed",
-            "MARKET_CLOSING",
-          );
-        }
-      }
-
-      const outcome = market.outcomes.find((o) => o.id === body.outcomeId);
-      if (!outcome) {
-        throw new ApiError(404, "Outcome not found on this market", "OUTCOME_NOT_FOUND");
-      }
-
-      // the source's price plus the house margin: the book's base and any
-      // automatic rise on a side the house stands to lose on (margin.ts)
-      const rise = (await risesFor([market.id], settings)).get(market.id)?.get(outcome.id) ?? 0;
-      const freshPriceKobo = quotedPriceKobo(
-        outcome.priceKobo,
-        baseMarginBps(event.origin, settings),
-        rise,
-      );
-      if (freshPriceKobo < 1 || freshPriceKobo > 9_999) {
-        throw new ApiError(409, "This outcome is not currently priceable", "MARKET_CLOSED");
-      }
-      if (Math.abs(freshPriceKobo - body.expectedPriceKobo) > settings.priceToleranceKobo) {
-        throw new ApiError(409, "The price moved — confirm the new price", "PRICE_MOVED", {
-          freshPriceKobo,
-        });
-      }
-
-      // house-exposure cap per market: what settlement could owe across
-      // all open positions, beyond the stakes already collected
-      const [agg] = await Position.aggregate<{ exposure: number }>([
-        { $match: { marketId: body.marketId, status: "open" } },
-        {
-          $group: {
-            _id: null,
-            exposure: { $sum: { $subtract: ["$potentialPayoutKobo", "$stakeKobo"] } },
-          },
-        },
-      ]);
-      const shares = body.stakeKobo / freshPriceKobo;
-      const potentialPayoutKobo = Math.floor(shares * PAYOUT_PER_SHARE_KOBO);
-      const newExposure = potentialPayoutKobo - body.stakeKobo;
-      if ((agg?.exposure ?? 0) + newExposure > settings.maxMarketExposureKobo) {
-        throw new ApiError(
-          409,
-          "This market has reached its trading limit for now",
-          "MARKET_LIMIT_REACHED",
-        );
-      }
-
-      const idempotencyKey = `${authUserId}:${body.idempotencyKey}`;
-      const debit = await debitNaira({
-        authUserId,
-        amountKobo: body.stakeKobo,
-        type: "trade_stake",
-        refKey: `trade:${idempotencyKey}`,
-        description: `${outcome.label} — ${event.title}`,
-        metadata: { eventId: event.id, marketId: market.id, outcomeId: outcome.id },
-      });
-
-      try {
-        const position = await Position.create({
-          authUserId,
-          eventId: event.id,
-          marketId: market.id,
-          outcomeId: outcome.id,
-          outcomeLabel: outcome.label,
-          eventSlug: event.slug,
-          eventTitle: event.title,
-          marketTitle: market.title,
-          stakeKobo: body.stakeKobo,
-          priceKobo: freshPriceKobo,
-          shares,
-          potentialPayoutKobo,
-          status: "open",
-          source: event.origin === "polymarket" ? "polymarket" : "local",
-          idempotencyKey,
-        });
-        return {
-          success: true,
-          data: {
-            position: serializePosition(position),
-            balanceKobo: debit.balanceAfterKobo,
-          },
-        };
-      } catch (err) {
-        // position write failed after the stake was taken — refund
-        const dup =
-          err && typeof err === "object" && "code" in err && err.code === 11000;
-        if (dup) {
-          // concurrent retry created it first; the stake refKey deduped too
-          const winner = await Position.findOne({ idempotencyKey });
-          if (winner) {
-            return {
-              success: true,
-              data: { position: serializePosition(winner), alreadyProcessed: true },
-            };
-          }
-        }
-        await creditNaira({
-          authUserId,
-          amountKobo: body.stakeKobo,
-          type: "refund",
-          refKey: `trade:${idempotencyKey}:reversal`,
-          description: "Trade failed — stake returned",
-        }).catch((repairErr) =>
-          request.log.error(
-            { err: repairErr, idempotencyKey },
-            "trade compensation failed — manual repair needed",
-          ),
-        );
-        throw err;
-      }
+      return placeOrder(authUserId, request.body, request.log);
     },
   );
 
@@ -258,6 +96,205 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
     };
   });
 };
+
+export type TradeBody = z.infer<typeof tradeBody>;
+
+/**
+ * One order for a signed-in user — all of POST /trades after sign-in,
+ * exported so the smoke tests can drive it without Clerk.
+ */
+export async function placeOrder(authUserId: string, body: TradeBody, log: FastifyBaseLogger) {
+  const idempotencyKey = `${authUserId}:${body.idempotencyKey}`;
+  const stakeRef = `trade:${idempotencyKey}`;
+  /** A retried request returns the original position, no new stake. */
+  const alreadyPlaced = async () => {
+    const existing = await Position.findOne({ idempotencyKey });
+    return existing
+      ? {
+          success: true,
+          data: { position: serializePosition(existing), alreadyProcessed: true },
+        }
+      : null;
+  };
+
+  const placed = await alreadyPlaced();
+  if (placed) return placed;
+
+  const settings = await getBookSettings();
+  const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-US")}`;
+
+  // the international book opens only on the desk's switch — checked
+  // by id shape before anything is fetched from Polymarket
+  if (isPolymarketId(body.eventId) && !settings.internationalTrading) {
+    throw new ApiError(
+      409,
+      "International markets aren't open for betting yet",
+      "INTERNATIONAL_CLOSED",
+    );
+  }
+  if (body.stakeKobo < settings.minStakeKobo) {
+    throw new ApiError(
+      400,
+      `Minimum stake is ${naira(settings.minStakeKobo)}`,
+      "STAKE_TOO_SMALL",
+    );
+  }
+  if (body.stakeKobo > settings.maxStakeKobo) {
+    throw new ApiError(
+      400,
+      `Maximum stake is ${naira(settings.maxStakeKobo)}`,
+      "STAKE_TOO_LARGE",
+    );
+  }
+
+  // fresh state at source — never the cached display feed
+  const event = await fetchTradableEvent(body.eventId);
+  if (event.status !== "open") {
+    throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
+  }
+  const market = requireMarket(event, body.marketId);
+  if (market.status !== "open") {
+    throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
+  }
+
+  const closingMs = event.closingDate ? Date.parse(event.closingDate) : NaN;
+  if (!Number.isNaN(closingMs)) {
+    const cutoffMs =
+      (event.countdown ? settings.countdownCutoffSeconds : 0) * 1000;
+    if (Date.now() >= closingMs - cutoffMs) {
+      throw new ApiError(
+        409,
+        event.countdown
+          ? "This market is too close to closing to trade"
+          : "This market has closed",
+        "MARKET_CLOSING",
+      );
+    }
+  }
+
+  const outcome = market.outcomes.find((o) => o.id === body.outcomeId);
+  if (!outcome) {
+    throw new ApiError(404, "Outcome not found on this market", "OUTCOME_NOT_FOUND");
+  }
+
+  // the source's price plus the house margin: the book's base and any
+  // automatic rise on a side the house stands to lose on (margin.ts)
+  const rise = (await risesFor([market.id], settings)).get(market.id)?.get(outcome.id) ?? 0;
+  const freshPriceKobo = quotedPriceKobo(
+    outcome.priceKobo,
+    baseMarginBps(event.origin, settings),
+    rise,
+  );
+  if (freshPriceKobo < 1 || freshPriceKobo > 9_999) {
+    throw new ApiError(409, "This outcome is not currently priceable", "MARKET_CLOSED");
+  }
+  if (Math.abs(freshPriceKobo - body.expectedPriceKobo) > settings.priceToleranceKobo) {
+    throw new ApiError(409, "The price moved — confirm the new price", "PRICE_MOVED", {
+      freshPriceKobo,
+    });
+  }
+
+  const shares = body.stakeKobo / freshPriceKobo;
+  const potentialPayoutKobo = Math.floor(shares * PAYOUT_PER_SHARE_KOBO);
+  const newExposure = potentialPayoutKobo - body.stakeKobo;
+
+  // From the loss-limit check to the fill, one order at a time on this
+  // market — checked together, two orders could each pass and between
+  // them go past the limit (trading/market-lock.ts).
+  return withMarketLock(market.id, async () => {
+    // the same order may have filled while this one waited for the lock
+    const filled = await alreadyPlaced();
+    if (filled) return filled;
+
+    // house-exposure cap per market: what settlement could owe across
+    // all open positions, beyond the stakes already collected
+    const [agg] = await Position.aggregate<{ exposure: number }>([
+      { $match: { marketId: market.id, status: "open" } },
+      {
+        $group: {
+          _id: null,
+          exposure: { $sum: { $subtract: ["$potentialPayoutKobo", "$stakeKobo"] } },
+        },
+      },
+    ]);
+    if ((agg?.exposure ?? 0) + newExposure > settings.maxMarketExposureKobo) {
+      throw new ApiError(
+        409,
+        "This market has reached its trading limit for now",
+        "MARKET_LIMIT_REACHED",
+      );
+    }
+
+    const debit = await debitNaira({
+      authUserId,
+      amountKobo: body.stakeKobo,
+      type: "trade_stake",
+      refKey: stakeRef,
+      description: `${outcome.label} — ${event.title}`,
+      metadata: { eventId: event.id, marketId: market.id, outcomeId: outcome.id },
+    });
+
+    // A retry of an order that failed once: its position write failed and
+    // the stake was returned (the reversal below), so the debit above found
+    // that first charge and took nothing now. Filling it would be a bet
+    // with no stake — refuse it, and the bet slip starts a fresh order.
+    if (await findExistingEntry(`${stakeRef}:reversal`)) {
+      throw new ApiError(
+        409,
+        "That bet didn't go through and your stake was returned — place it again",
+        "ORDER_REFUNDED",
+      );
+    }
+
+    try {
+      const position = await Position.create({
+        authUserId,
+        eventId: event.id,
+        marketId: market.id,
+        outcomeId: outcome.id,
+        outcomeLabel: outcome.label,
+        eventSlug: event.slug,
+        eventTitle: event.title,
+        marketTitle: market.title,
+        stakeKobo: body.stakeKobo,
+        priceKobo: freshPriceKobo,
+        shares,
+        potentialPayoutKobo,
+        status: "open",
+        source: event.origin === "polymarket" ? "polymarket" : "local",
+        idempotencyKey,
+      });
+      return {
+        success: true,
+        data: {
+          position: serializePosition(position),
+          balanceKobo: debit.balanceAfterKobo,
+        },
+      };
+    } catch (err) {
+      // position write failed after the stake was taken — refund
+      const dup = err && typeof err === "object" && "code" in err && err.code === 11000;
+      if (dup) {
+        // concurrent retry created it first; the stake refKey deduped too
+        const winner = await alreadyPlaced();
+        if (winner) return winner;
+      }
+      await creditNaira({
+        authUserId,
+        amountKobo: body.stakeKobo,
+        type: "refund",
+        refKey: `${stakeRef}:reversal`,
+        description: "Trade failed — stake returned",
+      }).catch((repairErr) =>
+        log.error(
+          { err: repairErr, idempotencyKey },
+          "trade compensation failed — manual repair needed",
+        ),
+      );
+      throw err;
+    }
+  });
+}
 
 function serializePosition(p: IPosition & { createdAt?: Date | null }) {
   return {

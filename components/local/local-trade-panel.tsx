@@ -222,7 +222,8 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   // One key per (order, nonce): stable while the user is looking at the
   // same order — so a re-confirm or a retry is idempotent — and new the
   // moment any part of the order changes.
-  const orderKey = `${tradeNonce}:${market.id}:${side}:${stakeKobo}`;
+  const keyFor = (nonce: string) => `${nonce}:${market.id}:${side}:${stakeKobo}`;
+  const orderKey = keyFor(tradeNonce);
   const failure = attempt?.orderKey === orderKey ? attempt : null;
 
   // an international market while the API's switch is off is shown, not
@@ -308,7 +309,21 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
       setStakeText("");
       setTradeNonce(newIdempotencyKey().slice(0, 8));
     } catch (err) {
-      setAttempt({ orderKey, ...describeFailure(err) });
+      if (err instanceof ApiError && err.code === "ORDER_REFUNDED") {
+        // this order failed once and its stake came back — the API won't
+        // fill it under this key again, so the next press is a new order
+        const nonce = newIdempotencyKey().slice(0, 8);
+        setTradeNonce(nonce);
+        void refreshNairaWallet();
+        setAttempt({
+          orderKey: keyFor(nonce),
+          error: "That bet didn't go through and your stake was returned. Press again to place it.",
+          confirmPriceKobo: null,
+          shortfallKobo: null,
+        });
+      } else {
+        setAttempt({ orderKey, ...describeFailure(err) });
+      }
     } finally {
       setPending(false);
     }
