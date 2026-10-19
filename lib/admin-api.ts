@@ -229,6 +229,12 @@ export interface PeriodStats {
   conversions?: number;
   /** profitKobo + conversionEarningsKobo — everything the book made. */
   totalEarnedKobo?: number;
+  /** Stakes kept from bets that lost — the platform's betting income. */
+  lostStakesKobo?: number;
+  /** What winners won on top of their own stake back — the platform's betting cost. */
+  winningsPaidKobo?: number;
+  /** lostStakesKobo + conversionEarningsKobo; net = this − winningsPaidKobo. */
+  platformMadeKobo?: number;
 }
 
 export interface AdminOverview {

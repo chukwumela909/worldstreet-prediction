@@ -116,14 +116,27 @@ export function BookOverview({ reloadKey = 0 }: { reloadKey?: number }) {
         </div>
       </div>
 
-      {p.totalEarnedKobo !== undefined && (
-        <TotalEarned
-          totalKobo={p.totalEarnedKobo}
-          bettingKobo={p.profitKobo}
-          conversionKobo={p.conversionEarningsKobo ?? 0}
-          conversions={p.conversions ?? 0}
+      {p.platformMadeKobo !== undefined &&
+      p.winningsPaidKobo !== undefined &&
+      p.totalEarnedKobo !== undefined ? (
+        <PlatformResult
+          madeKobo={p.platformMadeKobo}
+          keptKobo={p.lostStakesKobo ?? 0}
+          feesKobo={p.conversionEarningsKobo ?? 0}
+          winningsKobo={p.winningsPaidKobo}
+          netKobo={p.totalEarnedKobo}
           phrase={period.phrase}
         />
+      ) : (
+        p.totalEarnedKobo !== undefined && (
+          <TotalEarned
+            totalKobo={p.totalEarnedKobo}
+            bettingKobo={p.profitKobo}
+            conversionKobo={p.conversionEarningsKobo ?? 0}
+            conversions={p.conversions ?? 0}
+            phrase={period.phrase}
+          />
+        )
       )}
 
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -204,9 +217,76 @@ export function BookOverview({ reloadKey = 0 }: { reloadKey?: number }) {
 }
 
 /**
- * The one number the owner asks for first: what the book made in the
- * period, everything included — the betting result plus what the
- * conversion spread earned — with the two parts underneath.
+ * The owner's headline: what the platform MADE — stakes kept from losing
+ * bets plus conversion fees — biggest, then what it paid out in
+ * winnings and the net of the two beside it, so the sum reads off the
+ * page: made − winnings = net. Nothing is hidden; the net is just second.
+ */
+function PlatformResult({
+  madeKobo,
+  keptKobo,
+  feesKobo,
+  winningsKobo,
+  netKobo,
+  phrase,
+}: {
+  madeKobo: number;
+  keptKobo: number;
+  feesKobo: number;
+  winningsKobo: number;
+  netKobo: number;
+  phrase: string;
+}) {
+  const money = useAdminMoney();
+  const netTone = netKobo > 0 ? "text-yes" : netKobo < 0 ? "text-no" : "";
+
+  return (
+    <div className="mt-4 grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)]">
+      <div className="col-span-2 min-w-0 rounded-lg border border-border bg-page px-4 py-4 lg:col-span-1">
+        <p className="text-sm font-semibold text-secondary">Platform made {phrase}</p>
+        <p
+          className="mt-1 text-4xl font-bold tabular-nums text-yes sm:text-5xl"
+          title={money.format(madeKobo)}
+        >
+          {money.formatHeadline(madeKobo)}
+        </p>
+        <p className="mt-2 text-[13px] font-medium text-tertiary">
+          <span className="text-secondary">{money.format(keptKobo)}</span> kept from losing
+          bets · <span className="text-secondary">{money.format(feesKobo)}</span> conversion
+          fees
+        </p>
+      </div>
+      <div className="min-w-0 rounded-lg border border-border bg-page px-4 py-4">
+        <p className="text-sm font-semibold text-secondary">Winnings paid out</p>
+        <p
+          className="mt-1 text-2xl font-semibold tabular-nums"
+          title={money.format(winningsKobo)}
+        >
+          {money.formatHeadline(winningsKobo)}
+        </p>
+        <p className="mt-2 text-[13px] font-medium text-tertiary">
+          what winners won, on top of getting their stake back
+        </p>
+      </div>
+      <div className="min-w-0 rounded-lg border border-border bg-page px-4 py-4">
+        <p className="text-sm font-semibold text-secondary">Net result</p>
+        <p
+          className={`mt-1 text-2xl font-semibold tabular-nums ${netTone}`}
+          title={money.formatSigned(netKobo)}
+        >
+          {money.formatHeadline(netKobo, { signed: true })}
+        </p>
+        <p className="mt-2 text-[13px] font-medium text-tertiary">
+          platform made − winnings paid out
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The older headline, for an API that predates the made / winnings
+ * split: the net, with betting and conversion fees underneath.
  */
 function TotalEarned({
   totalKobo,

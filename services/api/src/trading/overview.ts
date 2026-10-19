@@ -34,6 +34,18 @@ export interface PeriodStats {
   conversions: number;
   /** Betting profit + conversion earnings — everything the book made. */
   totalEarnedKobo: number;
+  /** Stakes kept from bets that LOST — the house's betting income. */
+  lostStakesKobo: number;
+  /**
+   * What winners won on top of their own stake back — the house's
+   * betting cost. profitKobo = lostStakesKobo − winningsPaidKobo.
+   */
+  winningsPaidKobo: number;
+  /**
+   * Everything the platform took in: stakes kept from losing bets plus
+   * conversion fees. totalEarnedKobo = platformMadeKobo − winningsPaidKobo.
+   */
+  platformMadeKobo: number;
 }
 
 export interface AdminOverview {
@@ -134,7 +146,12 @@ async function period(
         },
       },
     ]),
-    Position.aggregate<{ settledStakesKobo: number; payoutsKobo: number }>([
+    Position.aggregate<{
+      settledStakesKobo: number;
+      payoutsKobo: number;
+      lostStakesKobo: number;
+      wonStakesKobo: number;
+    }>([
       { $match: { status: { $in: ["won", "lost"] }, ...finished } },
       {
         $group: {
@@ -142,6 +159,12 @@ async function period(
           settledStakesKobo: { $sum: "$stakeKobo" },
           payoutsKobo: {
             $sum: { $cond: [{ $eq: ["$status", "won"] }, "$potentialPayoutKobo", 0] },
+          },
+          lostStakesKobo: {
+            $sum: { $cond: [{ $eq: ["$status", "lost"] }, "$stakeKobo", 0] },
+          },
+          wonStakesKobo: {
+            $sum: { $cond: [{ $eq: ["$status", "won"] }, "$stakeKobo", 0] },
           },
         },
       },
@@ -154,6 +177,10 @@ async function period(
   const settledStakesKobo = results?.settledStakesKobo ?? 0;
   const payoutsKobo = results?.payoutsKobo ?? 0;
   const profitKobo = settledStakesKobo - payoutsKobo;
+  const lostStakesKobo = results?.lostStakesKobo ?? 0;
+  // a winner's payout includes their own stake back; what the house
+  // actually handed over is the rest
+  const winningsPaidKobo = payoutsKobo - (results?.wonStakesKobo ?? 0);
   return {
     stakedKobo,
     bets,
@@ -167,6 +194,9 @@ async function period(
     conversionEarningsKobo: fx.earnedKobo,
     conversions: fx.conversions,
     totalEarnedKobo: profitKobo + fx.earnedKobo,
+    lostStakesKobo,
+    winningsPaidKobo,
+    platformMadeKobo: lostStakesKobo + fx.earnedKobo,
   };
 }
 

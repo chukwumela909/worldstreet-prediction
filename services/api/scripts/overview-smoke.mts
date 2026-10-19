@@ -164,6 +164,13 @@ check(
   p?.allTime.conversionEarningsKobo === 29_000 && p.allTime.conversions === 2,
 );
 check(
+  "platform made = stakes kept from losers + fees; made − winnings paid = net",
+  p?.allTime.lostStakesKobo === 4_000 &&
+    p.allTime.winningsPaidKobo === 4_000 &&
+    p.allTime.platformMadeKobo === 33_000 &&
+    p.allTime.platformMadeKobo - p.allTime.winningsPaidKobo === p.allTime.totalEarnedKobo,
+);
+check(
   "total earned = betting profit + conversion earnings",
   p?.allTime.totalEarnedKobo === p.allTime.profitKobo + 29_000 &&
     p.last24h.totalEarnedKobo === -4_000 + 29_000,
