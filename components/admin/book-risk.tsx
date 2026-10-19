@@ -85,23 +85,23 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
     <>
       <section className="mt-6 grid grid-cols-1 gap-3 rounded-xl border border-border bg-surface p-4 shadow-card sm:grid-cols-3">
         <Stat
-          label="Money in play"
+          label="Money in unfinished bets"
           value={money.format(openStakeKobo)}
-          note={`${openPositions} open bet${openPositions === 1 ? "" : "s"} across ${openMarkets} market${openMarkets === 1 ? "" : "s"}`}
+          note={`${openPositions} bet${openPositions === 1 ? "" : "s"} on ${openMarkets} market${openMarkets === 1 ? "" : "s"} still waiting for a result`}
         />
         <Stat
-          label={exposed ? "Worst case" : "Locked-in profit"}
+          label={exposed ? "Most we could lose" : "Profit already guaranteed"}
           value={money.formatSigned(worstCaseKobo)}
           valueClass={netLoss ? "text-no" : "text-yes"}
           note={
             exposed
-              ? "if every open market goes against us"
-              : "the book is balanced — this is ours whatever happens"
+              ? "only if every unfinished bet goes against us at once — very unlikely"
+              : "bets are balanced on every market — we keep this whatever happens"
           }
         />
         {worstMarket ? (
           <Stat
-            label="Biggest single risk"
+            label="Riskiest market"
             value={money.formatSigned(worstMarket.lossKobo)}
             valueClass="text-no"
             note={
@@ -115,16 +115,16 @@ export function BookRiskStrip({ reloadKey = 0 }: { reloadKey?: number }) {
           />
         ) : (
           <Stat
-            label="Biggest single risk"
+            label="Riskiest market"
             value="—"
-            note="no market is short either side"
+            note="no market can lose us money right now"
           />
         )}
         {exposed && (
           <p className="flex items-start gap-1.5 text-[13px] font-medium text-tertiary sm:col-span-3">
             <AlertTriangle className="mt-0.5 size-3.5 shrink-0 text-no" />
-            Move the price on the side the money is piling onto — make it dearer,
-            and the other side cheaper — until both sides pay for each other.
+            Most of the money on these markets is on one side. On our own markets, make that side
+            more expensive and the other side cheaper, so bets come in on both sides.
           </p>
         )}
         <UsdRateNote className="sm:col-span-3" />

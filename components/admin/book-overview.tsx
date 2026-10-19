@@ -38,14 +38,22 @@ export function BookOverview({ reloadKey = 0 }: { reloadKey?: number }) {
   const money = useAdminMoney();
   const [periodKey, setPeriodKey] = useState<PeriodKey>("allTime");
 
-  // a non-admin is already explained by the desk; an older API without
-  // the endpoint simply has no overview
-  if (
-    overview.errorCode === "FORBIDDEN" ||
-    overview.errorStatus === 403 ||
-    overview.errorStatus === 404
-  ) {
+  // a non-admin is already explained by the desk
+  if (overview.errorCode === "FORBIDDEN" || overview.errorStatus === 403) {
     return null;
+  }
+  // an API older than this page has no overview yet — say so rather than
+  // leave the desk's headline numbers silently missing
+  if (overview.errorStatus === 404) {
+    return (
+      <section className="mt-6 rounded-xl border border-border bg-surface p-4 shadow-card">
+        <h2 className="text-base font-semibold">Overview</h2>
+        <p className="mt-2 text-sm text-secondary">
+          Profit / loss, money staked and the other headline numbers will show here once the
+          latest API is deployed. Redeploy the API from the latest code.
+        </p>
+      </section>
+    );
   }
 
   if (!overview.data) {
