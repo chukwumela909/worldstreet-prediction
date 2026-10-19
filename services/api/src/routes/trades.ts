@@ -6,6 +6,7 @@ import { ApiError } from "../errors.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
 import { isPolymarketId } from "../trading/polymarket/index.js";
 import { getBookSettings } from "../trading/settings.js";
+import { baseMarginBps, quotedPriceKobo, risesFor } from "../trading/margin.js";
 import {
   creditNaira,
   debitNaira,
@@ -27,7 +28,8 @@ import { Position, type IPosition } from "../trading/models.js";
  * Price integrity: the client sends the price it showed the user
  * (`expectedPriceKobo`); the server re-reads the market at source —
  * Relay for a Bayse event, Gamma for a Polymarket one, our own row for
- * one of ours — and executes
+ * one of ours — adds the house margin (the book's base plus any
+ * automatic rise on an exposed side, trading/margin.ts), and executes
  * at the fresh price only if it moved less than the tolerance,
  * otherwise 409 PRICE_MOVED with the fresh price for the client to
  * re-confirm. Fixed odds rarely trip that, but the desk can reprice
@@ -135,7 +137,14 @@ export const tradeRoutes: FastifyPluginAsync = async (rawApp) => {
         throw new ApiError(404, "Outcome not found on this market", "OUTCOME_NOT_FOUND");
       }
 
-      const freshPriceKobo = outcome.priceKobo;
+      // the source's price plus the house margin: the book's base and any
+      // automatic rise on a side the house stands to lose on (margin.ts)
+      const rise = (await risesFor([market.id], settings)).get(market.id)?.get(outcome.id) ?? 0;
+      const freshPriceKobo = quotedPriceKobo(
+        outcome.priceKobo,
+        baseMarginBps(event.origin, settings),
+        rise,
+      );
       if (freshPriceKobo < 1 || freshPriceKobo > 9_999) {
         throw new ApiError(409, "This outcome is not currently priceable", "MARKET_CLOSED");
       }

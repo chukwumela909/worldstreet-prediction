@@ -51,6 +51,7 @@ import {
 } from "@/lib/local-trades";
 import { useQuote } from "@/components/book-pricing";
 import { formatQuote } from "@/lib/book";
+import { useMarketRises } from "@/lib/use-market-rises";
 import { toCents } from "@/lib/format";
 import { TeamMark } from "@/components/sports/team-mark";
 
@@ -63,13 +64,18 @@ import { TeamMark } from "@/components/sports/team-mark";
  *
  * WorldStreet is the counterparty every time: the stake leaves the naira
  * wallet now and a winning share pays ₦100 at settlement (lib/book.ts).
- * The Local book always trades, at its own price. An international
+ * The Local book always trades: a Bayse market at Bayse's price plus the
+ * house margin, one of our own at the desk's price. An international
  * (Polymarket) market trades the same way, at Polymarket's price plus the
  * house spread, only while the API's international-trading switch is on
  * (`useQuote().international`, read from GET /v1/markets/pricing). With
  * it off — or no API, or one too old to say — the slip is a display-only
  * mirror: the source's prices in cents, the amount locked and no way to
- * submit. Stake limits are the API's too. Hold-to-settlement only, at
+ * submit. On top of the base margin, a side of the selected market the
+ * house stands to lose on carries the live auto-rise
+ * (lib/use-market-rises.ts): the slip quotes it, and says so under the
+ * answers, so the price shown is the price the order is charged.
+ * Stake limits are the API's too. Hold-to-settlement only, at
  * the market — so Sell and Limit are drawn where the reference has them
  * but can't be picked yet.
  *
@@ -118,6 +124,18 @@ function dateLabel(iso: string | undefined): string | null {
   }).format(ms);
 }
 
+/**
+ * The line under the answers when the picked side carries the live
+ * auto-rise: "Price includes +1.5 pts — most money is on this side right
+ * now". A point is ₦1 on a ₦100 share (100 kobo); null when the rise
+ * rounds to nothing at one decimal.
+ */
+function riseNotice(riseKobo: number): string | null {
+  const pts = (riseKobo / 100).toLocaleString("en-US", { maximumFractionDigits: 1 });
+  if (pts === "0") return null;
+  return `Price includes +${pts} ${pts === "1" ? "pt" : "pts"} — most money is on this side right now`;
+}
+
 /** Shares are fractional here (the whole stake buys in): "16.39". */
 function formatShares(n: number): string {
   return n.toLocaleString("en-US", { maximumFractionDigits: 2 });
@@ -136,7 +154,7 @@ interface Receipt {
 export function LocalTradePanel({ event }: { event: MarketEvent }) {
   // the stake limits are the API's: min so the ticket can explain the
   // floor before submitting, max so typing more clamps to it
-  const { quoteKobo, international, minStakeKobo, maxStakeKobo } = useQuote();
+  const { quoteKobo, international, autoAdjusting, minStakeKobo, maxStakeKobo } = useQuote();
   const { marketId, side, select, setSide } = useTradeSelection();
   const { user, openAuth } = useAuth();
   const { balanceKobo } = useNairaWallet(Boolean(user));
@@ -207,23 +225,36 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
   const orderKey = `${tradeNonce}:${market.id}:${side}:${stakeKobo}`;
   const failure = attempt?.orderKey === orderKey ? attempt : null;
 
-  const shownPriceKobo = quoteKobo(event, market.outcomePrices[sideIndex]);
-  const priceKobo = failure?.confirmPriceKobo ?? shownPriceKobo;
-  const shares = stakeKobo > 0 ? sharesFor(stakeKobo, priceKobo) : 0;
-  const payoutKobo = stakeKobo > 0 ? payoutFor(stakeKobo, priceKobo) : 0;
-
   // an international market while the API's switch is off is shown, not
   // traded: nothing to submit
   const mirror = !isLocalBook(event) && !international;
+  // the live auto-rise on each side of the selected market — part of the
+  // price the order will be charged
+  const rise = useMarketRises(
+    [market.id],
+    autoAdjusting && !mirror && Boolean(market.outcomeIds),
+  );
+  /** Our quote for a side of the selected market, its live rise included. */
+  const sideQuote = (i: 0 | 1) =>
+    quoteKobo(event, market.outcomePrices[i], rise(market.id, market.outcomeIds?.[i]));
+
+  const shownPriceKobo = sideQuote(sideIndex);
+  const priceKobo = failure?.confirmPriceKobo ?? shownPriceKobo;
+  const shares = stakeKobo > 0 ? sharesFor(stakeKobo, priceKobo) : 0;
+  const payoutKobo = stakeKobo > 0 ? payoutFor(stakeKobo, priceKobo) : 0;
+  // what the rise actually adds to the picked side — the ceiling can
+  // swallow some of it — said under the answers when there is one
+  const riseKobo =
+    shownPriceKobo > 0 ? shownPriceKobo - quoteKobo(event, market.outcomePrices[sideIndex]) : 0;
+  const riseNote = riseKobo > 0 ? riseNotice(riseKobo) : null;
+
   // no outcome ids or no quote: not on our book
   const tradeable = Boolean(market.outcomeIds) && shownPriceKobo > 0;
   // the team behind the picked outcome on a game, for the reference's crest
   const team = event.game?.teams.find((t) => t.name === market.groupItemTitle);
   /** An answer pill's price: our quote when it trades here, the source's cents on a mirror. */
   const answerPrice = (i: 0 | 1) =>
-    mirror
-      ? toCents(market.outcomePrices[i])
-      : formatQuote(quoteKobo(event, market.outcomePrices[i]));
+    mirror ? toCents(market.outcomePrices[i]) : formatQuote(sideQuote(i));
   // The automated series stop taking trades before they close, so the
   // deadline that matters here is earlier than the closing time.
   const stopsAt = tradingStopsAt(event);
@@ -435,6 +466,9 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
                 onClick={() => setSide("no")}
               />
             </div>
+            {riseNote && (
+              <p className="-mt-2 text-xs leading-normal text-secondary">{riseNote}</p>
+            )}
 
             {/* amount */}
             <div className="grid gap-2">

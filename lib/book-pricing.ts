@@ -23,6 +23,22 @@ export interface BookPricing {
    * side (300 = 3 points: 60% sells at ₦63) — see lib/book.ts.
    */
   polymarketSpreadBps: number;
+  /**
+   * Basis points added to Bayse's price on every Local (Bayse) outcome
+   * (200 = 2 points: 60% sells at ₦62). 0 from an API that predates it —
+   * Bayse markets then sell at Bayse's own price, as that API charges.
+   * Our own markets never take it: the desk prices them.
+   */
+  localSpreadBps: number;
+  /**
+   * The most the auto-adjusting spread adds to the side of a market the
+   * house stands to lose on, bps; 0 = off (or an API that predates it).
+   * The API works out each outcome's rise; the web reads it from GET
+   * /v1/markets/rises (lib/use-market-rises.ts).
+   */
+  autoSpreadMaxBps: number;
+  /** What the house must stand to lose on a side before the full rise applies, kobo; 0 = not published. */
+  autoSpreadFullAtKobo: number;
   /** Smallest stake one order may carry, kobo. */
   minStakeKobo: number;
   /** Largest stake one order may carry, kobo. */
@@ -42,14 +58,15 @@ let lastGood: BookPricing | null = null;
 const isKobo = (v: unknown): v is number =>
   typeof v === "number" && Number.isInteger(v) && v > 0;
 
+const isSpread = (v: unknown): v is number =>
+  typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= MAX_SPREAD_BPS;
+
 /** The API's `data`, or null when it doesn't carry a usable spread. */
 function parsePricing(data: unknown): BookPricing | null {
   if (typeof data !== "object" || data === null) return null;
   const d = data as Record<string, unknown>;
   const bps = d.polymarketSpreadBps;
-  if (typeof bps !== "number" || !Number.isInteger(bps) || bps < 0 || bps > MAX_SPREAD_BPS) {
-    return null;
-  }
+  if (!isSpread(bps)) return null;
   let minStakeKobo = isKobo(d.minStakeKobo) ? d.minStakeKobo : DEFAULT_MIN_STAKE_KOBO;
   let maxStakeKobo = isKobo(d.maxStakeKobo) ? d.maxStakeKobo : DEFAULT_MAX_STAKE_KOBO;
   if (minStakeKobo > maxStakeKobo) {
@@ -60,6 +77,10 @@ function parsePricing(data: unknown): BookPricing | null {
     // only an explicit `true` opens the book — absent or anything else is off
     internationalTrading: d.internationalTrading === true,
     polymarketSpreadBps: bps,
+    // optional — an older API sends none of these, and 0 is what it charges
+    localSpreadBps: isSpread(d.localSpreadBps) ? d.localSpreadBps : 0,
+    autoSpreadMaxBps: isSpread(d.autoSpreadMaxBps) ? d.autoSpreadMaxBps : 0,
+    autoSpreadFullAtKobo: isKobo(d.autoSpreadFullAtKobo) ? d.autoSpreadFullAtKobo : 0,
     minStakeKobo,
     maxStakeKobo,
   };
@@ -99,9 +120,9 @@ async function fetchPricing(): Promise<BookPricing | null> {
  */
 const getCachedPricing = unstable_cache(
   fetchPricing,
-  // the shape changed from the parked `international-book` version —
-  // a new key so a cached entry of the old shape is never served
-  ["book-pricing-v2", API_BASE],
+  // a new key whenever the shape changes (v3: the Local spread and the
+  // auto-adjusting spread), so a cached entry of an old shape is never served
+  ["book-pricing-v3", API_BASE],
   { revalidate: 60, tags: ["book-pricing"] },
 );
 

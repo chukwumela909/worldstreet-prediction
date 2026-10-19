@@ -14,7 +14,8 @@ import {
  * Hands the API's pricing parameters (lib/book-pricing.ts, loaded by the
  * root layout) to every client component that quotes a price or takes
  * a stake. Null — no API configured, an API too old to publish them, or
- * one that errored — means international trading is off.
+ * one that errored — means international trading is off and Local
+ * markets quote at their raw price.
  */
 const PricingContext = createContext<BookPricing | null>(null);
 
@@ -33,28 +34,31 @@ export function BookPricingProvider({
  * one price path: every buy button, payout multiple and stake form
  * reads its numbers from here.
  *
- * `international` is true only while the API's admin switch is on; the
- * spread reaches the quote functions only then, so with it off an
- * international outcome has no quote (0) and its multiple is
- * Polymarket's own. The stake limits are the API's, or its defaults
- * (₦100–₦50,000) when it published none.
+ * `quoteKobo` / `quoteMultiplier` take the outcome's auto-rise as an
+ * optional third argument: the bet slip and the market page's outcome
+ * rows read it from useMarketRises (lib/use-market-rises.ts) and pass
+ * it; cards and lists leave it out and show the base price.
+ *
+ * `international` is true only while the API's admin switch is on; with
+ * it off an international outcome has no quote (0) and its multiple is
+ * Polymarket's own. `autoAdjusting` is true while the API publishes an
+ * auto-adjusting spread — the only time rises are worth fetching. The
+ * stake limits are the API's, or its defaults (₦100–₦50,000) when it
+ * published none.
  */
 export function useQuote() {
   const pricing = useContext(PricingContext);
-  const international = pricing?.internationalTrading === true;
-  const spread = pricing && international ? pricing.polymarketSpreadBps : null;
-  const minStakeKobo = pricing?.minStakeKobo ?? DEFAULT_MIN_STAKE_KOBO;
-  const maxStakeKobo = pricing?.maxStakeKobo ?? DEFAULT_MAX_STAKE_KOBO;
   return useMemo(
     () => ({
-      quoteKobo: (event: Pick<MarketEvent, "source">, price: string) =>
-        quoteKobo(event, price, spread),
-      quoteMultiplier: (event: Pick<MarketEvent, "source">, price: string) =>
-        quoteMultiplier(event, price, spread),
-      international,
-      minStakeKobo,
-      maxStakeKobo,
+      quoteKobo: (event: Pick<MarketEvent, "source">, price: string, riseBps = 0) =>
+        quoteKobo(event, price, pricing, riseBps),
+      quoteMultiplier: (event: Pick<MarketEvent, "source">, price: string, riseBps = 0) =>
+        quoteMultiplier(event, price, pricing, riseBps),
+      international: pricing?.internationalTrading === true,
+      autoAdjusting: (pricing?.autoSpreadMaxBps ?? 0) > 0,
+      minStakeKobo: pricing?.minStakeKobo ?? DEFAULT_MIN_STAKE_KOBO,
+      maxStakeKobo: pricing?.maxStakeKobo ?? DEFAULT_MAX_STAKE_KOBO,
     }),
-    [spread, international, minStakeKobo, maxStakeKobo],
+    [pricing],
   );
 }

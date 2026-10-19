@@ -27,6 +27,19 @@ export interface BookSettings {
   internationalTrading: boolean;
   /** Basis points of a ₦100 share added to Polymarket's price, each side. */
   polymarketSpreadBps: number;
+  /**
+   * Basis points added to Bayse's price on Local markets — the house's
+   * margin. Our own markets are desk-priced (their margin is in the
+   * prices) and get none.
+   */
+  localSpreadBps: number;
+  /**
+   * The most the auto-adjusting spread adds on the side of a market the
+   * house stands to lose on (trading/margin.ts). 0 turns it off.
+   */
+  autoSpreadMaxBps: number;
+  /** How much the house must stand to lose on a side for the full rise. */
+  autoSpreadFullAtKobo: number;
   /** Basis points taken on USD ⇄ NGN conversion, each direction. */
   fxSpreadBps: number;
   minStakeKobo: number;
@@ -51,6 +64,9 @@ type NumericKey = Exclude<SettingKey, "internationalTrading">;
 /** Inclusive bounds the desk may set — the API refuses anything outside. */
 export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = {
   polymarketSpreadBps: { min: 0, max: 2_000 },
+  localSpreadBps: { min: 0, max: 2_000 },
+  autoSpreadMaxBps: { min: 0, max: 2_000 },
+  autoSpreadFullAtKobo: { min: 100_000, max: 100_000_000_000 }, // ₦1,000 – ₦1B
   fxSpreadBps: { min: 0, max: 2_000 },
   minStakeKobo: { min: 10_000, max: 100_000_000 }, // ₦100 – ₦1M
   maxStakeKobo: { min: 10_000, max: 1_000_000_000 }, // ₦100 – ₦10M
@@ -63,6 +79,9 @@ export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = 
 export const SETTING_KEYS: readonly SettingKey[] = [
   "internationalTrading",
   "polymarketSpreadBps",
+  "localSpreadBps",
+  "autoSpreadMaxBps",
+  "autoSpreadFullAtKobo",
   "fxSpreadBps",
   "minStakeKobo",
   "maxStakeKobo",
@@ -80,6 +99,9 @@ export function defaultSettings(): BookSettings {
   return {
     internationalTrading: false,
     polymarketSpreadBps: config.POLYMARKET_SPREAD_BPS,
+    localSpreadBps: 200, // 2 points on Bayse's price
+    autoSpreadMaxBps: 500, // up to +5 points on the exposed side
+    autoSpreadFullAtKobo: 20_000_000, // full rise once ₦200,000 is at stake
     fxSpreadBps: config.FX_SPREAD_BPS,
     minStakeKobo: MIN_STAKE_FLOOR_KOBO,
     maxStakeKobo: config.TRADE_MAX_STAKE_KOBO,

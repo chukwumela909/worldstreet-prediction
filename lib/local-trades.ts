@@ -140,8 +140,3 @@ export function sharesFor(stakeKobo: number, priceKobo: number): number {
 export function payoutFor(stakeKobo: number, priceKobo: number): number {
   return Math.floor(sharesFor(stakeKobo, priceKobo) * PAYOUT_PER_SHARE_KOBO);
 }
-
-/** Decimal probability ("0.58") → kobo per ₦100 share (5800). */
-export function priceToKobo(decimalPrice: string): number {
-  return Math.round(parseFloat(decimalPrice) * PAYOUT_PER_SHARE_KOBO);
-}

@@ -5,9 +5,10 @@ import {
   ChevronDownIcon as ChevronDown,
   ChevronUpIcon as ChevronUp,
 } from "@heroicons/react/24/outline";
-import { isBinary, isLocalBook, type MarketEvent } from "@/types/market";
+import { isBinary, isLocalBook, type Market, type MarketEvent } from "@/types/market";
 import { formatVolume, toCents, toPercent } from "@/lib/format";
 import { formatQuote } from "@/lib/book";
+import { useMarketRises } from "@/lib/use-market-rises";
 import { useQuote } from "@/components/book-pricing";
 import { dayDelta } from "@/lib/series";
 import {
@@ -28,15 +29,12 @@ import { DetailCard, useRevealTicket } from "./market-detail";
  *
  * While the event trades on our book — the API's international-trading
  * switch is on (`useQuote().international`) — the pills read "Buy Yes
- * ₦63.00": what a share costs here, Polymarket's price plus the house
- * spread (lib/book.ts). With it off the market is only mirrored, so
- * they read "Yes 60¢", the source's price, with no "Buy" — see
- * local-trade-panel.tsx.
+ * ₦63.00": what a share costs here (useOutcomePills). With it off the
+ * market is only mirrored, so they read "Yes 60¢", the source's price,
+ * with no "Buy" — see local-trade-panel.tsx.
  */
 export function OutcomeList({ event }: { event: MarketEvent }) {
-  const { quoteKobo, international } = useQuote();
-  // a Local event is always on our book; an international one only while the switch is on
-  const tradeable = isLocalBook(event) || international;
+  const pill = useOutcomePills(event);
   const { marketId, side, select } = useTradeSelection();
   const reveal = useRevealTicket();
   const binary = isBinary(event);
@@ -50,13 +48,8 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
       {event.markets.map((m, i) => {
         // a binary event's one row would only repeat the title as its name
         const name = binary ? (m.outcomeLabels?.[0] ?? "Yes") : (m.groupItemTitle ?? m.question);
-        const [yesLabel, noLabel] = m.outcomeLabels ?? ["Yes", "No"];
-        const pill = (label: string, i: 0 | 1) =>
-          tradeable
-            ? `Buy ${label} ${formatQuote(quoteKobo(event, m.outcomePrices[i]))}`
-            : `${label} ${toCents(m.outcomePrices[i])}`;
-        const yes = pill(yesLabel, 0);
-        const no = pill(noLabel, 1);
+        const yes = pill(m, 0);
+        const no = pill(m, 1);
         return (
           <OutcomeQuoteRow
             key={m.id}
@@ -83,6 +76,30 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
       })}
     </OutcomesCard>
   );
+}
+
+/**
+ * The outcome rows' pill text on a market page — shared with the Local
+ * page. On our book (Local always, international only while the API's
+ * switch is on) it's "Buy Yes ₦63.00": what a share costs here right
+ * now — the base margin plus the live auto-rise on that side
+ * (lib/book.ts, lib/use-market-rises.ts), the same price the bet slip
+ * shows. A mirrored market reads "Yes 60¢", the source's price.
+ */
+export function useOutcomePills(event: MarketEvent): (market: Market, side: 0 | 1) => string {
+  const { quoteKobo, international, autoAdjusting } = useQuote();
+  // a Local event is always on our book; an international one only while the switch is on
+  const tradeable = isLocalBook(event) || international;
+  const rise = useMarketRises(
+    event.markets.filter((m) => m.outcomeIds).map((m) => m.id),
+    tradeable && autoAdjusting,
+  );
+  return (m, i) => {
+    const label = (m.outcomeLabels ?? ["Yes", "No"])[i];
+    return tradeable
+      ? `Buy ${label} ${formatQuote(quoteKobo(event, m.outcomePrices[i], rise(m.id, m.outcomeIds?.[i])))}`
+      : `${label} ${toCents(m.outcomePrices[i])}`;
+  };
 }
 
 /** The card around a list of outcome rows — shared with the Local page. */

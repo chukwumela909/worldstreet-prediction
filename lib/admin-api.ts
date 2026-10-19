@@ -594,8 +594,14 @@ export interface BookSettings {
   internationalTrading: boolean;
   /** Basis points of a 100-credit share added to Polymarket's price; 100 = 1 point. */
   polymarketSpreadBps: number;
+  /** Basis points added to Bayse's price on every Local bet; our own markets take none. */
+  localSpreadBps: number;
   /** Dollar↔credit conversion margin each way; 100 = 1%. */
   fxSpreadBps: number;
+  /** The most the auto-adjusting spread adds to a market's exposed side, bps; 0 = off. */
+  autoSpreadMaxBps: number;
+  /** What the house must stand to lose on a side before the full rise applies, kobo. */
+  autoSpreadFullAtKobo: number;
   minStakeKobo: number;
   maxStakeKobo: number;
   /** The most the house may lose on one market. */

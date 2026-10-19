@@ -34,8 +34,9 @@ import {
 } from "@/components/admin/risk-flags";
 
 /**
- * The book's dials: spreads, stake limits, the per-market loss cap and
- * the international on/off switch.
+ * The book's dials: spreads (international, Local, conversion and the
+ * auto-adjusting one), stake limits, the per-market loss cap and the
+ * international on/off switch.
  *
  * Written for whoever runs the business, not whoever wrote the API: the
  * API stores basis points, kobo and seconds, and this page only ever
@@ -80,6 +81,27 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     unit: "points",
     step: 0.5,
     info: "What we add to Polymarket's price on every international bet — the house's margin. At 3 points, an outcome Polymarket rates 60% costs ₦63 instead of ₦60, and a winning share still pays ₦100. Higher means more profit per bet but worse prices for users.",
+  },
+  localSpreadBps: {
+    key: "localSpreadBps",
+    label: "Local spread",
+    unit: "points",
+    step: 0.5,
+    info: "What we add to Bayse's price on every Local bet — the house's margin. At 2 points, an outcome Bayse rates 60% costs ₦62 instead of ₦60, and a winning share still pays ₦100. Our own markets aren't affected — their prices are set at the desk.",
+  },
+  autoSpreadMaxBps: {
+    key: "autoSpreadMaxBps",
+    label: "Auto-adjust: biggest rise",
+    unit: "points",
+    step: 0.5,
+    info: "When most of a market's money is on one side — so we'd lose if that side wins — that side's price goes up automatically, by up to this much. The other side stays at the normal price. Set to 0 to switch auto-adjusting off.",
+  },
+  autoSpreadFullAtKobo: {
+    key: "autoSpreadFullAtKobo",
+    label: "Auto-adjust: full rise at",
+    unit: "credit",
+    step: 50_000,
+    info: "How much we'd have to stand to lose on one side before the full rise applies. Smaller amounts get part of it — at half this amount, half the rise.",
   },
   fxSpreadBps: {
     key: "fxSpreadBps",
@@ -136,7 +158,10 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
 const ORDER: BookSettingKey[] = [
   "internationalTrading",
   "polymarketSpreadBps",
+  "localSpreadBps",
   "fxSpreadBps",
+  "autoSpreadMaxBps",
+  "autoSpreadFullAtKobo",
   "minStakeKobo",
   "maxStakeKobo",
   "maxMarketExposureKobo",
@@ -155,8 +180,13 @@ const GROUPS: { title: string; note: string; rows: BookSettingKey[] }[] = [
   },
   {
     title: "Pricing",
-    note: "Our margin on converting dollars to credit.",
-    rows: ["fxSpreadBps"],
+    note: "Our margins on Local bets and on converting dollars to credit.",
+    rows: ["localSpreadBps", "fxSpreadBps"],
+  },
+  {
+    title: "Auto-adjusting spread",
+    note: "Raises the price on whichever side of a market most money is on, so new bets are pushed to the other side.",
+    rows: ["autoSpreadMaxBps", "autoSpreadFullAtKobo"],
   },
   {
     title: "Limits",
@@ -1247,7 +1277,7 @@ function SettingsSkeleton() {
   return (
     <div role="status" className="mt-6 flex flex-col gap-4">
       <span className="sr-only">Loading settings…</span>
-      {[2, 1, 3, 2].map((rows, i) => (
+      {[2, 2, 2, 3, 2, 1].map((rows, i) => (
         <div
           key={i}
           className="animate-pulse rounded-xl border border-border bg-surface p-4 sm:p-5"

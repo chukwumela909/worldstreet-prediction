@@ -61,6 +61,9 @@ const settingsBody = z
   .object({
     internationalTrading: z.boolean(),
     polymarketSpreadBps: z.number().int(),
+    localSpreadBps: z.number().int(),
+    autoSpreadMaxBps: z.number().int(),
+    autoSpreadFullAtKobo: z.number().int(),
     fxSpreadBps: z.number().int(),
     minStakeKobo: z.number().int(),
     maxStakeKobo: z.number().int(),

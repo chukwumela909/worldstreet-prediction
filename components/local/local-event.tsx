@@ -5,9 +5,8 @@ import {
   ClockIcon as Clock,
   CircleStackIcon as Droplets,
 } from "@heroicons/react/24/outline";
-import { isBinary, type Market, type MarketEvent } from "@/types/market";
-import { formatNaira, formatNairaCompact, toPercent } from "@/lib/format";
-import { priceToKobo } from "@/lib/local-trades";
+import { isBinary, type MarketEvent } from "@/types/market";
+import { formatNairaCompact, toPercent } from "@/lib/format";
 import { DetailBreadcrumb, EventLockup } from "@/components/event/event-header";
 import {
   DetailCard,
@@ -16,7 +15,11 @@ import {
   useRevealTicket,
 } from "@/components/event/market-detail";
 import { MarketInfo } from "@/components/event/market-info";
-import { OutcomeQuoteRow, OutcomesCard } from "@/components/event/outcome-list";
+import {
+  OutcomeQuoteRow,
+  OutcomesCard,
+  useOutcomePills,
+} from "@/components/event/outcome-list";
 import { TradeProvider, useTradeSelection } from "@/components/event/trade-context";
 import { YES_TONE, outcomeTone } from "@/components/market/outcome-quote";
 import { BaysePriceChart } from "@/components/local/bayse-price-chart";
@@ -150,16 +153,14 @@ function LocalStats({ event }: { event: MarketEvent }) {
 
 /* ---------- outcomes ---------- */
 
-/** Outcome price as ₦ per ₦100 share, e.g. "₦58". */
-function nairaPrice(market: Market, side: 0 | 1): string {
-  return formatNaira(priceToKobo(market.outcomePrices[side]));
-}
-
 /**
  * Always shown, binary included: below 1024px the panel lives in a
- * sheet, so these rows are where a side gets picked.
+ * sheet, so these rows are where a side gets picked. The pills quote
+ * what a share costs here — Bayse's price plus the house margin and any
+ * live rise, or the desk's price on our own markets (useOutcomePills).
  */
 function LocalOutcomeList({ event }: { event: MarketEvent }) {
+  const pill = useOutcomePills(event);
   const { marketId, side, select } = useTradeSelection();
   const reveal = useRevealTicket();
   const binary = isBinary(event);
@@ -171,11 +172,10 @@ function LocalOutcomeList({ event }: { event: MarketEvent }) {
   return (
     <OutcomesCard>
       {event.markets.map((m, i) => {
-        const labels = m.outcomeLabels ?? ["Yes", "No"];
         // a binary event's one row would only repeat the title as its name
-        const name = binary ? labels[0] : (m.groupItemTitle ?? m.question);
-        const yes = `Buy ${labels[0]} ${nairaPrice(m, 0)}`;
-        const no = `Buy ${labels[1]} ${nairaPrice(m, 1)}`;
+        const name = binary ? (m.outcomeLabels?.[0] ?? "Yes") : (m.groupItemTitle ?? m.question);
+        const yes = pill(m, 0);
+        const no = pill(m, 1);
         return (
           <OutcomeQuoteRow
             key={m.id}

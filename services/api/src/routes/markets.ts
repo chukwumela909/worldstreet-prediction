@@ -3,6 +3,8 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
 import { getBookSettings } from "../trading/settings.js";
+import { risesFor } from "../trading/margin.js";
+import { eventOrMarketId } from "../trading/ids.js";
 import { WorldstreetEvent, WorldstreetMarket } from "../trading/models.js";
 import { activityByEvent, serializeEvent } from "../trading/serialize.js";
 
@@ -17,6 +19,13 @@ import { activityByEvent, serializeEvent } from "../trading/serialize.js";
  */
 
 const LISTED_STATUSES = ["open", "closed"] as const;
+
+/** Markets one rises request may ask about. */
+const MAX_RISE_MARKETS = 50;
+const risesQuery = z.object({
+  /** Comma-separated market ids. */
+  marketIds: z.string().min(1).max(4_000),
+});
 const MAX_LISTED = 60;
 
 export const marketRoutes: FastifyPluginAsync = async (rawApp) => {
@@ -37,11 +46,50 @@ export const marketRoutes: FastifyPluginAsync = async (rawApp) => {
       data: {
         internationalTrading: s.internationalTrading,
         polymarketSpreadBps: s.polymarketSpreadBps,
+        localSpreadBps: s.localSpreadBps,
+        autoSpreadMaxBps: s.autoSpreadMaxBps,
+        autoSpreadFullAtKobo: s.autoSpreadFullAtKobo,
         minStakeKobo: s.minStakeKobo,
         maxStakeKobo: s.maxStakeKobo,
       },
     };
   });
+
+  /**
+   * The automatic rise on each side of the given markets right now
+   * (trading/margin.ts) — what the bet slip adds to show the price an
+   * order will actually be charged. Only sides with a rise appear.
+   * Public like the pricing above: the price on the page shows it anyway.
+   */
+  app.get(
+    "/markets/rises",
+    {
+      schema: { querystring: risesQuery },
+      config: { rateLimit: { max: 120, timeWindow: "1 minute" } },
+    },
+    async (request) => {
+      const ids = [
+        ...new Set(
+          request.query.marketIds
+            .split(",")
+            .map((id) => id.trim())
+            .filter(Boolean),
+        ),
+      ];
+      if (ids.length > MAX_RISE_MARKETS || ids.some((id) => !eventOrMarketId.safeParse(id).success)) {
+        throw new ApiError(400, "Up to 50 valid market ids", "INVALID_MARKET_IDS");
+      }
+      const rises = await risesFor(ids, await getBookSettings());
+      return {
+        success: true,
+        data: {
+          rises: Object.fromEntries(
+            [...rises].map(([marketId, sides]) => [marketId, Object.fromEntries(sides)]),
+          ),
+        },
+      };
+    },
+  );
 
   /** Live markets, soonest to close first, undated ones last. */
   app.get("/markets", async () => {

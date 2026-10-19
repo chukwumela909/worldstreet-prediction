@@ -6,7 +6,7 @@ import {
   type GammaEventRaw,
   type GammaMarketRaw,
 } from "./client.js";
-import { getBookSettings, defaultSettings } from "../settings.js";
+import { defaultSettings } from "../settings.js";
 import { buyPriceKobo } from "./pricing.js";
 import { finalResolution } from "./resolution.js";
 
@@ -100,6 +100,7 @@ export function fromPolymarket(
 
 /** Fresh state for one international event, at source. */
 export async function fetchPolymarketEvent(eventId: string): Promise<TradableEvent> {
-  const [raw, settings] = await Promise.all([fetchGammaEvent(eventId), getBookSettings()]);
-  return fromPolymarket(raw, Date.now(), settings.polymarketSpreadBps);
+  // Polymarket's own price — the house margin (base + auto-rise) is added
+  // when an order is priced (trading/margin.ts), the same on every book
+  return fromPolymarket(await fetchGammaEvent(eventId), Date.now(), 0);
 }
