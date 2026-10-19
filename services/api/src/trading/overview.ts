@@ -1,5 +1,5 @@
 import { User } from "../models.js";
-import { FxRate, NairaAccount, Position } from "./models.js";
+import { FxRate, LedgerEntry, NairaAccount, Position } from "./models.js";
 
 /**
  * The admin desk's headline numbers, in one read.
@@ -25,6 +25,15 @@ export interface PeriodStats {
   payoutsKobo: number;
   profitKobo: number;
   marginPct: number | null;
+  /**
+   * What the conversion spread earned on dollar⇄credit conversions in
+   * the period, against the mid rate in force at each one.
+   */
+  conversionEarningsKobo: number;
+  /** Conversions made in the period (deposits + cash-outs, failed ones excluded). */
+  conversions: number;
+  /** Betting profit + conversion earnings — everything the book made. */
+  totalEarnedKobo: number;
 }
 
 export interface AdminOverview {
@@ -43,11 +52,77 @@ export interface AdminOverview {
 
 const HOUR_MS = 3_600_000;
 
-async function period(since: Date | null): Promise<PeriodStats> {
+interface MidRow {
+  usdToNgn: number;
+  at: number;
+}
+
+/** The mid rate in force at `at`: the latest one set at or before it. */
+function midAt(rates: MidRow[], at: number): number | null {
+  let lo = 0;
+  let hi = rates.length - 1;
+  let found: number | null = null;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (rates[mid]!.at <= at) {
+      found = rates[mid]!.usdToNgn;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found;
+}
+
+/**
+ * What the conversion spread earned since `since`. A deposit gave the
+ * user `kobo` for `usd` cents, which were worth `usd × mid` kobo at the
+ * mid; a cash-out took `kobo` and paid `usd` cents, worth `usd × mid`.
+ * The difference each way is the house's — the spread plus the rounding
+ * dust it keeps. A cash-out the wallet refused was reversed
+ * (`<refKey>:reversal`) and earned nothing, so it's left out.
+ */
+async function conversionEarnings(
+  since: Date | null,
+  rates: MidRow[],
+  reversed: Set<string>,
+): Promise<{ earnedKobo: number; conversions: number }> {
+  const entries = await LedgerEntry.find(
+    {
+      type: { $in: ["conversion_in", "conversion_out"] },
+      ...(since ? { createdAt: { $gte: since } } : {}),
+    },
+    { type: 1, amountKobo: 1, metadata: 1, refKey: 1, createdAt: 1 },
+  ).lean();
+
+  let earned = 0;
+  let conversions = 0;
+  for (const e of entries) {
+    const usd = Number((e.metadata as { amountUsdMinor?: unknown } | null)?.amountUsdMinor);
+    const at = e.createdAt ? new Date(e.createdAt).getTime() : NaN;
+    const mid = Number.isNaN(at) ? null : midAt(rates, at);
+    if (!Number.isFinite(usd) || mid === null) continue;
+    const kobo = Math.abs(e.amountKobo);
+    if (e.type === "conversion_in") {
+      earned += usd * mid - kobo;
+    } else {
+      if (reversed.has(e.refKey)) continue;
+      earned += kobo - usd * mid;
+    }
+    conversions += 1;
+  }
+  return { earnedKobo: Math.round(earned), conversions };
+}
+
+async function period(
+  since: Date | null,
+  rates: MidRow[],
+  reversed: Set<string>,
+): Promise<PeriodStats> {
   const placed = since ? { createdAt: { $gte: since } } : {};
   const finished = since ? { settledAt: { $gte: since } } : {};
 
-  const [[activity], [results]] = await Promise.all([
+  const [[activity], [results], fx] = await Promise.all([
     Position.aggregate<{ stakedKobo: number; bets: number; traders: string[] }>([
       { $match: placed },
       {
@@ -71,6 +146,7 @@ async function period(since: Date | null): Promise<PeriodStats> {
         },
       },
     ]),
+    conversionEarnings(since, rates, reversed),
   ]);
 
   const stakedKobo = activity?.stakedKobo ?? 0;
@@ -88,17 +164,32 @@ async function period(since: Date | null): Promise<PeriodStats> {
     profitKobo,
     marginPct:
       settledStakesKobo > 0 ? Math.round((profitKobo / settledStakesKobo) * 1000) / 10 : null,
+    conversionEarningsKobo: fx.earnedKobo,
+    conversions: fx.conversions,
+    totalEarnedKobo: profitKobo + fx.earnedKobo,
   };
 }
 
 export async function getAdminOverview(now = Date.now()): Promise<AdminOverview> {
   const at = (hours: number) => new Date(now - hours * HOUR_MS);
+  // the rate history (oldest first) and the reversed cash-outs, shared by
+  // every period's conversion earnings
+  const [rateRows, reversals] = await Promise.all([
+    FxRate.find({}, { usdToNgn: 1, createdAt: 1 }).sort({ createdAt: 1 }).lean(),
+    LedgerEntry.find({ type: "refund", refKey: /:reversal$/ }, { refKey: 1 }).lean(),
+  ]);
+  const rates: MidRow[] = rateRows.map((r) => ({
+    usdToNgn: r.usdToNgn,
+    at: new Date(r.createdAt).getTime(),
+  }));
+  const reversed = new Set(reversals.map((r) => r.refKey.replace(/:reversal$/, "")));
+
   const [last24h, last7Days, last30Days, allTime, [open], accounts, [credit], fxRow] =
     await Promise.all([
-      period(at(24)),
-      period(at(24 * 7)),
-      period(at(24 * 30)),
-      period(null),
+      period(at(24), rates, reversed),
+      period(at(24 * 7), rates, reversed),
+      period(at(24 * 30), rates, reversed),
+      period(null, rates, reversed),
       Position.aggregate<{
         bets: number;
         markets: string[];

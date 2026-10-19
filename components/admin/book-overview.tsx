@@ -116,9 +116,19 @@ export function BookOverview({ reloadKey = 0 }: { reloadKey?: number }) {
         </div>
       </div>
 
+      {p.totalEarnedKobo !== undefined && (
+        <TotalEarned
+          totalKobo={p.totalEarnedKobo}
+          bettingKobo={p.profitKobo}
+          conversionKobo={p.conversionEarningsKobo ?? 0}
+          conversions={p.conversions ?? 0}
+          phrase={period.phrase}
+        />
+      )}
+
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Tile
-          label={finished ? (up ? "Profit" : "Loss") : "Profit / loss"}
+          label={finished ? (up ? "Betting profit" : "Betting loss") : "Betting profit / loss"}
           value={money.formatHeadline(p.profitKobo, { signed: true })}
           exact={money.formatSigned(p.profitKobo)}
           valueClass={resultTone}
@@ -190,6 +200,48 @@ export function BookOverview({ reloadKey = 0 }: { reloadKey?: number }) {
         )}
       </p>
     </section>
+  );
+}
+
+/**
+ * The one number the owner asks for first: what the book made in the
+ * period, everything included — the betting result plus what the
+ * conversion spread earned — with the two parts underneath.
+ */
+function TotalEarned({
+  totalKobo,
+  bettingKobo,
+  conversionKobo,
+  conversions,
+  phrase,
+}: {
+  totalKobo: number;
+  bettingKobo: number;
+  conversionKobo: number;
+  conversions: number;
+  phrase: string;
+}) {
+  const money = useAdminMoney();
+  const tone = totalKobo > 0 ? "text-yes" : totalKobo < 0 ? "text-no" : "";
+
+  return (
+    <div className="mt-4 rounded-lg border border-border bg-page px-4 py-3">
+      <p className="text-sm font-semibold text-secondary">
+        {totalKobo < 0 ? "Total lost" : "Total earned"} {phrase}
+      </p>
+      <p
+        className={`mt-1 text-3xl font-semibold tabular-nums ${tone}`}
+        title={money.formatSigned(totalKobo)}
+      >
+        {money.formatHeadline(totalKobo, { signed: true })}
+      </p>
+      <p className="mt-1.5 text-[13px] font-medium text-tertiary">
+        Betting <span className="text-secondary">{money.formatSigned(bettingKobo)}</span>
+        {" · "}
+        Conversion fees <span className="text-secondary">{money.formatSigned(conversionKobo)}</span>
+        {conversions > 0 && ` (${conversions} conversion${conversions === 1 ? "" : "s"})`}
+      </p>
+    </div>
   );
 }
 

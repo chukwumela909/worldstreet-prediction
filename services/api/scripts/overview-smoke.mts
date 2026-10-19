@@ -23,7 +23,7 @@ await mongoose.connect(mongod.getUri(), { dbName: "test" });
 
 const { buildApp } = await import("../src/app.js");
 const { User } = await import("../src/models.js");
-const { FxRate, NairaAccount, Position, ensureTradingIndexes } = await import(
+const { FxRate, LedgerEntry, NairaAccount, Position, ensureTradingIndexes } = await import(
   "../src/trading/models.js"
 );
 await ensureTradingIndexes();
@@ -100,6 +100,25 @@ await bet({ user: "u1", market: "m2", stake: 5_000, price: 5_000, status: "open"
 await bet({ user: "u2", market: "m1", stake: 4_000, price: 4_000, status: "lost", placedHoursAgo: 24 * 41, settledHoursAgo: 24 * 40 });
 await FxRate.create({ usdToNgn: 1_450, setBy: "smoke" });
 
+// conversions at ₦1,450 mid with a 1% spread: a $10 deposit credits
+// ₦14,355 (worth ₦14,500 at the mid → ₦145 earned); a ₦14,645 cash-out
+// pays $10 (₦14,500 at the mid → ₦145 earned); a cash-out the wallet
+// refused was reversed and earns nothing
+const ledger = (type: string, amountKobo: number, refKey: string, metadata = {}) =>
+  LedgerEntry.create({
+    authUserId: "u1",
+    type,
+    amountKobo,
+    balanceAfterKobo: 0,
+    refKey,
+    description: "smoke",
+    metadata,
+  });
+await ledger("conversion_in", 1_435_500, "convert:in1", { amountUsdMinor: 1_000 });
+await ledger("conversion_out", -1_464_500, "convert:out1", { amountUsdMinor: 1_000 });
+await ledger("conversion_out", -1_464_500, "convert:out2", { amountUsdMinor: 1_000 });
+await ledger("refund", 1_464_500, "convert:out2:reversal");
+
 /* ---------------- overview ---------------- */
 console.log("overview");
 const o = await get("/v1/admin/overview");
@@ -140,6 +159,15 @@ check(
     o.body.data.creditHeldKobo === 70_000,
 );
 check("FX mid for the ₦/$ switch", o.body.data?.fx?.usdToNgnMid === 1_450);
+check(
+  "conversion earnings: ₦145 each way, the reversed cash-out left out",
+  p?.allTime.conversionEarningsKobo === 29_000 && p.allTime.conversions === 2,
+);
+check(
+  "total earned = betting profit + conversion earnings",
+  p?.allTime.totalEarnedKobo === p.allTime.profitKobo + 29_000 &&
+    p.last24h.totalEarnedKobo === -4_000 + 29_000,
+);
 
 /* ---------------- fx ---------------- */
 console.log("fx");

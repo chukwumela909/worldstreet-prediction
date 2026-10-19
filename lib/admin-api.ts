@@ -223,6 +223,12 @@ export interface PeriodStats {
   profitKobo: number;
   /** profitKobo / settledStakesKobo × 100, null when nothing finished. */
   marginPct: number | null;
+  /** Earned by the conversion spread on dollar⇄credit conversions (absent on an older API). */
+  conversionEarningsKobo?: number;
+  /** Conversions made in the period. */
+  conversions?: number;
+  /** profitKobo + conversionEarningsKobo — everything the book made. */
+  totalEarnedKobo?: number;
 }
 
 export interface AdminOverview {
