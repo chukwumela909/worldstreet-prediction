@@ -382,6 +382,30 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   app.get("/admin/settlements", async (request) => {
     await requireAdmin(request);
     const settlements = await Settlement.find().sort({ createdAt: -1 }).limit(100);
+    // a settlement row only knows ids; the positions it paid carry the
+    // names (denormalized at trade time), which is what the desk shows
+    const names = new Map(
+      (
+        await Position.aggregate<{
+          _id: string;
+          eventTitle: string;
+          marketTitle: string;
+          eventSlug: string;
+          outcomes: { id: string; label: string }[];
+        }>([
+          { $match: { marketId: { $in: settlements.map((s) => s.marketId) } } },
+          {
+            $group: {
+              _id: "$marketId",
+              eventTitle: { $first: "$eventTitle" },
+              marketTitle: { $first: "$marketTitle" },
+              eventSlug: { $first: "$eventSlug" },
+              outcomes: { $addToSet: { id: "$outcomeId", label: "$outcomeLabel" } },
+            },
+          },
+        ])
+      ).map((n) => [n._id, n]),
+    );
     return {
       success: true,
       data: {
@@ -389,6 +413,13 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           id: String(s._id),
           eventId: s.eventId,
           marketId: s.marketId,
+          eventTitle: names.get(s.marketId)?.eventTitle ?? null,
+          marketTitle: names.get(s.marketId)?.marketTitle ?? null,
+          eventSlug: names.get(s.marketId)?.eventSlug ?? null,
+          // null when nobody had backed the winner, so no position names it
+          winningOutcomeLabel:
+            names.get(s.marketId)?.outcomes.find((o) => o.id === s.winningOutcomeId)?.label ??
+            null,
           winningOutcomeId: s.winningOutcomeId,
           voided: s.voided,
           source: s.source,

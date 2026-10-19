@@ -9,6 +9,7 @@ import {
   ArrowPathIcon as Loader2,
   EnvelopeIcon as Mail,
   ArrowPathIcon as RefreshCw,
+  ChevronDownIcon as ChevronDown,
 } from "@heroicons/react/24/outline";
 import { bookHref } from "@/lib/book";
 import { ApiError, isApiConfigured } from "@/lib/api-client";
@@ -24,6 +25,8 @@ import {
   type Attention,
   type QueueEvent,
   type QueueMarket,
+  type SettlementQueue as SettlementQueueData,
+  type SettlementRecord,
 } from "@/lib/admin-api";
 import {
   publishAdminFx,
@@ -57,7 +60,6 @@ import { BookOverview } from "@/components/admin/book-overview";
  * Amounts follow the desk's naira/dollar switch (useAdminMoney).
  */
 export function LocalDesk() {
-  const money = useAdminMoney();
   const queue = useAdminResource(fetchSettlementQueue, true);
   const settlements = useAdminResource(fetchSettlements, true);
   // The overview and the risk strip read their own endpoints; settling
@@ -120,77 +122,230 @@ export function LocalDesk() {
 
       <FxCard />
 
-      <section className="mt-8">
-        <div className="flex items-baseline justify-between gap-4">
+      <SettlementQueue
+        queue={queue.data}
+        loading={queue.loading}
+        error={queue.error}
+        onDone={refresh}
+      />
+
+      <RecentSettlements items={settlements.data} />
+    </>
+  );
+}
+
+/* ---------- settlement queue ---------- */
+
+/** How many folded cards "All open" shows before "Show more". */
+const QUEUE_PAGE = 20;
+
+/**
+ * Every event that still has open bets — most of them just waiting for
+ * their result. The desk only has to act on the ones the API flags
+ * (resolved but unsettled, overdue, cancelled, unmatched, unreachable),
+ * so those come first under "Needs action" with their settle controls
+ * open; everything else sits folded under "All open", searchable.
+ */
+function SettlementQueue({
+  queue,
+  loading,
+  error,
+  onDone,
+}: {
+  queue: SettlementQueueData | null;
+  loading: boolean;
+  error: string | null;
+  onDone: () => void;
+}) {
+  const [view, setView] = useState<"action" | "all">("action");
+  const [search, setSearch] = useState("");
+  const [shown, setShown] = useState(QUEUE_PAGE);
+
+  const events = queue?.events ?? [];
+  const needsAction = events.filter((e) => e.attention !== null);
+  const term = search.trim().toLowerCase();
+  // flagged first, then the order the API gives (soonest to resolve)
+  const all = [...needsAction, ...events.filter((e) => e.attention === null)].filter(
+    (e) => !term || (e.eventTitle || e.eventId).toLowerCase().includes(term),
+  );
+  const list = view === "action" ? needsAction : all.slice(0, shown);
+
+  const tab = (key: "action" | "all", label: string, count: number) => (
+    <button
+      type="button"
+      aria-pressed={view === key}
+      onClick={() => {
+        setView(key);
+        setShown(QUEUE_PAGE);
+      }}
+      className={`h-8 rounded-sm px-3 text-[13px] font-semibold transition-colors ${
+        view === key ? "bg-surface text-primary shadow-card" : "text-secondary hover:text-primary"
+      }`}
+    >
+      {label}
+      <span className="ml-1.5 tabular-nums text-tertiary">{count}</span>
+    </button>
+  );
+
+  return (
+    <section className="mt-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold">Settlement queue</h2>
-          {queue.data && (
-            <p className="text-[13px] font-medium text-tertiary">
-              {queue.data.events.length} event
-              {queue.data.events.length === 1 ? "" : "s"} with open positions
-              {queue.data.truncated && " (capped)"}
-            </p>
-          )}
-        </div>
-
-        {queue.error && (
-          <p className="mt-3 text-sm font-semibold text-no">{queue.error}</p>
-        )}
-        {queue.loading && !queue.data && (
-          <p className="py-8 text-center text-sm text-secondary">Loading…</p>
-        )}
-        {queue.data?.events.length === 0 && (
-          <p className="py-8 text-center text-sm text-secondary">
-            Nothing open. Every stake has been settled.
+          <p className="mt-0.5 text-[13px] text-secondary">
+            Markets with open bets. Only the flagged ones need you.
           </p>
-        )}
-
-        <div className="mt-3 flex flex-col gap-3">
-          {queue.data?.events.map((event) => (
-            <QueueCard
-              key={event.eventId}
-              event={event}
-              overdueHours={queue.data!.overdueHours}
-              onDone={refresh}
-            />
-          ))}
         </div>
-      </section>
-
-      <section className="mt-8">
-        <h2 className="text-lg font-semibold">Recent settlements</h2>
-        {settlements.data?.length === 0 && (
-          <p className="py-8 text-center text-sm text-secondary">
-            Nothing settled yet.
-          </p>
+        {queue && (
+          <div role="group" aria-label="Queue view" className="flex rounded-md bg-element-2 p-0.5">
+            {tab("action", "Needs action", needsAction.length)}
+            {tab("all", "All open", events.length)}
+          </div>
         )}
-        <ul className="mt-1 flex flex-col">
-          {settlements.data?.map((s) => (
+      </div>
+
+      {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}
+      {loading && !queue && (
+        <p className="py-8 text-center text-sm text-secondary">Loading…</p>
+      )}
+
+      {queue && events.length === 0 && (
+        <p className="py-8 text-center text-sm text-secondary">
+          Nothing open. Every stake has been settled.
+        </p>
+      )}
+
+      {queue && events.length > 0 && view === "action" && needsAction.length === 0 && (
+        <div className="mt-3 flex flex-col items-start gap-2 rounded-xl border border-border bg-surface px-4 py-4 shadow-card sm:flex-row sm:items-center sm:justify-between">
+          <p className="flex items-center gap-2 text-sm font-medium text-secondary">
+            <CheckCircle2 className="size-4 shrink-0 text-yes" />
+            Nothing needs you right now — {events.length} event
+            {events.length === 1 ? " is" : "s are"} waiting for {events.length === 1 ? "its" : "their"} result.
+          </p>
+          <button
+            type="button"
+            onClick={() => setView("all")}
+            className="shrink-0 text-sm font-semibold text-accent-ink hover:underline"
+          >
+            See all open
+          </button>
+        </div>
+      )}
+
+      {view === "all" && events.length > 0 && (
+        <input
+          value={search}
+          onChange={(e) => {
+            setSearch(e.target.value);
+            setShown(QUEUE_PAGE);
+          }}
+          placeholder="Search events"
+          aria-label="Search the settlement queue"
+          className="mt-3 h-10 w-full rounded-md border border-border bg-surface px-3 text-sm font-medium outline-none placeholder:text-tertiary focus:border-accent sm:max-w-sm"
+        />
+      )}
+
+      {/* the list scrolls inside its own box, under a screen tall, so the
+          page itself stays short however many events are open */}
+      <div className="mt-3 flex max-h-[70dvh] flex-col gap-3 overflow-y-auto overscroll-contain">
+        {list.map((event) => (
+          <QueueCard
+            key={event.eventId}
+            event={event}
+            overdueHours={queue!.overdueHours}
+            onDone={onDone}
+            startOpen={view === "action"}
+          />
+        ))}
+      </div>
+
+      {view === "all" && term && all.length === 0 && (
+        <p className="py-6 text-center text-sm text-secondary">No event matches &ldquo;{search.trim()}&rdquo;.</p>
+      )}
+      {view === "all" && all.length > shown && (
+        <button
+          type="button"
+          onClick={() => setShown((n) => n + QUEUE_PAGE)}
+          className="mt-3 h-10 w-full rounded-md border border-border bg-surface text-sm font-semibold text-secondary transition-colors hover:border-border-hover hover:text-primary"
+        >
+          Show more ({all.length - shown} left)
+        </button>
+      )}
+      {queue?.truncated && (
+        <p className="mt-2 text-[13px] font-medium text-tertiary">
+          The queue is capped — the oldest events beyond the cap aren&rsquo;t listed.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/* ---------- recent settlements ---------- */
+
+const SETTLED_PAGE = 10;
+
+function RecentSettlements({ items }: { items: SettlementRecord[] | null }) {
+  const money = useAdminMoney();
+  const [shown, setShown] = useState(SETTLED_PAGE);
+  if (!items) return null;
+
+  return (
+    <section className="mt-8">
+      <h2 className="text-lg font-semibold">Recent settlements</h2>
+      {items.length === 0 && (
+        <p className="py-8 text-center text-sm text-secondary">Nothing settled yet.</p>
+      )}
+      <ul className="mt-1 flex max-h-[60dvh] flex-col overflow-y-auto overscroll-contain">
+        {items.slice(0, shown).map((s) => {
+          const title = [s.eventTitle, s.marketTitle && s.marketTitle !== s.eventTitle ? s.marketTitle : null]
+            .filter(Boolean)
+            .join(" — ");
+          return (
             <li
               key={s.id}
               className="flex items-center gap-3 border-b border-border py-3 last:border-0"
             >
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-semibold">
-                  {s.voided ? "Voided" : "Settled"} ·{" "}
-                  <span className="font-mono text-[13px] text-secondary">
-                    {s.marketId.slice(0, 8)}
-                  </span>
+                  {title && s.eventSlug ? (
+                    <Link href={bookHref(s.eventSlug, s.eventId)} className="hover:underline">
+                      {title}
+                    </Link>
+                  ) : (
+                    title || <span className="font-mono text-[13px] text-secondary">{s.marketId.slice(0, 8)}</span>
+                  )}
                 </p>
                 <p className="mt-0.5 text-[13px] font-medium text-tertiary">
-                  {s.source === "admin" ? `By ${s.actor}` : "Auto"} ·{" "}
-                  {s.positionsSettled} position
-                  {s.positionsSettled === 1 ? "" : "s"}
+                  {s.voided
+                    ? "Voided — stakes refunded"
+                    : s.winningOutcomeLabel
+                      ? `Won: ${s.winningOutcomeLabel}`
+                      : "Settled"}{" "}
+                  · {s.source === "admin" ? `by ${s.actor}` : "automatically"} ·{" "}
+                  {s.positionsSettled} bet{s.positionsSettled === 1 ? "" : "s"}
                   {s.createdAt && ` · ${fmtDateTime(s.createdAt)}`}
                 </p>
               </div>
-              <p className="shrink-0 text-sm font-semibold text-yes">
-                {money.format(s.payoutTotalKobo)}
+              <p className="shrink-0 text-right text-sm font-semibold">
+                <span className="block">{money.format(s.payoutTotalKobo)}</span>
+                <span className="block text-[11px] font-medium text-tertiary">
+                  {s.voided ? "refunded" : "paid out"}
+                </span>
               </p>
             </li>
-          ))}
-        </ul>
-      </section>
-    </>
+          );
+        })}
+      </ul>
+      {items.length > shown && (
+        <button
+          type="button"
+          onClick={() => setShown((n) => n + SETTLED_PAGE)}
+          className="mt-3 h-10 w-full rounded-md border border-border bg-surface text-sm font-semibold text-secondary transition-colors hover:border-border-hover hover:text-primary"
+        >
+          Show more ({items.length - shown} older)
+        </button>
+      )}
+    </section>
   );
 }
 
@@ -421,13 +576,17 @@ function QueueCard({
   event,
   overdueHours,
   onDone,
+  startOpen,
 }: {
   event: QueueEvent;
   overdueHours: number;
   onDone: () => void;
+  /** Settle controls showing from the start (the "Needs action" view). */
+  startOpen: boolean;
 }) {
   const flag = event.attention ? ATTENTION[event.attention] : null;
   const money = useAdminMoney();
+  const [open, setOpen] = useState(startOpen);
 
   return (
     <article className="rounded-xl border border-border bg-surface p-4 shadow-card">
@@ -465,18 +624,29 @@ function QueueCard({
             {event.attention === "overdue" && ` (over ${overdueHours}h ago)`}
           </p>
         </div>
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setOpen((v) => !v)}
+          className="flex h-8 shrink-0 items-center gap-1 rounded-sm px-2.5 text-[13px] font-semibold text-secondary transition-colors hover:bg-element-2 hover:text-primary"
+        >
+          {open ? "Hide" : `Settle (${event.markets.length} market${event.markets.length === 1 ? "" : "s"})`}
+          <ChevronDown className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
       </div>
 
-      <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-        {event.markets.map((market) => (
-          <MarketRow
-            key={market.marketId}
-            eventId={event.eventId}
-            market={market}
-            onDone={onDone}
-          />
-        ))}
-      </div>
+      {open && (
+        <div className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+          {event.markets.map((market) => (
+            <MarketRow
+              key={market.marketId}
+              eventId={event.eventId}
+              market={market}
+              onDone={onDone}
+            />
+          ))}
+        </div>
+      )}
     </article>
   );
 }

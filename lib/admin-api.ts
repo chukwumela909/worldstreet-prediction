@@ -71,6 +71,12 @@ export interface SettlementRecord {
   id: string;
   eventId: string;
   marketId: string;
+  /** Names from the positions it paid; absent on an older API. */
+  eventTitle?: string | null;
+  marketTitle?: string | null;
+  eventSlug?: string | null;
+  /** The winning side's label, when anyone had backed it. */
+  winningOutcomeLabel?: string | null;
   winningOutcomeId: string | null;
   voided: boolean;
   source: string;
