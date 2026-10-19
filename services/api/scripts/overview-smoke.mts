@@ -156,6 +156,41 @@ const losers = await get("/v1/admin/traders?activeOnly=true&sort=losers");
 check("biggest losers first", losers.body.data?.traders[0]?.username === "bayo");
 const open = await get("/v1/admin/traders?activeOnly=true&sort=open");
 check("most money in play first", open.body.data?.traders[0]?.username === "ada");
+/* -------- bettors are never hidden by newer, never-staked accounts -------- */
+console.log("traders beyond the newest 2,000 accounts");
+// 2,005 sign-ups newer than everyone above, none of whom ever bet — the
+// old listing scanned only the newest 2,000 profiles and lost the bettors
+const later = Date.now() + 60_000;
+await User.collection.insertMany(
+  Array.from({ length: 2_005 }, (_, i) => ({
+    authUserId: `signup_${i}`,
+    username: `signup${i}`,
+    displayName: `Signup ${i}`,
+    email: `signup${i}@test.dev`,
+    createdAt: new Date(later + i),
+    updatedAt: new Date(later + i),
+  })),
+);
+const crowded = await get("/v1/admin/traders?activeOnly=true&sort=staked");
+check(
+  "every bettor is still listed under Active traders",
+  crowded.body.data?.total === 2 &&
+    crowded.body.data.traders.map((t: { username: string }) => t.username).sort().join() === "ada,bayo",
+);
+const everyone = await get("/v1/admin/traders?activeOnly=false");
+check(
+  "All accounts: the newest 2,000 plus every bettor beyond them",
+  everyone.body.data?.total === 2_002 && everyone.body.data.truncated === true,
+);
+// a bet from an account with no profile row at all
+await bet({ user: "ghost", market: "m9", stake: 7_000, price: 7_000, status: "open", placedHoursAgo: 1 });
+const withGhost = await get("/v1/admin/traders?activeOnly=true");
+check(
+  "a bettor without a profile is listed, not dropped",
+  withGhost.body.data?.total === 3 &&
+    withGhost.body.data.traders.some((t: { authUserId: string }) => t.authUserId === "ghost"),
+);
+
 const refused = await app.inject({ method: "GET", url: "/v1/admin/overview" });
 check("no key, no login → refused", refused.statusCode === 401 || refused.statusCode === 403);
 

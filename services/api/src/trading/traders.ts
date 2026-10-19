@@ -11,8 +11,10 @@ import { NairaAccount, Position } from "./models.js";
  * Three collections, three round trips, merged in memory rather than
  * with `$lookup` — same reason as leaderboard.ts: profiles, positions
  * and balances stay joinable even if they ever live in separate
- * databases. That costs a bounded scan (`SCAN_CAP`), which is honest
- * for a book this size and says so via `truncated` when it isn't.
+ * databases. Everyone who has ever staked is always in the list (found
+ * from the positions, then joined to their profile); only the
+ * never-staked accounts under "All accounts" are a bounded scan of the
+ * newest `SCAN_CAP`, reported via `truncated`.
  *
  * Kobo end to end; the UI renders credit.
  */
@@ -74,8 +76,20 @@ export interface TraderList {
   truncated: boolean;
 }
 
-/** As many profiles as one listing will merge in memory. */
+/**
+ * As many never-staked profiles as "All accounts" will merge in memory.
+ * Bettors are always included on top of this, whatever their age.
+ */
 const SCAN_CAP = 2000;
+
+interface ProfileDoc {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  avatar?: string | null;
+  createdAt?: Date | null;
+}
 
 interface PositionStats {
   _id: string;
@@ -126,21 +140,66 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
       }
     : {};
 
-  // one over the cap, so we can tell "exactly full" from "there's more"
-  const users = await User.find(filter, {
+  const projection = {
     authUserId: 1,
     username: 1,
     displayName: 1,
     email: 1,
     avatar: 1,
     createdAt: 1,
-  })
-    .sort({ createdAt: -1 })
-    .limit(SCAN_CAP + 1)
-    .lean();
+  };
 
-  const truncated = users.length > SCAN_CAP;
-  const scanned = truncated ? users.slice(0, SCAN_CAP) : users;
+  // Everyone who has ever staked — the list must never lose one of
+  // them. Most accounts never bet, so scanning the newest profiles alone
+  // hid every bettor who signed up before the newest SCAN_CAP accounts.
+  const bettorIds: string[] = await Position.distinct("authUserId");
+
+  let truncated = false;
+  let scanned: ProfileDoc[];
+  if (params.activeOnly) {
+    // the bettors themselves, matched against the search
+    scanned = await User.find(
+      { ...filter, authUserId: { $in: bettorIds } },
+      projection,
+    ).lean<ProfileDoc[]>();
+  } else {
+    // one over the cap, so we can tell "exactly full" from "there's more"
+    const recent = await User.find(filter, projection)
+      .sort({ createdAt: -1 })
+      .limit(SCAN_CAP + 1)
+      .lean<ProfileDoc[]>();
+    truncated = recent.length > SCAN_CAP;
+    scanned = truncated ? recent.slice(0, SCAN_CAP) : recent;
+    // ...plus every bettor the scan didn't reach
+    const have = new Set(scanned.map((u) => u.authUserId));
+    const beyond = bettorIds.filter((id) => !have.has(id));
+    if (beyond.length > 0) {
+      scanned.push(
+        ...(await User.find(
+          { ...filter, authUserId: { $in: beyond } },
+          projection,
+        ).lean<ProfileDoc[]>()),
+      );
+    }
+  }
+
+  // A bettor with no profile at all shouldn't exist (authenticate()
+  // creates one on the first request), but money is never hidden: list
+  // them under their id rather than drop them.
+  const profiled = new Set(scanned.map((u) => u.authUserId));
+  for (const id of bettorIds) {
+    if (profiled.has(id)) continue;
+    if (search && search !== id) continue;
+    scanned.push({
+      authUserId: id,
+      username: id,
+      displayName: "Account without a profile",
+      email: "",
+      avatar: "",
+      createdAt: null,
+    });
+  }
+
   const ids = scanned.map((u) => u.authUserId);
 
   if (ids.length === 0) {
