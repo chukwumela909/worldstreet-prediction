@@ -153,6 +153,37 @@ export interface MarketLimitFlag {
   level: "watch" | "critical";
 }
 
+/** Settled-market figures for one window (or one book within it). */
+export interface PnlFigures {
+  /** Stakes on settled won + lost bets — what came in. */
+  stakesKobo: number;
+  /** Paid out to winners. */
+  payoutsKobo: number;
+  /** Handed back on voided bets — no effect on profit. */
+  refundsKobo: number;
+  /** stakes − payouts; negative means the house lost money. */
+  profitKobo: number;
+  positions: number;
+  markets: number;
+}
+
+export interface PnlWindow extends PnlFigures {
+  local: PnlFigures;
+  international: PnlFigures;
+}
+
+/** What the book has actually made or lost on finished markets. */
+export interface ProfitAndLoss {
+  allTime: PnlWindow;
+  last30Days: PnlWindow;
+  last7Days: PnlWindow;
+}
+
+export async function fetchProfitAndLoss(): Promise<ProfitAndLoss> {
+  const res = await apiFetch<{ data: ProfitAndLoss }>("/v1/admin/pnl");
+  return res.data;
+}
+
 export async function fetchBookRisk(): Promise<BookRisk> {
   const res = await apiFetch<{ data: BookRisk }>("/v1/admin/risk");
   return res.data;
@@ -472,6 +503,8 @@ export interface BookSettings {
   priceToleranceKobo: number;
   /** Betting stops this long before a countdown market closes. */
   countdownCutoffSeconds: number;
+  /** Alert the admins when the book's worst case reaches this loss; 0 = off. */
+  lossAlertKobo: number;
 }
 
 export type BookSettingKey = keyof BookSettings;

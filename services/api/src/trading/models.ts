@@ -194,6 +194,7 @@ const bookSettingsSchema = new Schema(
     maxMarketExposureKobo: { type: Number },
     priceToleranceKobo: { type: Number },
     countdownCutoffSeconds: { type: Number },
+    lossAlertKobo: { type: Number },
     /** Email of the admin behind the last change. */
     updatedBy: { type: String },
   },

@@ -86,6 +86,7 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
     maxMarketExposureKobo: exposure,
     priceToleranceKobo: tolerance,
     countdownCutoffSeconds: cutoff,
+    lossAlertKobo: lossAlert,
   } = values;
   const risks: SettingRisk[] = [];
 
@@ -150,6 +151,13 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
       field: "countdownCutoffSeconds",
       level: "risky",
       reason: "Late bets when the result is nearly known.",
+    });
+  }
+  if (lossAlert === 0) {
+    risks.push({
+      field: "lossAlertKobo",
+      level: "caution",
+      reason: "Off — nobody is told when the whole book's possible loss grows.",
     });
   }
   return risks;

@@ -15,6 +15,7 @@ import { getSettlementQueue } from "../trading/exposure.js";
 import { listTraders, TRADER_SORTS, type TraderSort } from "../trading/traders.js";
 import { getBookRisk } from "../trading/risk.js";
 import { getSettingsView, updateBookSettings } from "../trading/settings.js";
+import { getProfitAndLoss } from "../trading/pnl.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 
@@ -60,6 +61,7 @@ const settingsBody = z
     maxMarketExposureKobo: z.number().int(),
     priceToleranceKobo: z.number().int(),
     countdownCutoffSeconds: z.number().int(),
+    lossAlertKobo: z.number().int(),
   })
   .partial()
   .strict();
@@ -85,6 +87,15 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       return { success: true, data: { label, via } };
     },
   );
+
+  /**
+   * What the book has actually made or lost on finished markets — all
+   * time, last 30 and 7 days, Local vs international (trading/pnl.ts).
+   */
+  app.get("/admin/pnl", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getProfitAndLoss() };
+  });
 
   /** The book's pricing and limits, their defaults, bounds and change log. */
   app.get("/admin/settings", async (request) => {

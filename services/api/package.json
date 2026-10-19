@@ -18,6 +18,7 @@
     "smoke:polymarket:quick": "tsx scripts/polymarket-quick.mts",
     "smoke:settings": "tsx scripts/settings-smoke.mts",
     "smoke:admin-keys": "tsx scripts/admin-keys-smoke.mts",
+    "smoke:risk-alerts": "tsx scripts/risk-alerts-smoke.mts",
     "verify:leaderboard": "tsx scripts/verify-leaderboard.ts",
     "verify:traders": "tsx scripts/verify-traders.ts",
     "inspect:settlement": "tsx scripts/inspect-settlement.ts"

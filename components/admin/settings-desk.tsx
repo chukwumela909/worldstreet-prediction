@@ -123,6 +123,13 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     step: 5,
     info: "For short countdown markets (like 15-minute crypto), betting stops this many seconds before the close, so nobody can bet when the result is almost certain.",
   },
+  lossAlertKobo: {
+    key: "lossAlertKobo",
+    label: "Book loss alert",
+    unit: "credit",
+    step: 100_000,
+    info: "Admins get an alert email when the most we could lose across all open bets reaches this amount. Separately, they're always alerted when any one market reaches 70% and 90% of its Maximum loss per market. Set it to 0 to switch this alert off. Alerts only ever go to admins, never to users.",
+  },
 };
 
 /** Page order — the groups below, flattened. */
@@ -135,6 +142,7 @@ const ORDER: BookSettingKey[] = [
   "maxMarketExposureKobo",
   "priceToleranceKobo",
   "countdownCutoffSeconds",
+  "lossAlertKobo",
 ];
 
 const NUMERIC_KEYS = ORDER.filter(isNumericKey);
@@ -159,6 +167,11 @@ const GROUPS: { title: string; note: string; rows: BookSettingKey[] }[] = [
     title: "Safety",
     note: "Guards against stale prices and last-second bets.",
     rows: ["priceToleranceKobo", "countdownCutoffSeconds"],
+  },
+  {
+    title: "Alerts",
+    note: "When admins are emailed about the risk of a loss — never users.",
+    rows: ["lossAlertKobo"],
   },
 ];
 
@@ -324,6 +337,9 @@ function buildForm(state: BookSettingsState, edits: Edits): Form {
   const errors: Form["errors"] = {};
 
   for (const key of NUMERIC_KEYS) {
+    // an API older than this page doesn't send every setting — leave the
+    // missing ones out rather than marking them invalid
+    if (settings[key] === undefined) continue;
     const text = edits[key] ?? toInput(key, settings[key]);
     texts[key] = text;
     const parsed = parseField(key, text, limits[key]);
@@ -347,6 +363,7 @@ function buildForm(state: BookSettingsState, edits: Edits): Form {
   for (const key of ORDER) {
     const to = values[key];
     const from = settings[key];
+    if (from === undefined) continue; // not on this API (see above)
     if (to === undefined) {
       dirty = true;
       continue;
@@ -553,7 +570,12 @@ function SettingsForm({
       {risks.length > 0 && <RiskBanner risks={risks} dirty={form.dirty} />}
 
       <div className="mt-6 flex flex-col gap-4">
-        {GROUPS.map((group) => (
+        {GROUPS.map((group) => ({
+          ...group,
+          rows: group.rows.filter((key) => state.settings[key] !== undefined),
+        }))
+          .filter((group) => group.rows.length > 0)
+          .map((group) => (
           <section
             key={group.title}
             className="rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5"

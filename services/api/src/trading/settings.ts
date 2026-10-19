@@ -37,6 +37,12 @@ export interface BookSettings {
   priceToleranceKobo: number;
   /** No new trades this close to a countdown market's close. */
   countdownCutoffSeconds: number;
+  /**
+   * Email the admins when the whole book's worst case reaches this loss
+   * (trading/risk-alerts.ts). 0 turns that alert off; the per-market
+   * near-limit alerts run regardless.
+   */
+  lossAlertKobo: number;
 }
 
 export type SettingKey = keyof BookSettings;
@@ -51,6 +57,7 @@ export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = 
   maxMarketExposureKobo: { min: 100_000, max: 100_000_000_000 }, // ₦1,000 – ₦1B
   priceToleranceKobo: { min: 0, max: 2_000 }, // ₦0 – ₦20
   countdownCutoffSeconds: { min: 0, max: 3_600 },
+  lossAlertKobo: { min: 0, max: 100_000_000_000 }, // ₦0 (off) – ₦1B
 };
 
 export const SETTING_KEYS: readonly SettingKey[] = [
@@ -62,6 +69,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "maxMarketExposureKobo",
   "priceToleranceKobo",
   "countdownCutoffSeconds",
+  "lossAlertKobo",
 ];
 
 /** ₦100 floor: Bayse's own minimum, and the trade schema's. */
@@ -78,6 +86,7 @@ export function defaultSettings(): BookSettings {
     maxMarketExposureKobo: config.TRADE_MAX_MARKET_EXPOSURE_KOBO,
     priceToleranceKobo: 200, // ₦2 per ₦100 share
     countdownCutoffSeconds: config.TRADE_COUNTDOWN_CUTOFF_SECONDS,
+    lossAlertKobo: 100_000_000, // ₦1,000,000
   };
 }
 

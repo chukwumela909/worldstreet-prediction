@@ -217,7 +217,7 @@ function LimitRow({ flag }: { flag: MarketLimitFlag }) {
   );
 }
 
-function Stat({
+export function Stat({
   label,
   value,
   valueClass,

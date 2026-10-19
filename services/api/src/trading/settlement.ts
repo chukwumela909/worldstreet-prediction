@@ -5,6 +5,7 @@ import { fetchTradableEvent } from "./events.js";
 import { creditNaira } from "./ledger.js";
 import { Position, Settlement, type SettlementSource } from "./models.js";
 import { markWorldstreetSettled } from "./worldstreet.js";
+import { checkRiskAlerts } from "./risk-alerts.js";
 
 /**
  * Settlement engine for the Local markets book. One market settles
@@ -289,6 +290,14 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
       // one broken event must not stall the rest of the pass
       log.error({ err, eventId }, "settlement pass failed for event");
     }
+  }
+
+  // with this pass's settlements done, warn the admins if what's still
+  // open is heading for a loss (trading/risk-alerts.ts)
+  try {
+    await checkRiskAlerts(log);
+  } catch (err) {
+    log.error({ err }, "risk alert check failed");
   }
 }
 

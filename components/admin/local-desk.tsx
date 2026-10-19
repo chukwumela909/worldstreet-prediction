@@ -29,6 +29,7 @@ import {
 } from "@/lib/admin-api";
 import { useNairaWallet } from "@/lib/naira-wallet";
 import { BookRiskStrip } from "@/components/admin/book-risk";
+import { PnlCard } from "@/components/admin/pnl-card";
 
 /**
  * The Local (naira) book's operating desk. Two jobs:
@@ -105,6 +106,8 @@ export function LocalDesk() {
       </div>
 
       <BookRiskStrip reloadKey={bookVersion} />
+
+      <PnlCard reloadKey={bookVersion} />
 
       <FxCard />
 
