@@ -89,19 +89,12 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     step: 0.5,
     info: "What we add to Bayse's price on every Local bet — the house's margin. At 2 points, an outcome Bayse rates 60% costs ₦62 instead of ₦60, and a winning share still pays ₦100. Our own markets aren't affected — their prices are set at the desk.",
   },
-  autoSpreadMaxBps: {
-    key: "autoSpreadMaxBps",
-    label: "Auto-adjust: biggest rise",
-    unit: "points",
-    step: 0.5,
-    info: "When most of a market's money is on one side — so we'd lose if that side wins — that side's price goes up automatically, by up to this much. The other side stays at the normal price. Set to 0 to switch auto-adjusting off.",
-  },
-  autoSpreadFullAtKobo: {
-    key: "autoSpreadFullAtKobo",
-    label: "Auto-adjust: full rise at",
+  autoSpreadStepKobo: {
+    key: "autoSpreadStepKobo",
+    label: "Auto-adjust: +1 point for every",
     unit: "credit",
-    step: 50_000,
-    info: "How much we'd have to stand to lose on one side before the full rise applies. Smaller amounts get part of it — at half this amount, half the rise.",
+    step: 5_000,
+    info: "When most of a market's money is on one side — so we'd lose if that side wins — that side's price goes up 1 point for every this much we'd lose. At ₦40,000: ₦200,000 at risk is +5 points, ₦1,000,000 is +25. There's no top limit — the price keeps rising with the bets, up to ₦99 — and Maximum loss per market still stops new bets. The other side stays at the normal price. A smaller amount makes prices rise faster. Set to 0 to switch auto-adjusting off.",
   },
   fxSpreadBps: {
     key: "fxSpreadBps",
@@ -160,8 +153,7 @@ const ORDER: BookSettingKey[] = [
   "polymarketSpreadBps",
   "localSpreadBps",
   "fxSpreadBps",
-  "autoSpreadMaxBps",
-  "autoSpreadFullAtKobo",
+  "autoSpreadStepKobo",
   "minStakeKobo",
   "maxStakeKobo",
   "maxMarketExposureKobo",
@@ -185,8 +177,8 @@ const GROUPS: { title: string; note: string; rows: BookSettingKey[] }[] = [
   },
   {
     title: "Auto-adjusting spread",
-    note: "Raises the price on whichever side of a market most money is on, so new bets are pushed to the other side.",
-    rows: ["autoSpreadMaxBps", "autoSpreadFullAtKobo"],
+    note: "Raises the price on whichever side of a market most money is on — more as the bets grow — so new bets are pushed to the other side.",
+    rows: ["autoSpreadStepKobo"],
   },
   {
     title: "Limits",

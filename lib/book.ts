@@ -15,8 +15,9 @@ import { formatNaira, toMultiplier } from "@/lib/format";
  *   `polymarketSpreadBps`, and only while the API's international
  *   switch is on — off, it's a display-only mirror with no quote here.
  * - **Auto-rise.** On the side of a market where the house stands to
- *   lose, the API raises the price by up to `autoSpreadMaxBps`, in
- *   proportion to how much it stands to lose. The API computes that per
+ *   lose, the API raises the price 1 point for every
+ *   `autoSpreadStepKobo` it stands to lose, with no cap short of the
+ *   ₦99 ceiling. The API computes that per
  *   outcome; the bet slip and the market page's outcome rows read it
  *   from GET /v1/markets/rises (lib/use-market-rises.ts) and pass it in
  *   as `riseBps`. Board surfaces (cards, lists) show the base price.

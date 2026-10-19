@@ -1,5 +1,5 @@
 import { ExclamationTriangleIcon as AlertTriangle } from "@heroicons/react/20/solid";
-import { formatNairaCompact } from "@/lib/format";
+import { CREDIT, formatNairaCompact } from "@/lib/format";
 import type { BookSettingKey, BookSettings } from "@/lib/admin-api";
 
 /**
@@ -75,6 +75,7 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
   const LOW_FX_SPREAD_BPS = 50; // under 0.5%
   const THIN_LOCAL_SPREAD_BPS = 100; // under 1 point
   const LOW_LOCAL_SPREAD_BPS = 150; // under 1.5 points
+  const STEEP_AUTO_STEP_KOBO = 1_000_000; // +1 point per under 10,000 credit
   const BIG_STAKE_KOBO = 100_000_000; // over 1,000,000 credit
   const BIG_EXPOSURE_KOBO = 1_000_000_000; // over 10,000,000 credit
   const LOOSE_TOLERANCE_KOBO = 500; // over 5 credit
@@ -85,7 +86,7 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
     polymarketSpreadBps: spread,
     localSpreadBps: localSpread,
     fxSpreadBps: fxSpread,
-    autoSpreadMaxBps: autoSpreadMax,
+    autoSpreadStepKobo: autoStep,
     maxStakeKobo: maxStake,
     maxMarketExposureKobo: exposure,
     priceToleranceKobo: tolerance,
@@ -136,11 +137,17 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
       reason: "Currency moves between rate updates can cost the house.",
     });
   }
-  if (autoSpreadMax === 0) {
+  if (autoStep === 0) {
     risks.push({
-      field: "autoSpreadMaxBps",
+      field: "autoSpreadStepKobo",
       level: "caution",
       reason: "Auto-adjusting is off — one-sided markets won't rebalance.",
+    });
+  } else if (autoStep !== undefined && autoStep < STEEP_AUTO_STEP_KOBO) {
+    risks.push({
+      field: "autoSpreadStepKobo",
+      level: "risky",
+      reason: `Very steep — a handful of bets can push a side's price to nearly ${CREDIT}99.`,
     });
   }
   if (maxStake !== undefined && exposure !== undefined && maxStake > exposure) {

@@ -598,10 +598,8 @@ export interface BookSettings {
   localSpreadBps: number;
   /** Dollar↔credit conversion margin each way; 100 = 1%. */
   fxSpreadBps: number;
-  /** The most the auto-adjusting spread adds to a market's exposed side, bps; 0 = off. */
-  autoSpreadMaxBps: number;
-  /** What the house must stand to lose on a side before the full rise applies, kobo. */
-  autoSpreadFullAtKobo: number;
+  /** Auto-adjusting spread: a market's exposed side rises 1 point per this much at risk, kobo, uncapped; 0 = off. */
+  autoSpreadStepKobo: number;
   minStakeKobo: number;
   maxStakeKobo: number;
   /** The most the house may lose on one market. */

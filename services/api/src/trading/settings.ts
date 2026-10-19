@@ -34,12 +34,11 @@ export interface BookSettings {
    */
   localSpreadBps: number;
   /**
-   * The most the auto-adjusting spread adds on the side of a market the
-   * house stands to lose on (trading/margin.ts). 0 turns it off.
+   * The auto-adjusting spread (trading/margin.ts): the side of a market
+   * the house stands to lose on rises 1 point for every this much at
+   * risk, with no cap. 0 turns it off.
    */
-  autoSpreadMaxBps: number;
-  /** How much the house must stand to lose on a side for the full rise. */
-  autoSpreadFullAtKobo: number;
+  autoSpreadStepKobo: number;
   /** Basis points taken on USD ⇄ NGN conversion, each direction. */
   fxSpreadBps: number;
   minStakeKobo: number;
@@ -65,8 +64,7 @@ type NumericKey = Exclude<SettingKey, "internationalTrading">;
 export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = {
   polymarketSpreadBps: { min: 0, max: 2_000 },
   localSpreadBps: { min: 0, max: 2_000 },
-  autoSpreadMaxBps: { min: 0, max: 2_000 },
-  autoSpreadFullAtKobo: { min: 100_000, max: 100_000_000_000 }, // ₦1,000 – ₦1B
+  autoSpreadStepKobo: { min: 0, max: 100_000_000_000 }, // 0 (off), else ₦1,000 – ₦1B
   fxSpreadBps: { min: 0, max: 2_000 },
   minStakeKobo: { min: 10_000, max: 100_000_000 }, // ₦100 – ₦1M
   maxStakeKobo: { min: 10_000, max: 1_000_000_000 }, // ₦100 – ₦10M
@@ -80,8 +78,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "internationalTrading",
   "polymarketSpreadBps",
   "localSpreadBps",
-  "autoSpreadMaxBps",
-  "autoSpreadFullAtKobo",
+  "autoSpreadStepKobo",
   "fxSpreadBps",
   "minStakeKobo",
   "maxStakeKobo",
@@ -90,6 +87,12 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "countdownCutoffSeconds",
   "lossAlertKobo",
 ];
+
+/**
+ * Smallest auto-adjust step that isn't 0 (off): below ₦1,000 a point, a
+ * couple of bets would put a side at the ceiling.
+ */
+const MIN_AUTO_SPREAD_STEP_KOBO = 100_000;
 
 /** ₦100 floor: Bayse's own minimum, and the trade schema's. */
 const MIN_STAKE_FLOOR_KOBO = 10_000;
@@ -100,8 +103,7 @@ export function defaultSettings(): BookSettings {
     internationalTrading: false,
     polymarketSpreadBps: config.POLYMARKET_SPREAD_BPS,
     localSpreadBps: 200, // 2 points on Bayse's price
-    autoSpreadMaxBps: 500, // up to +5 points on the exposed side
-    autoSpreadFullAtKobo: 20_000_000, // full rise once ₦200,000 is at stake
+    autoSpreadStepKobo: 4_000_000, // +1 point per ₦40,000 at risk on the exposed side
     fxSpreadBps: config.FX_SPREAD_BPS,
     minStakeKobo: MIN_STAKE_FLOOR_KOBO,
     maxStakeKobo: config.TRADE_MAX_STAKE_KOBO,
@@ -194,7 +196,7 @@ function invalid(message: string): never {
 /**
  * Apply an admin's edit. Only the keys present change; each is checked
  * against SETTING_LIMITS and the result against the cross-field rule
- * (min stake ≤ max stake) before anything is written. Unchanged values
+ * (min stake ≤ max stake; an auto-adjust step of 0 or ≥ ₦1,000) before anything is written. Unchanged values
  * are skipped, so the log only records real moves.
  */
 export async function updateBookSettings(
@@ -222,6 +224,9 @@ export async function updateBookSettings(
 
   if (next.minStakeKobo > next.maxStakeKobo) {
     invalid("The minimum stake can't be above the maximum stake");
+  }
+  if (next.autoSpreadStepKobo > 0 && next.autoSpreadStepKobo < MIN_AUTO_SPREAD_STEP_KOBO) {
+    invalid("The auto-adjust amount must be 0 (off) or at least ₦1,000");
   }
 
   const changed = SETTING_KEYS.filter((k) => next[k] !== current[k]);

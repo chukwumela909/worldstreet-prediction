@@ -14,10 +14,12 @@ import type { BookSettings } from "./settings.js";
  *    their margin;
  *  - an automatic RISE on any side the house stands to lose on: with
  *    `payout − everything staked on the market` at risk if that side
- *    wins, the side's price goes up by `autoSpreadMaxBps × (at risk ÷
- *    autoSpreadFullAtKobo)`, capped at the max. New money is pushed to
- *    the other side until the book balances, and the rise falls back to
- *    zero. The quiet side never goes below its base — the house never
+ *    wins, the side's price goes up 1 point for every
+ *    `autoSpreadStepKobo` at risk. There is no cap: it keeps growing
+ *    with the bets until the price meets the ₦99 ceiling, and the
+ *    market's loss limit stops new bets regardless. New money is pushed
+ *    to the other side until the book balances, and the rise falls back
+ *    to zero. The quiet side never goes below its base — the house never
  *    sells under its margin.
  *
  * The trade route charges `quotedPriceKobo` on every order; the web app
@@ -48,11 +50,15 @@ export function quotedPriceKobo(rawKobo: number, baseBps: number, riseBps: numbe
   return Math.min(rawKobo + margin, MAX_QUOTED_KOBO);
 }
 
-/** The rise on one side, from what the house would lose if it won. */
+/**
+ * The rise on one side, from what the house would lose if it won:
+ * 1 point (100 bps) per `autoSpreadStepKobo` at risk, uncapped — the
+ * price rule's ceiling is what stops it.
+ */
 export function riseBps(atRiskKobo: number, settings: BookSettings): number {
-  const { autoSpreadMaxBps: max, autoSpreadFullAtKobo: fullAt } = settings;
-  if (max <= 0 || fullAt <= 0 || atRiskKobo <= 0) return 0;
-  return Math.round(max * Math.min(1, atRiskKobo / fullAt));
+  const step = settings.autoSpreadStepKobo;
+  if (step <= 0 || atRiskKobo <= 0) return 0;
+  return Math.round((atRiskKobo / step) * 100);
 }
 
 /**
@@ -64,7 +70,7 @@ export async function risesFor(
   settings: BookSettings,
 ): Promise<Map<string, Map<string, number>>> {
   const out = new Map<string, Map<string, number>>();
-  if (marketIds.length === 0 || settings.autoSpreadMaxBps <= 0) return out;
+  if (marketIds.length === 0 || settings.autoSpreadStepKobo <= 0) return out;
   for (const market of await openRiskByMarket(marketIds)) {
     for (const side of market.outcomes) {
       // profitIfWins < 0: the house loses that much if this side wins

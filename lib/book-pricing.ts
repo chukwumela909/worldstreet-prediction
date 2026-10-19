@@ -31,14 +31,13 @@ export interface BookPricing {
    */
   localSpreadBps: number;
   /**
-   * The most the auto-adjusting spread adds to the side of a market the
-   * house stands to lose on, bps; 0 = off (or an API that predates it).
-   * The API works out each outcome's rise; the web reads it from GET
-   * /v1/markets/rises (lib/use-market-rises.ts).
+   * The auto-adjusting spread: the side of a market the house stands to
+   * lose on rises 1 point per this much at risk, kobo, with no cap; 0 =
+   * off (or an API that predates it). The API works out each outcome's
+   * rise; the web reads it from GET /v1/markets/rises
+   * (lib/use-market-rises.ts).
    */
-  autoSpreadMaxBps: number;
-  /** What the house must stand to lose on a side before the full rise applies, kobo; 0 = not published. */
-  autoSpreadFullAtKobo: number;
+  autoSpreadStepKobo: number;
   /** Smallest stake one order may carry, kobo. */
   minStakeKobo: number;
   /** Largest stake one order may carry, kobo. */
@@ -79,8 +78,7 @@ function parsePricing(data: unknown): BookPricing | null {
     polymarketSpreadBps: bps,
     // optional — an older API sends none of these, and 0 is what it charges
     localSpreadBps: isSpread(d.localSpreadBps) ? d.localSpreadBps : 0,
-    autoSpreadMaxBps: isSpread(d.autoSpreadMaxBps) ? d.autoSpreadMaxBps : 0,
-    autoSpreadFullAtKobo: isKobo(d.autoSpreadFullAtKobo) ? d.autoSpreadFullAtKobo : 0,
+    autoSpreadStepKobo: isKobo(d.autoSpreadStepKobo) ? d.autoSpreadStepKobo : 0,
     minStakeKobo,
     maxStakeKobo,
   };
@@ -122,7 +120,7 @@ const getCachedPricing = unstable_cache(
   fetchPricing,
   // a new key whenever the shape changes (v3: the Local spread and the
   // auto-adjusting spread), so a cached entry of an old shape is never served
-  ["book-pricing-v3", API_BASE],
+  ["book-pricing-v4", API_BASE],
   { revalidate: 60, tags: ["book-pricing"] },
 );
 

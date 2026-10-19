@@ -55,7 +55,7 @@ export function useQuote() {
       quoteMultiplier: (event: Pick<MarketEvent, "source">, price: string, riseBps = 0) =>
         quoteMultiplier(event, price, pricing, riseBps),
       international: pricing?.internationalTrading === true,
-      autoAdjusting: (pricing?.autoSpreadMaxBps ?? 0) > 0,
+      autoAdjusting: (pricing?.autoSpreadStepKobo ?? 0) > 0,
       minStakeKobo: pricing?.minStakeKobo ?? DEFAULT_MIN_STAKE_KOBO,
       maxStakeKobo: pricing?.maxStakeKobo ?? DEFAULT_MAX_STAKE_KOBO,
     }),

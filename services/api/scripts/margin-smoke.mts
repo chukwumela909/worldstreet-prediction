@@ -41,8 +41,8 @@ function check(name: string, cond: boolean) {
 console.log("base margin");
 const s0 = await settings.getBookSettings();
 check(
-  "defaults: Local 2 pts, rise up to 5 pts, full at ₦200,000",
-  s0.localSpreadBps === 200 && s0.autoSpreadMaxBps === 500 && s0.autoSpreadFullAtKobo === 20_000_000,
+  "defaults: Local 2 pts, +1 pt per ₦40,000 at risk",
+  s0.localSpreadBps === 200 && s0.autoSpreadStepKobo === 4_000_000,
 );
 check("Bayse markets get the Local spread", margin.baseMarginBps("bayse", s0) === 200);
 check("international markets get the Polymarket spread", margin.baseMarginBps("polymarket", s0) === 300);
@@ -55,6 +55,7 @@ check("…and at ₦64.50 with a 2.5-pt rise", margin.quotedPriceKobo(6_000, 200
 check("own market, nothing at risk: the desk's price", margin.quotedPriceKobo(5_800, 0, 0) === 5_800);
 check("own market with a rise", margin.quotedPriceKobo(5_800, 0, 150) === 5_950);
 check("capped below the ₦100 payout", margin.quotedPriceKobo(9_850, 200, 100) === 9_900);
+check("a huge rise stops at ₦99", margin.quotedPriceKobo(6_000, 200, 25_000) === 9_900);
 check("no room for a margin → not sold", margin.quotedPriceKobo(9_950, 200, 0) === 0);
 check(
   "decided or missing prices → not sold",
@@ -65,13 +66,21 @@ check(
 
 /* ---------------- the rise ---------------- */
 console.log("rise");
-check("half the full amount at risk → half the rise", margin.riseBps(10_000_000, s0) === 250);
-check("past the full amount → capped at the max", margin.riseBps(40_000_000, s0) === 500);
+check("₦60,000 at risk → +1.5 pts", margin.riseBps(6_000_000, s0) === 150);
+check("₦200,000 at risk → +5 pts", margin.riseBps(20_000_000, s0) === 500);
+check("no cap: ₦1,000,000 at risk → +25 pts", margin.riseBps(100_000_000, s0) === 2_500);
 check("nothing at risk → no rise", margin.riseBps(0, s0) === 0 && margin.riseBps(-5_000, s0) === 0);
 check(
-  "max 0 switches it off",
-  margin.riseBps(40_000_000, { ...s0, autoSpreadMaxBps: 0 }) === 0,
+  "a step of 0 switches it off",
+  margin.riseBps(100_000_000, { ...s0, autoSpreadStepKobo: 0 }) === 0,
 );
+let refused = false;
+try {
+  await settings.updateBookSettings({ autoSpreadStepKobo: 50_000 }, "smoke");
+} catch {
+  refused = true;
+}
+check("a step under ₦1,000 (other than 0) is refused", refused);
 
 let n = 0;
 async function bet(market: string, outcome: string, stakeKobo: number, priceKobo: number) {
@@ -101,11 +110,11 @@ await bet("11111111-1111-4111-8111-111111111111", "11111111-1111-4111-8111-11111
 await bet("22222222-2222-4222-8222-222222222222", "22222222-2222-4222-8222-2222222222a2", 50_000, 5_000);
 await bet("22222222-2222-4222-8222-222222222222", "22222222-2222-4222-8222-2222222222b2", 50_000, 5_000);
 
-// full rise at ₦2,000 at risk, so ₦1,300 → 65% of 5 pts = 3.25 pts
-await settings.updateBookSettings({ autoSpreadFullAtKobo: 200_000 }, "smoke");
+// +1 pt per ₦1,000 at risk, so ₦1,300 → 1.3 pts
+await settings.updateBookSettings({ autoSpreadStepKobo: 100_000 }, "smoke");
 const s1 = await settings.getBookSettings();
 const rises = await margin.risesFor(["11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222", "33333333-3333-4333-8333-333333333333"], s1);
-check("the exposed side rises in proportion", rises.get("11111111-1111-4111-8111-111111111111")?.get("11111111-1111-4111-8111-1111111111a1") === 325);
+check("the exposed side rises in proportion", rises.get("11111111-1111-4111-8111-111111111111")?.get("11111111-1111-4111-8111-1111111111a1") === 130);
 check("the quiet side stays at base", !rises.get("11111111-1111-4111-8111-111111111111")?.has("11111111-1111-4111-8111-1111111111b1"));
 check("a balanced market has no rise", !rises.has("22222222-2222-4222-8222-222222222222"));
 check("a market with no bets has no rise", !rises.has("33333333-3333-4333-8333-333333333333"));
@@ -116,7 +125,7 @@ const r = await app.inject({ method: "GET", url: "/v1/markets/rises?marketIds=11
 const body = r.json() as { data: { rises: Record<string, Record<string, number>> } };
 check(
   "GET /v1/markets/rises lists the rise per side",
-  r.statusCode === 200 && body.data.rises["11111111-1111-4111-8111-111111111111"]?.["11111111-1111-4111-8111-1111111111a1"] === 325 && !body.data.rises["22222222-2222-4222-8222-222222222222"],
+  r.statusCode === 200 && body.data.rises["11111111-1111-4111-8111-111111111111"]?.["11111111-1111-4111-8111-1111111111a1"] === 130 && !body.data.rises["22222222-2222-4222-8222-222222222222"],
 );
 const bad = await app.inject({ method: "GET", url: "/v1/markets/rises?marketIds=../admin" });
 check("bad market ids are refused", bad.statusCode === 400);
@@ -124,7 +133,7 @@ const pricing = await app.inject({ method: "GET", url: "/v1/markets/pricing" });
 const pd = (pricing.json() as { data: Record<string, number> }).data;
 check(
   "pricing publishes the Local spread and the rise settings",
-  pd.localSpreadBps === 200 && pd.autoSpreadMaxBps === 500 && pd.autoSpreadFullAtKobo === 200_000,
+  pd.localSpreadBps === 200 && pd.autoSpreadStepKobo === 100_000,
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);
