@@ -328,6 +328,8 @@ export interface PausedVoidResult {
   refundKobo: number;
   /** Markets settled by someone else first, left alone. */
   alreadySettled: number;
+  /** Customers told by email that their bet was refunded (0 on a preview). */
+  emailed: number;
   dryRun: boolean;
   topics: string[];
 }

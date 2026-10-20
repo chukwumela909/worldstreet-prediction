@@ -8,6 +8,8 @@ import { markWorldstreetSettled } from "./worldstreet.js";
 import { checkRiskAlerts } from "./risk-alerts.js";
 import { pausedPattern } from "./paused.js";
 import { getBookSettings } from "./settings.js";
+import { User } from "../models.js";
+import { sendCustomerEmails } from "../customer-mail.js";
 
 /**
  * Settlement engine for the Local markets book. One market settles
@@ -181,13 +183,16 @@ export interface PausedVoidResult {
   refundKobo: number;
   /** Markets someone else settled first; their bets were left alone. */
   alreadySettled: number;
+  /** Customers told by email that their bet was refunded (0 on a dry run). */
+  emailed: number;
   dryRun: boolean;
 }
 
 /**
  * Void every market the paused topics cover (trading/paused.ts) that
  * still has open bets: each refunds every open stake, exactly as the
- * desk's single-market void does. A dry run only counts.
+ * desk's single-market void does, and every customer refunded gets one
+ * email saying so (customer-mail.ts). A dry run only counts.
  */
 export async function voidPausedMarkets(params: {
   topics: readonly string[];
@@ -196,10 +201,9 @@ export async function voidPausedMarkets(params: {
   dryRun: boolean;
   log: FastifyBaseLogger;
 }): Promise<PausedVoidResult> {
+  const none = { markets: 0, positions: 0, refundKobo: 0, alreadySettled: 0, emailed: 0 };
   const pattern = pausedPattern(params.topics);
-  if (!pattern) {
-    return { markets: 0, positions: 0, refundKobo: 0, alreadySettled: 0, dryRun: params.dryRun };
-  }
+  if (!pattern) return { ...none, dryRun: params.dryRun };
   const open = await Position.find(
     {
       status: "open",
@@ -207,6 +211,7 @@ export async function voidPausedMarkets(params: {
     },
     { eventId: 1, marketId: 1, stakeKobo: 1 },
   ).lean();
+  if (open.length === 0) return { ...none, dryRun: params.dryRun };
 
   const markets = new Map<string, string>(); // marketId → eventId
   let stakes = 0;
@@ -215,13 +220,7 @@ export async function voidPausedMarkets(params: {
     stakes += p.stakeKobo;
   }
   if (params.dryRun) {
-    return {
-      markets: markets.size,
-      positions: open.length,
-      refundKobo: stakes,
-      alreadySettled: 0,
-      dryRun: true,
-    };
+    return { ...none, markets: markets.size, positions: open.length, refundKobo: stakes, dryRun: true };
   }
 
   let positions = 0;
@@ -239,13 +238,70 @@ export async function voidPausedMarkets(params: {
     positions += result.positionsSettled;
     refundKobo += result.payoutTotalKobo;
   }
-  if (markets.size > 0) {
-    params.log.warn(
-      { markets: markets.size, positions, refundKobo, alreadySettled, actor: params.actor },
-      "paused markets voided",
-    );
+
+  // what each customer actually got back — only bets this void refunded
+  const voided = await Position.find(
+    { _id: { $in: open.map((p) => p._id) }, status: "voided" },
+    { authUserId: 1, eventTitle: 1, stakeKobo: 1 },
+  ).lean();
+  const emailed = await emailRefunds(voided, params.topics, params.log);
+
+  params.log.warn(
+    { markets: markets.size, positions, refundKobo, alreadySettled, emailed, actor: params.actor },
+    "paused markets voided",
+  );
+  return { markets: markets.size, positions, refundKobo, alreadySettled, emailed, dryRun: false };
+}
+
+/** One email per refunded customer: what was cancelled and what came back. */
+async function emailRefunds(
+  voided: { authUserId: string; eventTitle: string; stakeKobo: number }[],
+  topics: readonly string[],
+  log: FastifyBaseLogger,
+): Promise<number> {
+  const byUser = new Map<string, { kobo: number; events: Set<string> }>();
+  for (const p of voided) {
+    const mine = byUser.get(p.authUserId) ?? { kobo: 0, events: new Set<string>() };
+    mine.kobo += p.stakeKobo;
+    mine.events.add(p.eventTitle);
+    byUser.set(p.authUserId, mine);
   }
-  return { markets: markets.size, positions, refundKobo, alreadySettled, dryRun: false };
+  if (byUser.size === 0) return 0;
+
+  const users = await User.find(
+    { authUserId: { $in: [...byUser.keys()] } },
+    { authUserId: 1, email: 1, username: 1 },
+  ).lean();
+  const topic = topics[0] ? topics[0].charAt(0).toUpperCase() + topics[0].slice(1) : "Some";
+  const naira = (kobo: number) =>
+    `₦${(kobo / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+  const emails = users
+    .filter((u) => u.email)
+    .map((u) => {
+      const mine = byUser.get(u.authUserId)!;
+      const events = [...mine.events];
+      const plural = voided.filter((p) => p.authUserId === u.authUserId).length > 1;
+      return {
+        to: u.email,
+        subject: plural ? "Your bets have been refunded" : "Your bet has been refunded",
+        text: [
+          `Hi ${u.username},`,
+          "",
+          `We've paused ${topic} markets on WorldStreet Predict for now while we improve them.`,
+          "",
+          `Your open ${plural ? "bets" : "bet"} on:`,
+          ...events.map((e) => `• ${e}`),
+          "",
+          `${plural ? "have" : "has"} been cancelled, and your full stake of ${naira(mine.kobo)} is back in your credit balance. You can use it on any other market right away.`,
+          "",
+          "Thank you for bearing with us — we're working to serve you better.",
+          "",
+          "The WorldStreet team",
+        ].join("\n"),
+      };
+    });
+  return sendCustomerEmails(log, emails);
 }
 
 /* ------------------------------------------------------------------ */

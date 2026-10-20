@@ -65,6 +65,12 @@ const envSchema = z.object({
   /** Comma-separated recipients. */
   ALERT_EMAIL_TO: z.string().default(""),
   /**
+   * Sender for notices to customers (a refunded bet), e.g.
+   * "WorldStreet <support@worldstreetgold.com>". Falls back to
+   * ALERT_EMAIL_FROM; needs RESEND_API_KEY either way (customer-mail.ts).
+   */
+  CUSTOMER_EMAIL_FROM: z.string().default(""),
+  /**
    * How long the same alert condition stays quiet after being sent. The
    * poller re-detects a stuck market every pass; without this it would
    * mail on every one. 0 sends every time.

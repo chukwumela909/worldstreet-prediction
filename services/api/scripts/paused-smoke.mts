@@ -11,6 +11,8 @@ process.env.MONGODB_URI = "mongodb://placeholder";
 process.env.CLERK_PUBLISHABLE_KEY = "pk_test_ZmFrZS5jbGVyay5hY2NvdW50cy5kZXYk";
 process.env.CLERK_SECRET_KEY = "sk_test_fake";
 process.env.SETTLEMENT_POLL_SECONDS = "0";
+process.env.RESEND_API_KEY = "re_test";
+process.env.ALERT_EMAIL_FROM = "WorldStreet <alerts@worldstreetgold.test>";
 
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
@@ -28,8 +30,21 @@ const { creditNaira, getNairaBalanceKobo } = await import("../src/trading/ledger
 const { Position, WorldstreetEvent, WorldstreetMarket, ensureTradingIndexes } = await import(
   "../src/trading/models.js"
 );
+const { User } = await import("../src/models.js");
 await ensureTradingIndexes();
 const app = await buildApp();
+
+// Resend, answered here: every customer email is kept for the checks
+const sent: { to: string[]; subject: string; text: string }[] = [];
+const realFetch = globalThis.fetch;
+globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  if (url.startsWith("https://api.resend.com/")) {
+    sent.push(JSON.parse(String(init?.body)));
+    return new Response(JSON.stringify({ id: "email" }), { status: 200 });
+  }
+  return realFetch(input, init);
+}) as typeof fetch;
 
 let passed = 0;
 let failed = 0;
@@ -141,6 +156,9 @@ check("a bet elsewhere still goes through", (await order(ethMarket, "paused-key-
 /* ---------------- voiding ---------------- */
 console.log("voiding");
 // bets placed before the pause
+for (const [id, name] of [["u2", "ada"], ["u3", "tunde"]] as const) {
+  await User.create({ authUserId: id, email: `${name}@example.test`, username: name, displayName: name });
+}
 await openBet(btcMarket, "u2", 20_000);
 await openBet(btcMarket, "u3", 30_000);
 await openBet(btcMarket2, "u2", 50_000);
@@ -160,12 +178,25 @@ check(
   "…marking them voided",
   (await Position.countDocuments({ marketId: { $in: [btcMarket.marketId, btcMarket2.marketId] }, status: "voided" })) === 3,
 );
+const toAda = sent.find((m) => m.to[0] === "ada@example.test");
+const toTunde = sent.find((m) => m.to[0] === "tunde@example.test");
+check(`one email per refunded customer (got ${sent.length})`, sent.length === 2);
+check(
+  "…with their own total and markets",
+  Boolean(
+    toAda?.text.includes("₦700.00") &&
+      toAda.text.includes("Bitcoin above $130k") &&
+      toAda.subject === "Your bets have been refunded",
+  ) && Boolean(toTunde?.text.includes("₦300.00") && toTunde.subject === "Your bet has been refunded"),
+);
+check("…asking them to bear with us", Boolean(toAda?.text.includes("bearing with us")));
 check(
   "…and leaves other markets' bets open",
   (await Position.countDocuments({ marketId: ethMarket.marketId, status: "open" })) === 2,
 );
 await runSettlementPass(log);
 check("a second pass refunds nothing twice", (await getNairaBalanceKobo("u2")) === 70_000);
+check("…and emails nobody twice", sent.length === 2);
 const after = await voidPausedMarkets({ topics: btc, actor: "smoke", reason: "test", dryRun: true, log });
 check("nothing left to void", after.positions === 0);
 

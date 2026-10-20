@@ -74,7 +74,9 @@ export function PausedMarketsCard({
         showToast(
           `Voided ${result.positions} bet${result.positions === 1 ? "" : "s"} on ${result.markets} market${
             result.markets === 1 ? "" : "s"
-          } — ${formatNaira(result.refundKobo)} refunded`,
+          } — ${formatNaira(result.refundKobo)} refunded${
+            result.emailed > 0 ? `, ${result.emailed} customer${result.emailed === 1 ? "" : "s"} emailed` : ""
+          }`,
           "success",
         );
       }
@@ -131,8 +133,9 @@ export function PausedMarketsCard({
           <p className="text-sm font-semibold">Void open bets on paused markets</p>
           <p className="text-xs text-secondary">
             Refunds every open stake on markets matching{" "}
-            <span className="font-semibold">{saved.join(", ")}</span>. Bets already settled are
-            not changed. This can&rsquo;t be undone.
+            <span className="font-semibold">{saved.join(", ")}</span>, and emails each customer
+            refunded. This also happens on its own about every minute while a topic is paused.
+            Bets already settled are not changed. This can&rsquo;t be undone.
           </p>
 
           {preview ? (
