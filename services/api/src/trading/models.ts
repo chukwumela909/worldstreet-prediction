@@ -132,6 +132,8 @@ const positionSchema = new Schema(
     idempotencyKey: { type: String, required: true, unique: true },
     settledAt: { type: Date },
     settlementId: { type: String },
+    /** When the customer was emailed that this bet was refunded (paused topics). */
+    refundNotifiedAt: { type: Date },
   },
   { timestamps: true },
 );

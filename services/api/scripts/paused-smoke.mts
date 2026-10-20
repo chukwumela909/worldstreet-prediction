@@ -25,7 +25,10 @@ const { buildApp } = await import("../src/app.js");
 const { placeOrder } = await import("../src/routes/trades.js");
 const { isPausedMarket } = await import("../src/trading/paused.js");
 const settings = await import("../src/trading/settings.js");
-const { voidPausedMarkets, runSettlementPass } = await import("../src/trading/settlement.js");
+const { voidPausedMarkets, runSettlementPass, adminVoidMarket } = await import(
+  "../src/trading/settlement.js"
+);
+const { getPausedRefunds, notifyPausedRefunds } = await import("../src/trading/pause-refunds.js");
 const { creditNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { Position, WorldstreetEvent, WorldstreetMarket, ensureTradingIndexes } = await import(
   "../src/trading/models.js"
@@ -199,6 +202,43 @@ check("a second pass refunds nothing twice", (await getNairaBalanceKobo("u2")) =
 check("…and emails nobody twice", sent.length === 2);
 const after = await voidPausedMarkets({ topics: btc, actor: "smoke", reason: "test", dryRun: true, log });
 check("nothing left to void", after.positions === 0);
+
+/* ---------------- the desk's refund report and one-off email ---------------- */
+console.log("report");
+// refunded before the emails existed: a desk void of one Bitcoin market,
+// which refunds but tells nobody
+await User.create({ authUserId: "u4", email: "kemi@example.test", username: "kemi", displayName: "kemi" });
+const btcMarket3 = await ownMarket("BTC Up or Down — 15 minutes");
+await openBet(btcMarket3, "u4", 25_000);
+await adminVoidMarket({ eventId: btcMarket3.eventId, marketId: btcMarket3.marketId, actor: "key:josh", reason: "Bitcoin paused", log });
+
+const report = await getPausedRefunds(btc, 72);
+check(
+  `the report lists 3 customers, 4 bets, ₦1,250 refunded (got ${report.totals.customers}/${report.totals.bets}/${report.totals.refundKobo})`,
+  report.totals.customers === 3 && report.totals.bets === 4 && report.totals.refundKobo === 125_000,
+);
+const kemi = report.customers.find((c) => c.username === "kemi");
+const ada = report.customers.find((c) => c.username === "ada");
+check("…with who was emailed and who wasn't", Boolean(ada?.emailedAt) && kemi?.emailedAt === null);
+check("…and each customer's email and amount", kemi?.email === "kemi@example.test" && kemi.refundKobo === 25_000);
+check(
+  "…and who voided each market",
+  report.markets.find((m) => m.marketId === btcMarket3.marketId)?.voidedBy === "key:josh" &&
+    report.markets.find((m) => m.marketId === btcMarket.marketId)?.voidedBy === "auto",
+);
+check("the ETH market's open bets aren't in it", !report.markets.some((m) => m.marketId === ethMarket.marketId));
+
+const notifyPreview = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: true, log });
+check(
+  "the one-off preview finds only kemi, not yet told",
+  notifyPreview.customers === 1 && notifyPreview.bets === 1 && notifyPreview.emailed === 0,
+);
+check("…sending nothing", sent.length === 2);
+const notified = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: false, log });
+check("sending it emails her once", notified.emailed === 1 && sent.length === 3 && sent[2]?.to[0] === "kemi@example.test");
+check("…and now everyone is marked emailed", (await getPausedRefunds(btc, 72)).totals.notEmailed === 0);
+const again = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: false, log });
+check("running it again emails nobody", again.emailed === 0 && sent.length === 3);
 
 /* ---------------- what the public sees ---------------- */
 console.log("public");

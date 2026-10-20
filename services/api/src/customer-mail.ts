@@ -30,17 +30,17 @@ export interface CustomerEmail {
   text: string;
 }
 
-/** Send each in turn, spaced for Resend's rate; how many it accepted. */
+/** Send each in turn, spaced for Resend's rate; whether Resend accepted each. */
 export async function sendCustomerEmails(
   log: FastifyBaseLogger,
   emails: CustomerEmail[],
-): Promise<number> {
-  if (emails.length === 0) return 0;
+): Promise<boolean[]> {
+  if (emails.length === 0) return [];
   if (!isCustomerMailConfigured()) {
     log.warn({ count: emails.length }, "customer emails not sent: Resend isn't configured");
-    return 0;
+    return emails.map(() => false);
   }
-  let sent = 0;
+  const sent: boolean[] = [];
   for (const [i, mail] of emails.entries()) {
     if (i > 0) await sleep(GAP_MS);
     try {
@@ -53,13 +53,13 @@ export async function sendCustomerEmails(
         body: JSON.stringify({ from: sender(), to: [mail.to], subject: mail.subject, text: mail.text }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
-      if (res.ok) {
-        sent += 1;
-      } else {
+      sent.push(res.ok);
+      if (!res.ok) {
         const body = await res.text().catch(() => "");
         log.error({ status: res.status, body: body.slice(0, 300) }, "customer email rejected");
       }
     } catch (err) {
+      sent.push(false);
       log.error({ err }, "customer email failed");
     }
   }

@@ -14,6 +14,7 @@ import { CREDIT, formatNaira } from "@/lib/format";
 import { isApiConfigured } from "@/lib/api-client";
 import { showToast } from "@/lib/toast-store";
 import { PausedMarketsCard } from "@/components/admin/paused-markets";
+import { PausedRefundsReport } from "@/components/admin/paused-refunds";
 import {
   fetchBookSettings,
   updateBookSettings,
@@ -495,10 +496,13 @@ export function SettingsDesk() {
           )}
           {/* an older API publishes no topics: nothing to show */}
           {Array.isArray(state.settings.pausedTopics) && (
-            <PausedMarketsCard
-              state={state}
-              onSaved={(next) => setSaved({ state: next, over: resource.data })}
-            />
+            <>
+              <PausedMarketsCard
+                state={state}
+                onSaved={(next) => setSaved({ state: next, over: resource.data })}
+              />
+              <PausedRefundsReport />
+            </>
           )}
           <SettingsForm
             state={state}

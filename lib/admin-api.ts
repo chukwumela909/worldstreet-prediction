@@ -353,6 +353,79 @@ export async function voidPausedMarkets(params: {
   }
 }
 
+export interface PausedRefundMarket {
+  marketId: string;
+  eventTitle: string;
+  marketTitle: string;
+  bets: number;
+  refundKobo: number;
+  voidedAt: string | null;
+  /** "auto" (the minute-by-minute pause) or the admin who voided it. */
+  voidedBy: string;
+  reason: string;
+}
+
+export interface PausedRefundCustomer {
+  authUserId: string;
+  username: string;
+  email: string;
+  bets: number;
+  refundKobo: number;
+  events: string[];
+  refundedAt: string | null;
+  /** When the apology email went; null = not told yet. */
+  emailedAt: string | null;
+}
+
+/** What the paused topics refunded, over the last `hours`. */
+export interface PausedRefundReport {
+  topics: string[];
+  hours: number;
+  /** Whether the API can send customer email at all (Resend set up). */
+  mailConfigured: boolean;
+  totals: {
+    customers: number;
+    bets: number;
+    refundKobo: number;
+    emailed: number;
+    notEmailed: number;
+  };
+  markets: PausedRefundMarket[];
+  customers: PausedRefundCustomer[];
+}
+
+/** Refunds from paused topics in the last 3 days — module-level, for useAdminResource. */
+export async function fetchPausedRefunds(): Promise<PausedRefundReport> {
+  try {
+    const res = await apiFetch<{ data: PausedRefundReport }>("/v1/admin/paused-refunds?hours=72");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+export interface NotifyRefundsResult {
+  customers: number;
+  bets: number;
+  refundKobo: number;
+  emailed: number;
+  mailConfigured: boolean;
+  dryRun: boolean;
+}
+
+/** Email the refunded customers not yet told, once each; `dryRun` only counts. */
+export async function notifyPausedRefunds(dryRun: boolean): Promise<NotifyRefundsResult> {
+  try {
+    const res = await apiFetch<{ data: NotifyRefundsResult }>("/v1/admin/notify-paused-refunds", {
+      method: "POST",
+      body: JSON.stringify({ dryRun, hours: 72 }),
+    });
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Worldstreet's own markets                                           */
 /* ------------------------------------------------------------------ */
