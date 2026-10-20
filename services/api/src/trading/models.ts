@@ -197,6 +197,8 @@ const bookSettingsSchema = new Schema(
     priceToleranceKobo: { type: Number },
     countdownCutoffSeconds: { type: Number },
     lossAlertKobo: { type: Number },
+    // no default: an unset field falls back to settings.ts's own
+    pausedTopics: { type: [String], default: undefined },
     /** Email of the admin behind the last change. */
     updatedBy: { type: String },
   },

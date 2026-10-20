@@ -3,6 +3,7 @@ import type { Category, GameState, Market, MarketEvent, SportType } from "@/type
 import { CATEGORIES } from "@/types/market";
 import type { HistoryWindow, SeriesPoint } from "@/lib/series";
 import { deriveHotTopics, type HotTopic } from "@/lib/hot-topics";
+import { getPausedTopics, isPaused } from "@/lib/paused";
 
 /**
  * Server-side data layer for Polymarket's public Gamma API
@@ -478,9 +479,21 @@ function rememberEvents(events: MarketEvent[]) {
  * fetch above, plus noting each result in the recent-events index.
  */
 export async function getEvents(options: GetEventsOptions = {}): Promise<MarketEvent[]> {
-  const events = await getEventsCached(options);
+  const [all, paused] = await Promise.all([getEventsCached(options), getPausedTopics()]);
+  // the desk's paused topics leave the boards (lib/paused.ts)
+  const events = all.filter((e) => !isPausedEvent(paused, e));
   rememberEvents(events);
   return events;
+}
+
+/** Whether a paused topic covers the event or one of its markets. */
+function isPausedEvent(paused: readonly string[], event: MarketEvent): boolean {
+  return isPaused(
+    paused,
+    event.title,
+    event.slug,
+    ...event.markets.flatMap((m) => [m.question, m.groupItemTitle]),
+  );
 }
 
 /**
@@ -488,11 +501,12 @@ export async function getEvents(options: GetEventsOptions = {}): Promise<MarketE
  * cache period when there is one, otherwise its own (cached) fetch.
  */
 export async function getEventForPage(slug: string): Promise<MarketEvent | null> {
+  const paused = await getPausedTopics();
   const recent = recentEvents.get(slug);
-  if (recent && Date.now() - recent.at < RECENT_TTL_MS) {
-    return recent.event;
-  }
-  return getEventBySlug(slug);
+  const event =
+    recent && Date.now() - recent.at < RECENT_TTL_MS ? recent.event : await getEventBySlug(slug);
+  // a paused topic's page is gone too, not just its card
+  return event && isPausedEvent(paused, event) ? null : event;
 }
 
 /** Single event by its URL slug, or null when not found. Cached like getEvents. */

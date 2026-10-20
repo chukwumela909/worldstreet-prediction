@@ -1,6 +1,7 @@
 import { unstable_cache } from "next/cache";
 import type { Category, Market, MarketEvent } from "@/types/market";
 import type { SeriesPoint } from "@/lib/series";
+import { getPausedTopics, isPaused } from "@/lib/paused";
 
 /**
  * Server-side data layer for the Bayse Relay API
@@ -206,8 +207,18 @@ function hasKickedOff(raw: BayseEvent, starts: GameStarts): boolean {
   return kickoff !== undefined && !Number.isNaN(kickoff) && Date.now() >= kickoff;
 }
 
-/** Returns null when the event has no open market with usable prices. */
-export function toBayseMarketEvent(raw: BayseEvent, starts: GameStarts = {}): MarketEvent | null {
+/**
+ * Returns null when the event has no open market with usable prices, or
+ * it's on a topic the desk has paused (lib/paused.ts).
+ */
+export function toBayseMarketEvent(
+  raw: BayseEvent,
+  starts: GameStarts = {},
+  paused: readonly string[] = [],
+): MarketEvent | null {
+  if (isPaused(paused, raw.title, raw.slug, ...(raw.markets ?? []).map((m) => m.title))) {
+    return null;
+  }
   const single = raw.type === "SINGLE_MARKET";
   const markets = (raw.markets ?? [])
     .filter((m) => (m.status ?? "open") === "open")
@@ -333,8 +344,9 @@ const getGameStarts = (): Promise<GameStarts> => fetchGameStarts().catch(() => (
  */
 export const getBayseEvents = unstable_cache(
   async (): Promise<MarketEvent[]> => {
-    const [starts, ...pages] = await Promise.all([
+    const [starts, paused, ...pages] = await Promise.all([
       getGameStarts(),
+      getPausedTopics(),
       ...[1, 2].map((page) =>
         relayFetch<{ events?: BayseEvent[] }>("/v1/pm/events", {
           page,
@@ -347,7 +359,7 @@ export const getBayseEvents = unstable_cache(
     return pages
       .flatMap((p) => p.events ?? [])
       .filter((raw) => !hasKickedOff(raw, starts))
-      .map((raw) => toBayseMarketEvent(raw, starts))
+      .map((raw) => toBayseMarketEvent(raw, starts, paused))
       .filter((e): e is MarketEvent => e !== null);
   },
   ["bayse-events"],
@@ -384,8 +396,9 @@ export const getBayseEventsPage = unstable_cache(
     if (!Number.isInteger(page) || page < 1 || page > BAYSE_MAX_PAGE) {
       throw new RangeError(`Bayse page out of range: ${page}`);
     }
-    const [starts, raw] = await Promise.all([
+    const [starts, paused, raw] = await Promise.all([
       getGameStarts(),
+      getPausedTopics(),
       relayFetch<BayseEventsResponse>("/v1/pm/events", {
         page,
         size: BAYSE_PAGE_SIZE,
@@ -401,7 +414,7 @@ export const getBayseEventsPage = unstable_cache(
     return {
       events: rows
         .filter((r) => !hasKickedOff(r, starts))
-        .map((r) => toBayseMarketEvent(r, starts))
+        .map((r) => toBayseMarketEvent(r, starts, paused))
         .filter((e): e is MarketEvent => e !== null),
       hasMore,
     };
@@ -415,6 +428,7 @@ export const getBayseEventBySlug = unstable_cache(
   async (slug: string): Promise<MarketEvent | null> => {
     let raw: BayseEvent;
     const starts = getGameStarts();
+    const paused = getPausedTopics();
     try {
       raw = await relayFetch<BayseEvent>(
         `/v1/pm/events/slug/${encodeURIComponent(slug)}`,
@@ -424,7 +438,7 @@ export const getBayseEventBySlug = unstable_cache(
       if (err instanceof BayseApiError && err.status === 404) return null;
       throw err;
     }
-    return toBayseMarketEvent(raw, await starts);
+    return toBayseMarketEvent(raw, await starts, await paused);
   },
   ["bayse-event-by-slug"],
   { revalidate: DEFAULT_REVALIDATE_SECONDS, tags: ["bayse"] },
@@ -440,6 +454,7 @@ export const getBayseEventLive = unstable_cache(
   async (slug: string): Promise<MarketEvent | null> => {
     let raw: BayseEvent;
     const starts = getGameStarts();
+    const paused = getPausedTopics();
     try {
       raw = await relayFetch<BayseEvent>(
         `/v1/pm/events/slug/${encodeURIComponent(slug)}`,
@@ -449,7 +464,7 @@ export const getBayseEventLive = unstable_cache(
       if (err instanceof BayseApiError && err.status === 404) return null;
       throw err;
     }
-    return toBayseMarketEvent(raw, await starts);
+    return toBayseMarketEvent(raw, await starts, await paused);
   },
   ["bayse-event-live"],
   { revalidate: LIVE_REVALIDATE_SECONDS, tags: ["bayse"] },

@@ -6,6 +6,8 @@ import { creditNaira } from "./ledger.js";
 import { Position, Settlement, type SettlementSource } from "./models.js";
 import { markWorldstreetSettled } from "./worldstreet.js";
 import { checkRiskAlerts } from "./risk-alerts.js";
+import { pausedPattern } from "./paused.js";
+import { getBookSettings } from "./settings.js";
 
 /**
  * Settlement engine for the Local markets book. One market settles
@@ -170,6 +172,82 @@ export function adminVoidMarket(params: {
   });
 }
 
+export interface PausedVoidResult {
+  /** Markets with open bets that the pause covers. */
+  markets: number;
+  /** Open bets on them (before voiding, on a dry run). */
+  positions: number;
+  /** Stakes refunded — or that would be, on a dry run. */
+  refundKobo: number;
+  /** Markets someone else settled first; their bets were left alone. */
+  alreadySettled: number;
+  dryRun: boolean;
+}
+
+/**
+ * Void every market the paused topics cover (trading/paused.ts) that
+ * still has open bets: each refunds every open stake, exactly as the
+ * desk's single-market void does. A dry run only counts.
+ */
+export async function voidPausedMarkets(params: {
+  topics: readonly string[];
+  actor: string;
+  reason: string;
+  dryRun: boolean;
+  log: FastifyBaseLogger;
+}): Promise<PausedVoidResult> {
+  const pattern = pausedPattern(params.topics);
+  if (!pattern) {
+    return { markets: 0, positions: 0, refundKobo: 0, alreadySettled: 0, dryRun: params.dryRun };
+  }
+  const open = await Position.find(
+    {
+      status: "open",
+      $or: [{ eventTitle: pattern }, { eventSlug: pattern }, { marketTitle: pattern }],
+    },
+    { eventId: 1, marketId: 1, stakeKobo: 1 },
+  ).lean();
+
+  const markets = new Map<string, string>(); // marketId → eventId
+  let stakes = 0;
+  for (const p of open) {
+    markets.set(p.marketId, p.eventId);
+    stakes += p.stakeKobo;
+  }
+  if (params.dryRun) {
+    return {
+      markets: markets.size,
+      positions: open.length,
+      refundKobo: stakes,
+      alreadySettled: 0,
+      dryRun: true,
+    };
+  }
+
+  let positions = 0;
+  let refundKobo = 0;
+  let alreadySettled = 0;
+  for (const [marketId, eventId] of markets) {
+    const result = await adminVoidMarket({
+      eventId,
+      marketId,
+      actor: params.actor,
+      reason: params.reason,
+      log: params.log,
+    });
+    if (result.outcome === "already_settled") alreadySettled += 1;
+    positions += result.positionsSettled;
+    refundKobo += result.payoutTotalKobo;
+  }
+  if (markets.size > 0) {
+    params.log.warn(
+      { markets: markets.size, positions, refundKobo, alreadySettled, actor: params.actor },
+      "paused markets voided",
+    );
+  }
+  return { markets: markets.size, positions, refundKobo, alreadySettled, dryRun: false };
+}
+
 /* ------------------------------------------------------------------ */
 /* Auto-settlement poller                                              */
 /* ------------------------------------------------------------------ */
@@ -188,6 +266,19 @@ export function adminVoidMarket(params: {
  * event and nagging about an overdue one.
  */
 export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
+  // Paused topics first: their open bets are voided and refunded before
+  // anything below could settle them as won or lost (trading/paused.ts).
+  const { pausedTopics } = await getBookSettings();
+  if (pausedTopics.length > 0) {
+    await voidPausedMarkets({
+      topics: pausedTopics,
+      actor: "system:paused",
+      reason: `Paused topic: ${pausedTopics.join(", ")}`,
+      dryRun: false,
+      log,
+    }).catch((err: unknown) => log.error({ err }, "voiding paused markets failed"));
+  }
+
   const eventIds: string[] = await Position.distinct("eventId", {
     status: "open",
   });

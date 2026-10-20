@@ -38,6 +38,11 @@ export interface BookPricing {
    * (lib/use-market-rises.ts).
    */
   autoSpreadStepKobo: number;
+  /**
+   * The desk's paused topics ("bitcoin", "btc"): matching markets take
+   * no bets and are hidden (lib/paused.ts). [] from an older API.
+   */
+  pausedTopics: string[];
   /** Smallest stake one order may carry, kobo. */
   minStakeKobo: number;
   /** Largest stake one order may carry, kobo. */
@@ -79,6 +84,9 @@ function parsePricing(data: unknown): BookPricing | null {
     // optional — an older API sends none of these, and 0 is what it charges
     localSpreadBps: isSpread(d.localSpreadBps) ? d.localSpreadBps : 0,
     autoSpreadStepKobo: isKobo(d.autoSpreadStepKobo) ? d.autoSpreadStepKobo : 0,
+    pausedTopics: Array.isArray(d.pausedTopics)
+      ? d.pausedTopics.filter((t): t is string => typeof t === "string" && t.trim() !== "")
+      : [],
     minStakeKobo,
     maxStakeKobo,
   };
@@ -120,7 +128,7 @@ const getCachedPricing = unstable_cache(
   fetchPricing,
   // a new key whenever the shape changes (v3: the Local spread and the
   // auto-adjusting spread), so a cached entry of an old shape is never served
-  ["book-pricing-v4", API_BASE],
+  ["book-pricing-v5", API_BASE],
   { revalidate: 60, tags: ["book-pricing"] },
 );
 

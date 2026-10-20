@@ -24,6 +24,7 @@
     "smoke:orders": "tsx scripts/orders-smoke.mts",
     "smoke:kickoff": "tsx scripts/kickoff-smoke.mts",
     "smoke:convert": "tsx scripts/convert-smoke.mts",
+    "smoke:paused": "tsx scripts/paused-smoke.mts",
     "verify:leaderboard": "tsx scripts/verify-leaderboard.ts",
     "verify:traders": "tsx scripts/verify-traders.ts",
     "inspect:settlement": "tsx scripts/inspect-settlement.ts"

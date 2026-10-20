@@ -8,13 +8,14 @@ import { FxRate, LedgerEntry, Position, Settlement } from "../trading/models.js"
 import {
   adminSettleMarket,
   adminVoidMarket,
+  voidPausedMarkets,
 } from "../trading/settlement.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
 import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { getSettlementQueue } from "../trading/exposure.js";
 import { listTraders, TRADER_SORTS, type TraderSort } from "../trading/traders.js";
 import { getBookRisk } from "../trading/risk.js";
-import { getSettingsView, updateBookSettings } from "../trading/settings.js";
+import { getBookSettings, getSettingsView, updateBookSettings } from "../trading/settings.js";
 import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { sendAlert } from "../alerts.js";
@@ -70,9 +71,15 @@ const settingsBody = z
     priceToleranceKobo: z.number().int(),
     countdownCutoffSeconds: z.number().int(),
     lossAlertKobo: z.number().int(),
+    pausedTopics: z.array(z.string().max(80)).max(50),
   })
   .partial()
   .strict();
+
+const voidPausedBody = z.object({
+  reason: z.string().min(3).max(500),
+  dryRun: z.boolean(),
+});
 
 const voidBody = z.object({
   eventId: eventOrMarketId,
@@ -286,6 +293,32 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     }
     return { success: true, data: result };
   });
+
+  /**
+   * Void every market the paused topics cover (Settings → Paused
+   * markets) that still has open bets, refunding each stake — the
+   * single-market void below, in bulk. `dryRun` only counts, so the desk
+   * can show what will happen before it does.
+   */
+  app.post(
+    "/admin/void-paused",
+    { schema: { body: voidPausedBody }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request) => {
+      const user = await requireAdmin(request);
+      const settings = await getBookSettings();
+      if (settings.pausedTopics.length === 0) {
+        throw new ApiError(409, "No topics are paused", "NOTHING_PAUSED");
+      }
+      const result = await voidPausedMarkets({
+        topics: settings.pausedTopics,
+        actor: user.id,
+        reason: request.body.reason,
+        dryRun: request.body.dryRun,
+        log: request.log,
+      });
+      return { success: true, data: { ...result, topics: settings.pausedTopics } };
+    },
+  );
 
   /** Void a market — refunds every open stake, audited. */
   app.post("/admin/void", { schema: { body: voidBody } }, async (request) => {

@@ -319,6 +319,38 @@ export async function voidMarket(params: {
   return res.data;
 }
 
+export interface PausedVoidResult {
+  /** Markets with open bets that the paused topics cover. */
+  markets: number;
+  /** Open bets on them. */
+  positions: number;
+  /** Stakes refunded, or that would be on a preview, kobo. */
+  refundKobo: number;
+  /** Markets settled by someone else first, left alone. */
+  alreadySettled: number;
+  dryRun: boolean;
+  topics: string[];
+}
+
+/**
+ * Void every market the paused topics cover that still has open bets,
+ * refunding each stake. `dryRun` only counts — the desk previews first.
+ */
+export async function voidPausedMarkets(params: {
+  reason: string;
+  dryRun: boolean;
+}): Promise<PausedVoidResult> {
+  try {
+    const res = await apiFetch<{ data: PausedVoidResult }>("/v1/admin/void-paused", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
 /* ------------------------------------------------------------------ */
 /* Worldstreet's own markets                                           */
 /* ------------------------------------------------------------------ */
@@ -610,6 +642,11 @@ export interface BookSettings {
   countdownCutoffSeconds: number;
   /** Alert the admins when the book's worst case reaches this loss; 0 = off. */
   lossAlertKobo: number;
+  /**
+   * Paused topics ("bitcoin", "btc"): matching markets take no bets and
+   * leave the site; [] = nothing paused. Edited on the Paused markets card.
+   */
+  pausedTopics: string[];
 }
 
 export type BookSettingKey = keyof BookSettings;
@@ -627,8 +664,8 @@ export interface SettingLimit {
 /** One saved edit, from the audit trail. */
 export interface BookSettingChange {
   field: BookSettingKey;
-  from: number | boolean;
-  to: number | boolean;
+  from: number | boolean | string[];
+  to: number | boolean | string[];
   by: string;
   at: string;
 }

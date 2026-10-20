@@ -3,6 +3,7 @@ import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { ApiError } from "../errors.js";
 import { getBookSettings } from "../trading/settings.js";
+import { isPausedMarket } from "../trading/paused.js";
 import { risesFor } from "../trading/margin.js";
 import { eventOrMarketId } from "../trading/ids.js";
 import { WorldstreetEvent, WorldstreetMarket } from "../trading/models.js";
@@ -48,6 +49,7 @@ export const marketRoutes: FastifyPluginAsync = async (rawApp) => {
         polymarketSpreadBps: s.polymarketSpreadBps,
         localSpreadBps: s.localSpreadBps,
         autoSpreadStepKobo: s.autoSpreadStepKobo,
+        pausedTopics: s.pausedTopics,
         minStakeKobo: s.minStakeKobo,
         maxStakeKobo: s.maxStakeKobo,
       },
@@ -92,9 +94,12 @@ export const marketRoutes: FastifyPluginAsync = async (rawApp) => {
 
   /** Live markets, soonest to close first, undated ones last. */
   app.get("/markets", async () => {
-    const events = await WorldstreetEvent.find({
-      status: { $in: LISTED_STATUSES },
-    }).limit(MAX_LISTED);
+    const [listed, settings] = await Promise.all([
+      WorldstreetEvent.find({ status: { $in: LISTED_STATUSES } }).limit(MAX_LISTED),
+      getBookSettings(),
+    ]);
+    // a paused topic is off the site (trading/paused.ts)
+    const events = listed.filter((e) => !isPausedMarket(settings.pausedTopics, e.title, e.slug));
     if (events.length === 0) return { success: true, data: { events: [] } };
 
     const eventIds = events.map((e) => e.eventId);

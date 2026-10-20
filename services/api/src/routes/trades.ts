@@ -16,6 +16,7 @@ import {
 } from "../trading/ledger.js";
 import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { withMarketLock } from "../trading/market-lock.js";
+import { isPausedMarket } from "../trading/paused.js";
 import { Position, type IPosition } from "../trading/models.js";
 
 /**
@@ -156,6 +157,11 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
   const market = requireMarket(event, body.marketId);
   if (market.status !== "open") {
     throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
+  }
+
+  // the desk's emergency stop for a topic (trading/paused.ts)
+  if (isPausedMarket(settings.pausedTopics, event.title, event.slug, market.title)) {
+    throw new ApiError(409, "This market is paused for now", "MARKET_PAUSED");
   }
 
   // A game stops taking bets at kickoff: in play, anyone watching knows

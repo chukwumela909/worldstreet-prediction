@@ -55,10 +55,26 @@ export interface BookSettings {
    * near-limit alerts run regardless.
    */
   lossAlertKobo: number;
+  /**
+   * Paused topics ("bitcoin", "btc"): a market whose event title or slug
+   * or market title contains one as a whole word takes no bets and is
+   * hidden on the site, and the desk can void its open bets in one go
+   * (trading/paused.ts). Lowercase, deduplicated; empty = nothing paused.
+   */
+  pausedTopics: string[];
 }
 
 export type SettingKey = keyof BookSettings;
-type NumericKey = Exclude<SettingKey, "internationalTrading">;
+type NumericKey = Exclude<SettingKey, "internationalTrading" | "pausedTopics">;
+
+/** At most this many paused topics, each 2–40 characters. */
+const MAX_PAUSED_TOPICS = 20;
+const TOPIC = /^[a-z0-9][a-z0-9 .-]{1,39}$/;
+
+/** Trimmed, lowercased, deduplicated, empties dropped. */
+export function normalizeTopics(topics: readonly string[]): string[] {
+  return [...new Set(topics.map((t) => t.trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean))];
+}
 
 /** Inclusive bounds the desk may set — the API refuses anything outside. */
 export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = {
@@ -86,6 +102,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "priceToleranceKobo",
   "countdownCutoffSeconds",
   "lossAlertKobo",
+  "pausedTopics",
 ];
 
 /**
@@ -111,6 +128,9 @@ export function defaultSettings(): BookSettings {
     priceToleranceKobo: 200, // ₦2 per ₦100 share
     countdownCutoffSeconds: config.TRADE_COUNTDOWN_CUTOFF_SECONDS,
     lossAlertKobo: 100_000_000, // ₦1,000,000
+    // the October 2026 Bitcoin pause, in force from the first deploy;
+    // the desk lifts it by clearing the topics in Settings
+    pausedTopics: ["bitcoin", "btc"],
   };
 }
 
@@ -125,6 +145,10 @@ function merge(row: Partial<Record<SettingKey, unknown>> | null): BookSettings {
     const v = row[key];
     if (key === "internationalTrading") {
       if (typeof v === "boolean") out.internationalTrading = v;
+    } else if (key === "pausedTopics") {
+      if (Array.isArray(v) && v.every((t) => typeof t === "string")) {
+        out.pausedTopics = normalizeTopics(v);
+      }
     } else if (typeof v === "number" && Number.isFinite(v)) {
       out[key] = v;
     }
@@ -148,8 +172,8 @@ export function clearSettingsCache(): void {
 
 export interface SettingsChangeRecord {
   field: SettingKey;
-  from: number | boolean;
-  to: number | boolean;
+  from: number | boolean | string[];
+  to: number | boolean | string[];
   by: string;
   at: string;
 }
@@ -181,8 +205,8 @@ export async function getSettingsView(): Promise<SettingsView> {
     updatedBy: row?.updatedBy ?? null,
     history: changes.map((c) => ({
       field: c.field as SettingKey,
-      from: c.from as number | boolean,
-      to: c.to as number | boolean,
+      from: c.from as number | boolean | string[],
+      to: c.to as number | boolean | string[],
       by: c.by,
       at: new Date(c.createdAt).toISOString(),
     })),
@@ -215,6 +239,19 @@ export async function updateBookSettings(
       next.internationalTrading = v;
       continue;
     }
+    if (key === "pausedTopics") {
+      if (!Array.isArray(v) || !v.every((t) => typeof t === "string")) {
+        invalid("Paused topics must be a list of words");
+      }
+      const topics = normalizeTopics(v);
+      if (topics.length > MAX_PAUSED_TOPICS) invalid(`At most ${MAX_PAUSED_TOPICS} paused topics`);
+      const bad = topics.find((t) => !TOPIC.test(t));
+      if (bad !== undefined) {
+        invalid(`"${bad}" isn't a usable topic — 2 to 40 letters, numbers, spaces, dots or dashes`);
+      }
+      next.pausedTopics = topics;
+      continue;
+    }
     const { min, max } = SETTING_LIMITS[key];
     if (typeof v !== "number" || !Number.isInteger(v) || v < min || v > max) {
       invalid(`${key} must be a whole number from ${min} to ${max}`);
@@ -229,7 +266,9 @@ export async function updateBookSettings(
     invalid("The auto-adjust amount must be 0 (off) or at least ₦1,000");
   }
 
-  const changed = SETTING_KEYS.filter((k) => next[k] !== current[k]);
+  const changed = SETTING_KEYS.filter(
+    (k) => JSON.stringify(next[k]) !== JSON.stringify(current[k]),
+  );
   if (changed.length > 0) {
     const set: Record<string, unknown> = { updatedBy: by };
     for (const k of changed) set[k] = next[k];

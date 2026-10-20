@@ -13,6 +13,7 @@ import {
 import { CREDIT, formatNaira } from "@/lib/format";
 import { isApiConfigured } from "@/lib/api-client";
 import { showToast } from "@/lib/toast-store";
+import { PausedMarketsCard } from "@/components/admin/paused-markets";
 import {
   fetchBookSettings,
   updateBookSettings,
@@ -148,7 +149,10 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
 };
 
 /** Page order — the groups below, flattened. */
-const ORDER: BookSettingKey[] = [
+/** The settings this form edits — all but the paused topics, which have their own card. */
+type FormKey = Exclude<BookSettingKey, "pausedTopics">;
+
+const ORDER: FormKey[] = [
   "internationalTrading",
   "polymarketSpreadBps",
   "localSpreadBps",
@@ -164,7 +168,7 @@ const ORDER: BookSettingKey[] = [
 
 const NUMERIC_KEYS = ORDER.filter(isNumericKey);
 
-const GROUPS: { title: string; note: string; rows: BookSettingKey[] }[] = [
+const GROUPS: { title: string; note: string; rows: FormKey[] }[] = [
   {
     title: "International markets",
     note: "Polymarket markets, priced off Polymarket plus our margin.",
@@ -203,6 +207,7 @@ function isNumericKey(key: string): key is NumericBookSettingKey {
 
 function labelOf(key: string): string {
   if (key === "internationalTrading") return INTL_LABEL;
+  if (key === "pausedTopics") return "Paused topics";
   return isNumericKey(key) ? FIELDS[key].label : key;
 }
 
@@ -237,13 +242,14 @@ function unitWord(key: NumericBookSettingKey, value: number): string {
   return "";
 }
 
-function onOff(v: number | boolean): string {
+function onOff(v: number | boolean | string[]): string {
+  if (Array.isArray(v)) return v.length > 0 ? v.join(", ") : "None";
   return typeof v === "boolean" ? (v ? "On" : "Off") : String(v);
 }
 
 /** One value in friendly units: "3 points", "1%", "₩100", "60 seconds", "On". */
-function formatValue(key: string, value: number | boolean): string {
-  if (typeof value === "boolean" || !isNumericKey(key)) return onOff(value);
+function formatValue(key: string, value: number | boolean | string[]): string {
+  if (typeof value !== "number" || !isNumericKey(key)) return onOff(value);
   switch (FIELDS[key].unit) {
     case "credit":
       return formatNaira(value);
@@ -260,11 +266,11 @@ function formatValue(key: string, value: number | boolean): string {
  */
 function formatPair(
   key: string,
-  a: number | boolean,
-  b: number | boolean,
+  a: number | boolean | string[],
+  b: number | boolean | string[],
   sep: string,
 ): string {
-  if (typeof a === "boolean" || typeof b === "boolean" || !isNumericKey(key)) {
+  if (typeof a !== "number" || typeof b !== "number" || !isNumericKey(key)) {
     return `${onOff(a)}${sep}${onOff(b)}`;
   }
   switch (FIELDS[key].unit) {
@@ -334,7 +340,7 @@ type Edits = { [K in NumericBookSettingKey]?: string } & {
 };
 
 interface Change {
-  key: BookSettingKey;
+  key: FormKey;
   from: number | boolean;
   to: number | boolean;
 }
@@ -487,6 +493,13 @@ export function SettingsDesk() {
               Couldn&rsquo;t refresh: {resource.error}
             </p>
           )}
+          {/* an older API publishes no topics: nothing to show */}
+          {Array.isArray(state.settings.pausedTopics) && (
+            <PausedMarketsCard
+              state={state}
+              onSaved={(next) => setSaved({ state: next, over: resource.data })}
+            />
+          )}
           <SettingsForm
             state={state}
             onSaved={(next) => setSaved({ state: next, over: resource.data })}
@@ -541,7 +554,7 @@ function SettingsForm({
     setText(key, toInput(key, next));
   };
 
-  const reset = (key: BookSettingKey) => {
+  const reset = (key: FormKey) => {
     if (key === "internationalTrading") {
       setEdits((e) => ({
         ...e,
@@ -577,7 +590,7 @@ function SettingsForm({
     }
   };
 
-  const rowProps = (key: BookSettingKey) => ({
+  const rowProps = (key: FormKey) => ({
     risks: risksFor(risks, key),
     atDefault: form.values[key] === state.defaults[key],
     defaultText: formatValue(key, state.defaults[key]),
@@ -1079,7 +1092,7 @@ function ConfirmDialog({
     return () => document.removeEventListener("keydown", onKey);
   }, [onCancel]);
 
-  const changed = new Set(changes.map((c) => c.key));
+  const changed = new Set<BookSettingKey>(changes.map((c) => c.key));
   const enablingIntl = changes.some(
     (c) => c.key === "internationalTrading" && c.to === true,
   );
