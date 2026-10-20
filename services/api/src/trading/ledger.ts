@@ -80,17 +80,7 @@ export async function creditNaira(params: {
       metadata: params.metadata,
     });
   } catch (err) {
-    // Duplicate refKey race: a concurrent retry won. Undo our $inc so
-    // the balance reflects exactly one credit, then return theirs.
-    if (isDuplicateKey(err)) {
-      await NairaAccount.updateOne(
-        { authUserId },
-        { $inc: { balanceKobo: -amountKobo } },
-      );
-      const winner = await findExistingEntry(params.refKey);
-      if (winner) return winner;
-    }
-    throw err;
+    return afterFailedAppend(err, authUserId, params.refKey, amountKobo, account.balanceKobo);
   }
 }
 
@@ -138,17 +128,38 @@ export async function debitNaira(params: {
       metadata: params.metadata,
     });
   } catch (err) {
-    if (isDuplicateKey(err)) {
-      // A concurrent retry already debited — give this attempt's money back.
-      await NairaAccount.updateOne(
-        { authUserId },
-        { $inc: { balanceKobo: amountKobo } },
-      );
-      const winner = await findExistingEntry(params.refKey);
-      if (winner) return winner;
-    }
-    throw err;
+    return afterFailedAppend(err, authUserId, params.refKey, -amountKobo, account.balanceKobo);
   }
+}
+
+/**
+ * The balance moved by `deltaKobo` but its ledger entry didn't write.
+ *
+ * A duplicate refKey means a concurrent retry recorded the same
+ * operation first: undo our move so the balance reflects it once, and
+ * return theirs. Any other failure: if our own entry landed anyway (the
+ * error came after the write), it stands; otherwise the move is undone
+ * and the error rethrown — the balance never holds money the ledger
+ * doesn't explain, or a caller's compensation (a refunded dollar charge,
+ * a returned stake) would pay out twice.
+ */
+async function afterFailedAppend(
+  err: unknown,
+  authUserId: string,
+  refKey: string,
+  deltaKobo: number,
+  balanceAfterKobo: number,
+): Promise<ILedgerEntry> {
+  if (!isDuplicateKey(err)) {
+    const landed = await findExistingEntry(refKey).catch(() => null);
+    if (landed && landed.balanceAfterKobo === balanceAfterKobo) return landed;
+  }
+  await NairaAccount.updateOne({ authUserId }, { $inc: { balanceKobo: -deltaKobo } });
+  if (isDuplicateKey(err)) {
+    const winner = await findExistingEntry(refKey);
+    if (winner) return winner;
+  }
+  throw err;
 }
 
 function isDuplicateKey(err: unknown): boolean {

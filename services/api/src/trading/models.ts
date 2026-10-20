@@ -255,6 +255,25 @@ export const MarketLock: Model<IMarketLock> =
   (mongoose.models.MarketLock as Model<IMarketLock>) ??
   mongoose.model<IMarketLock>("MarketLock", marketLockSchema);
 
+/**
+ * A dollars-to-credit conversion whose dollar charge was refunded after
+ * the naira side failed. Its key can't be replayed: the wallet dedupes
+ * charges by key and would hand back the refunded charge as if it stood,
+ * crediting naira for nothing (routes/ngn-wallet.ts).
+ */
+const reversedConversionSchema = new Schema(
+  { refKey: { type: String, required: true, unique: true } },
+  { timestamps: true },
+);
+
+export type IReversedConversion = InferSchemaType<typeof reversedConversionSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const ReversedConversion: Model<IReversedConversion> =
+  (mongoose.models.ReversedConversion as Model<IReversedConversion>) ??
+  mongoose.model<IReversedConversion>("ReversedConversion", reversedConversionSchema);
+
 export const SETTLEMENT_SOURCES = [
   "bayse-auto",
   "worldstreet-auto",
@@ -434,6 +453,7 @@ export async function ensureTradingIndexes(): Promise<void> {
     FxRate.init(),
     BookSettingsDoc.init(),
     MarketLock.init(),
+    ReversedConversion.init(),
     Settlement.init(),
     WorldstreetEvent.init(),
     WorldstreetMarket.init(),

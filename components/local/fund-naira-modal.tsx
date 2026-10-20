@@ -120,7 +120,11 @@ function FundDialog({
       setAmount("");
       keyRef.current = newIdempotencyKey();
     } catch (err) {
-      setError(convertMessage(err));
+      setError(convertMessage(err, toNaira));
+      // The API answered, so nothing is left half-done (a failed step is
+      // put back first): the next press is a new conversion. Without an
+      // answer — a timeout — the key stays, so a retry can't convert twice.
+      if (err instanceof ApiError) keyRef.current = newIdempotencyKey();
     } finally {
       setPending(false);
     }
@@ -340,7 +344,7 @@ function Balance({ label, value }: { label: string; value: string }) {
 }
 
 /** Conversion failures the user can act on; anything else keeps its message. */
-function convertMessage(err: unknown): string {
+function convertMessage(err: unknown, toNaira: boolean): string {
   if (err instanceof ApiError) {
     switch (err.code) {
       case "INSUFFICIENT_FUNDS":
@@ -348,9 +352,12 @@ function convertMessage(err: unknown): string {
       case "FX_UNAVAILABLE":
         return "Conversion is unavailable right now — no rate is set.";
       case "WALLET_UNAVAILABLE":
-        // the money never moved, but re-read in case it half-did
+      case "CONVERSION_REVERSED":
+        // the money never moved or was put back — re-read to show it
         void refreshNairaWallet();
-        return "The wallet service is unreachable. Nothing was converted.";
+        return toNaira
+          ? "Couldn't reach your WorldStreet dollar wallet. Nothing was converted — please try again shortly."
+          : "Couldn't add the dollars to your WorldStreet wallet, so your credit was returned. Nothing was converted — please try again shortly.";
       default:
         return err.message;
     }
