@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeftIcon as ArrowLeft,
   BanknotesIcon as Coins,
+  ClipboardDocumentCheckIcon as Settled,
   Cog6ToothIcon as Settings,
   PencilSquareIcon as PenSquare,
   UsersIcon as Users,
@@ -19,6 +20,7 @@ const NAV = [
   { href: "/admin", label: "Local book", icon: Coins },
   { href: "/admin/markets", label: "Markets", icon: PenSquare },
   { href: "/admin/traders", label: "Traders", icon: Users },
+  { href: "/admin/settled", label: "Settled bets", icon: Settled },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ] as const;
 

@@ -71,6 +71,9 @@ type NumericKey = Exclude<SettingKey, "internationalTrading" | "pausedTopics">;
 const MAX_PAUSED_TOPICS = 20;
 const TOPIC = /^[a-z0-9][a-z0-9 .-]{1,39}$/;
 
+/** A usable topic, once normalized: 2–40 letters, numbers, spaces, dots or dashes. */
+export const isUsableTopic = (topic: string): boolean => TOPIC.test(topic);
+
 /** Trimmed, lowercased, deduplicated, empties dropped. */
 export function normalizeTopics(topics: readonly string[]): string[] {
   return [...new Set(topics.map((t) => t.trim().toLowerCase().replace(/\s+/g, " ")).filter(Boolean))];

@@ -25,9 +25,10 @@ const { buildApp } = await import("../src/app.js");
 const { placeOrder } = await import("../src/routes/trades.js");
 const { isPausedMarket } = await import("../src/trading/paused.js");
 const settings = await import("../src/trading/settings.js");
-const { voidPausedMarkets, runSettlementPass, adminVoidMarket } = await import(
+const { voidPausedMarkets, runSettlementPass, adminVoidMarket, adminSettleMarket } = await import(
   "../src/trading/settlement.js"
 );
+const { getTopicBets } = await import("../src/trading/topic-bets.js");
 const { getPausedRefunds, notifyPausedRefunds } = await import("../src/trading/pause-refunds.js");
 const { creditNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { Position, WorldstreetEvent, WorldstreetMarket, ensureTradingIndexes } = await import(
@@ -239,6 +240,39 @@ check("sending it emails her once", notified.emailed === 1 && sent.length === 3 
 check("…and now everyone is marked emailed", (await getPausedRefunds(btc, 72)).totals.notEmailed === 0);
 const again = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: false, log });
 check("running it again emails nobody", again.emailed === 0 && sent.length === 3);
+
+/* ---------------- settled bets on a topic ---------------- */
+console.log("settled bets");
+// a Bitcoin bet that won and one that lost, settled by the desk
+await User.create({ authUserId: "u5", email: "bola@example.test", username: "bola", displayName: "bola" });
+const wonMarket = await ownMarket("BTC above $100k at noon?");
+const lostMarket = await ownMarket("BTC above $150k at noon?");
+await openBet(wonMarket, "u5", 10_000);
+await openBet(lostMarket, "u5", 20_000);
+const lostNo = (await WorldstreetMarket.findOne({ marketId: lostMarket.marketId }))!.outcomes[1]!.outcomeId;
+await adminSettleMarket({ eventId: wonMarket.eventId, marketId: wonMarket.marketId, winningOutcomeId: wonMarket.yes, actor: "key:josh", log });
+await adminSettleMarket({ eventId: lostMarket.eventId, marketId: lostMarket.marketId, winningOutcomeId: lostNo, actor: "key:josh", log });
+
+const topicBets = await getTopicBets(btc, 72);
+const t = topicBets.totals;
+check(
+  `every finished Bitcoin bet is in it: 1 won, 1 lost, 4 refunded (got ${t.won}/${t.lost}/${t.refunded})`,
+  t.won === 1 && t.lost === 1 && t.refunded === 4 && t.bets === 6,
+);
+check(
+  `…with staked, paid, refunded and the house result (got ${t.stakedKobo}/${t.paidKobo}/${t.refundedKobo}/${t.houseResultKobo})`,
+  t.stakedKobo === 155_000 && t.paidKobo === 18_181 && t.refundedKobo === 125_000 && t.houseResultKobo === 11_819,
+);
+const bola = topicBets.customers.find((c) => c.username === "bola");
+const adaRow = topicBets.customers.find((c) => c.username === "ada");
+check(
+  "…per customer: what they won, lost and got back",
+  bola?.won === 1 && bola.lost === 1 && bola.resultKobo === -11_819 &&
+    adaRow?.refunded === 2 && adaRow.refundedKobo === 70_000 && adaRow.resultKobo === 0,
+);
+check("…and each bet with its customer", topicBets.bets.length === 6 && topicBets.bets.every((b) => b.username !== ""));
+check("other topics stay out", !topicBets.bets.some((b) => /ETH/.test(b.eventTitle)));
+check("a topic with nothing on it is empty", (await getTopicBets(["dogecoin"], 72)).totals.bets === 0);
 
 /* ---------------- what the public sees ---------------- */
 console.log("public");

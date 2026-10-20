@@ -15,7 +15,14 @@ import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { getSettlementQueue } from "../trading/exposure.js";
 import { listTraders, TRADER_SORTS, type TraderSort } from "../trading/traders.js";
 import { getBookRisk } from "../trading/risk.js";
-import { getBookSettings, getSettingsView, updateBookSettings } from "../trading/settings.js";
+import {
+  getBookSettings,
+  getSettingsView,
+  isUsableTopic,
+  normalizeTopics,
+  updateBookSettings,
+} from "../trading/settings.js";
+import { getTopicBets } from "../trading/topic-bets.js";
 import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds, notifyPausedRefunds } from "../trading/pause-refunds.js";
@@ -80,6 +87,12 @@ const settingsBody = z
 const voidPausedBody = z.object({
   reason: z.string().min(3).max(500),
   dryRun: z.boolean(),
+});
+
+const topicBetsQuery = z.object({
+  /** Comma-separated; absent = the paused topics. */
+  topics: z.string().max(400).optional(),
+  hours: z.coerce.number().int().min(1).max(2160).default(72),
 });
 
 const refundsQuery = z.object({
@@ -329,6 +342,27 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       return { success: true, data: { ...result, topics: settings.pausedTopics } };
     },
   );
+
+  /**
+   * Every bet on a topic's markets that finished in the window — won,
+   * lost or refunded — with who placed it and what they're up or down
+   * (trading/topic-bets.ts). Topics default to the paused ones.
+   */
+  app.get("/admin/topic-bets", { schema: { querystring: topicBetsQuery } }, async (request) => {
+    await requireAdmin(request);
+    const asked = request.query.topics;
+    const topics =
+      asked === undefined ? (await getBookSettings()).pausedTopics : normalizeTopics(asked.split(","));
+    if (topics.length === 0) {
+      throw new ApiError(400, "Name at least one topic, e.g. bitcoin", "NO_TOPICS");
+    }
+    if (topics.length > 10) throw new ApiError(400, "At most 10 topics at once", "TOO_MANY_TOPICS");
+    const bad = topics.find((t) => !isUsableTopic(t));
+    if (bad !== undefined) {
+      throw new ApiError(400, `"${bad}" isn't a usable topic — letters, numbers, spaces, dots or dashes`, "BAD_TOPIC");
+    }
+    return { success: true, data: await getTopicBets(topics, request.query.hours) };
+  });
 
   /**
    * Who the paused topics refunded, and how much: the markets voided and

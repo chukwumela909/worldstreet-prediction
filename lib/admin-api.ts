@@ -404,6 +404,77 @@ export async function fetchPausedRefunds(): Promise<PausedRefundReport> {
   }
 }
 
+export type SettledStatus = "won" | "lost" | "voided";
+
+export interface TopicBet {
+  id: string;
+  authUserId: string;
+  username: string;
+  eventTitle: string;
+  marketTitle: string;
+  outcomeLabel: string;
+  stakeKobo: number;
+  priceKobo: number;
+  /** What a win paid (stake included); paid only when won. */
+  payoutKobo: number;
+  status: SettledStatus;
+  placedAt: string | null;
+  settledAt: string | null;
+}
+
+export interface TopicCustomer {
+  authUserId: string;
+  username: string;
+  email: string;
+  bets: number;
+  won: number;
+  lost: number;
+  refunded: number;
+  stakedKobo: number;
+  paidKobo: number;
+  refundedKobo: number;
+  /** Paid + refunded − staked: what they're up (+) or down (−). */
+  resultKobo: number;
+  lastSettledAt: string | null;
+}
+
+/** Every bet on a topic's markets that finished in the window, and who placed it. */
+export interface TopicBetsReport {
+  topics: string[];
+  hours: number;
+  totals: {
+    customers: number;
+    bets: number;
+    won: number;
+    lost: number;
+    refunded: number;
+    stakedKobo: number;
+    paidKobo: number;
+    refundedKobo: number;
+    /** Staked − paid − refunded: what the house kept (+) or lost (−). */
+    houseResultKobo: number;
+  };
+  open: { bets: number; stakeKobo: number };
+  customers: TopicCustomer[];
+  bets: TopicBet[];
+  truncated: boolean;
+}
+
+/** Settled bets on these topics (the paused ones when none are given). */
+export async function fetchTopicBets(params: {
+  topics?: string[];
+  hours: number;
+}): Promise<TopicBetsReport> {
+  const qs = new URLSearchParams({ hours: String(params.hours) });
+  if (params.topics && params.topics.length > 0) qs.set("topics", params.topics.join(","));
+  try {
+    const res = await apiFetch<{ data: TopicBetsReport }>(`/v1/admin/topic-bets?${qs}`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
 export interface NotifyRefundsResult {
   customers: number;
   bets: number;
