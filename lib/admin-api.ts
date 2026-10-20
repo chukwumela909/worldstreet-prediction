@@ -408,6 +408,7 @@ export type SettledStatus = "won" | "lost" | "voided";
 
 export interface TopicBet {
   id: string;
+  marketId: string;
   authUserId: string;
   username: string;
   eventTitle: string;
@@ -435,7 +436,26 @@ export interface TopicCustomer {
   refundedKobo: number;
   /** Paid + refunded − staked: what they're up (+) or down (−). */
   resultKobo: number;
+  /** Stake-weighted average price paid per ₦100 share. */
+  avgPriceKobo: number;
   lastSettledAt: string | null;
+}
+
+/** One market's bets — for a 15-minute series, one window. */
+export interface TopicRound {
+  marketId: string;
+  eventTitle: string;
+  marketTitle: string;
+  settledAt: string | null;
+  bets: number;
+  customers: number;
+  stakedKobo: number;
+  paidKobo: number;
+  refundedKobo: number;
+  houseResultKobo: number;
+  /** The side(s) that paid out. */
+  winning: string[];
+  avgPriceKobo: number;
 }
 
 /** Every bet on a topic's markets that finished in the window, and who placed it. */
@@ -453,9 +473,13 @@ export interface TopicBetsReport {
     refundedKobo: number;
     /** Staked − paid − refunded: what the house kept (+) or lost (−). */
     houseResultKobo: number;
+    /** Stake-weighted average price paid per ₦100 share. */
+    avgPriceKobo: number;
+    rounds: number;
   };
   open: { bets: number; stakeKobo: number };
   customers: TopicCustomer[];
+  rounds: TopicRound[];
   bets: TopicBet[];
   truncated: boolean;
 }

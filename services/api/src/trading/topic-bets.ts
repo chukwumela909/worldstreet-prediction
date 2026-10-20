@@ -8,19 +8,26 @@ import { pausedPattern } from "./paused.js";
  * topic matches as paused topics do (trading/paused.ts): a whole word in
  * the event's title or slug or the market's title. Amounts are kobo.
  *
- * Per customer, "their result" is what they're up or down on these
- * bets: winnings paid plus refunds, minus everything staked. The house
- * result is its opposite.
+ * Three views of the same bets: per customer (with their win rate and
+ * the average price they paid, stake-weighted — buying at ₦95+ means
+ * buying what was already nearly decided), per round (one market, e.g.
+ * one 15-minute Bitcoin window), and the bets themselves.
+ *
+ * A customer's "result" is what they're up or down on these bets:
+ * winnings paid plus refunds, minus everything staked. The house result
+ * is its opposite.
  */
 
 const MAX_HOURS = 24 * 90;
 const MAX_BETS = 5_000;
+const MAX_BET_ROWS = 1_500;
 const MAX_ROWS = 500;
 
 export type SettledStatus = "won" | "lost" | "voided";
 
 export interface TopicBet {
   id: string;
+  marketId: string;
   authUserId: string;
   username: string;
   eventTitle: string;
@@ -49,7 +56,27 @@ export interface TopicCustomer {
   refundedKobo: number;
   /** Paid + refunded − staked: what they're up (+) or down (−). */
   resultKobo: number;
+  /** Stake-weighted average price paid per ₦100 share. */
+  avgPriceKobo: number;
   lastSettledAt: string | null;
+}
+
+/** One market's bets — for a 15-minute series, one window. */
+export interface TopicRound {
+  marketId: string;
+  eventTitle: string;
+  marketTitle: string;
+  settledAt: string | null;
+  bets: number;
+  customers: number;
+  stakedKobo: number;
+  paidKobo: number;
+  refundedKobo: number;
+  /** Staked − paid − refunded on this market. */
+  houseResultKobo: number;
+  /** The side(s) that paid out, from the winning bets. */
+  winning: string[];
+  avgPriceKobo: number;
 }
 
 export interface TopicBetsReport {
@@ -66,17 +93,24 @@ export interface TopicBetsReport {
     refundedKobo: number;
     /** Staked − paid − refunded: what the house kept (+) or lost (−). */
     houseResultKobo: number;
+    /** Stake-weighted average price paid per ₦100 share. */
+    avgPriceKobo: number;
+    rounds: number;
   };
   /** Bets on these markets still waiting to settle. */
   open: { bets: number; stakeKobo: number };
+  /** Biggest winners first. */
   customers: TopicCustomer[];
-  /** Newest first, at most MAX_ROWS. */
+  /** Newest first. */
+  rounds: TopicRound[];
+  /** Newest first, at most MAX_BET_ROWS. */
   bets: TopicBet[];
   /** More bets settled in the window than were read (MAX_BETS). */
   truncated: boolean;
 }
 
 const iso = (d: Date | null | undefined) => (d ? new Date(d).toISOString() : null);
+const avg = (priceStake: number, stake: number) => (stake > 0 ? Math.round(priceStake / stake) : 0);
 
 export async function getTopicBets(
   topics: readonly string[],
@@ -96,9 +130,12 @@ export async function getTopicBets(
       paidKobo: 0,
       refundedKobo: 0,
       houseResultKobo: 0,
+      avgPriceKobo: 0,
+      rounds: 0,
     },
     open: { bets: 0, stakeKobo: 0 },
     customers: [],
+    rounds: [],
     bets: [],
     truncated: false,
   };
@@ -112,6 +149,7 @@ export async function getTopicBets(
       { status: { $in: ["won", "lost", "voided"] }, settledAt: { $gte: since }, ...onTopic },
       {
         authUserId: 1,
+        marketId: 1,
         eventTitle: 1,
         marketTitle: 1,
         outcomeLabel: 1,
@@ -123,7 +161,7 @@ export async function getTopicBets(
         settledAt: 1,
       },
     )
-      .sort({ settledAt: -1 })
+      .sort({ settledAt: -1, createdAt: -1 })
       .limit(MAX_BETS + 1)
       .lean(),
     Position.aggregate<{ bets: number; stakeKobo: number }>([
@@ -140,8 +178,14 @@ export async function getTopicBets(
   ).lean();
   const userById = new Map(users.map((u) => [u.authUserId, u]));
 
-  const customers = new Map<string, TopicCustomer>();
   const totals = { ...empty.totals };
+  let totalPriceStake = 0;
+  const customers = new Map<string, TopicCustomer & { priceStake: number }>();
+  const rounds = new Map<
+    string,
+    TopicRound & { priceStake: number; who: Set<string>; wins: Set<string> }
+  >();
+
   for (const b of rows) {
     const status = b.status as SettledStatus;
     const paid = status === "won" ? b.potentialPayoutKobo : 0;
@@ -150,6 +194,7 @@ export async function getTopicBets(
     totals.stakedKobo += b.stakeKobo;
     totals.paidKobo += paid;
     totals.refundedKobo += refund;
+    totalPriceStake += b.priceKobo * b.stakeKobo;
     if (status === "won") totals.won += 1;
     else if (status === "lost") totals.lost += 1;
     else totals.refunded += 1;
@@ -167,7 +212,9 @@ export async function getTopicBets(
       paidKobo: 0,
       refundedKobo: 0,
       resultKobo: 0,
+      avgPriceKobo: 0,
       lastSettledAt: iso(b.settledAt), // rows are newest first
+      priceStake: 0,
     };
     c.bets += 1;
     if (status === "won") c.won += 1;
@@ -177,20 +224,61 @@ export async function getTopicBets(
     c.paidKobo += paid;
     c.refundedKobo += refund;
     c.resultKobo = c.paidKobo + c.refundedKobo - c.stakedKobo;
+    c.priceStake += b.priceKobo * b.stakeKobo;
     customers.set(b.authUserId, c);
+
+    const r = rounds.get(b.marketId) ?? {
+      marketId: b.marketId,
+      eventTitle: b.eventTitle,
+      marketTitle: b.marketTitle,
+      settledAt: iso(b.settledAt),
+      bets: 0,
+      customers: 0,
+      stakedKobo: 0,
+      paidKobo: 0,
+      refundedKobo: 0,
+      houseResultKobo: 0,
+      winning: [],
+      avgPriceKobo: 0,
+      priceStake: 0,
+      who: new Set<string>(),
+      wins: new Set<string>(),
+    };
+    r.bets += 1;
+    r.stakedKobo += b.stakeKobo;
+    r.paidKobo += paid;
+    r.refundedKobo += refund;
+    r.priceStake += b.priceKobo * b.stakeKobo;
+    r.who.add(b.authUserId);
+    if (status === "won") r.wins.add(b.outcomeLabel);
+    rounds.set(b.marketId, r);
   }
   totals.customers = customers.size;
+  totals.rounds = rounds.size;
   totals.houseResultKobo = totals.stakedKobo - totals.paidKobo - totals.refundedKobo;
+  totals.avgPriceKobo = avg(totalPriceStake, totals.stakedKobo);
 
   return {
     topics: [...topics],
     hours,
     totals,
     open: { bets: openAgg?.bets ?? 0, stakeKobo: openAgg?.stakeKobo ?? 0 },
-    // biggest winners first: who the house paid most
-    customers: [...customers.values()].sort((a, b) => b.resultKobo - a.resultKobo).slice(0, MAX_ROWS),
-    bets: rows.slice(0, MAX_ROWS).map((b) => ({
+    customers: [...customers.values()]
+      .map(({ priceStake, ...c }) => ({ ...c, avgPriceKobo: avg(priceStake, c.stakedKobo) }))
+      .sort((a, b) => b.resultKobo - a.resultKobo)
+      .slice(0, MAX_ROWS),
+    rounds: [...rounds.values()]
+      .map(({ priceStake, who, wins, ...r }) => ({
+        ...r,
+        customers: who.size,
+        winning: [...wins],
+        houseResultKobo: r.stakedKobo - r.paidKobo - r.refundedKobo,
+        avgPriceKobo: avg(priceStake, r.stakedKobo),
+      }))
+      .slice(0, MAX_ROWS),
+    bets: rows.slice(0, MAX_BET_ROWS).map((b) => ({
       id: String(b._id),
+      marketId: b.marketId,
       authUserId: b.authUserId,
       username: userById.get(b.authUserId)?.username ?? "",
       eventTitle: b.eventTitle,

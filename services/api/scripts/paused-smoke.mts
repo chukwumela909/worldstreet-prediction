@@ -271,6 +271,12 @@ check(
     adaRow?.refunded === 2 && adaRow.refundedKobo === 70_000 && adaRow.resultKobo === 0,
 );
 check("…and each bet with its customer", topicBets.bets.length === 6 && topicBets.bets.every((b) => b.username !== ""));
+const wonRound = topicBets.rounds.find((r) => r.marketId === wonMarket.marketId);
+check(
+  `one round per market, with its winning side (got ${t.rounds} rounds)`,
+  t.rounds === 5 && JSON.stringify(wonRound?.winning) === JSON.stringify(["Yes"]) && wonRound?.houseResultKobo === 10_000 - 18_181,
+);
+check("the average price paid, stake-weighted", t.avgPriceKobo === 5_500 && bola?.avgPriceKobo === 5_500);
 check("other topics stay out", !topicBets.bets.some((b) => /ETH/.test(b.eventTitle)));
 check("a topic with nothing on it is empty", (await getTopicBets(["dogecoin"], 72)).totals.bets === 0);
 
