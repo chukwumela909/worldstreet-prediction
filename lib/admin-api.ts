@@ -419,6 +419,8 @@ export interface TopicBet {
   /** What a win paid (stake included); paid only when won. */
   payoutKobo: number;
   status: SettledStatus;
+  /** Set when the desk reversed it after it settled (Recovery). */
+  reversedFrom?: "won" | "lost" | "open" | null;
   placedAt: string | null;
   settledAt: string | null;
 }
@@ -498,6 +500,106 @@ export async function fetchTopicBets(params: {
     throw unwrapNestedError(err);
   }
 }
+
+/* ---------- Recovery: reversing settled bets ---------- */
+
+export type Shortfall = "negative" | "cap";
+
+export interface RecoveryCustomer {
+  authUserId: string;
+  username: string;
+  email: string;
+  bets: number;
+  takenBackKobo: number;
+  returnedKobo: number;
+  writtenOffKobo: number;
+  balanceKobo: number;
+  emailedAt: string | null;
+  reversedAt: string | null;
+}
+
+/** What reversing has recovered so far. */
+export interface RecoveryReport {
+  totals: {
+    bets: number;
+    customers: number;
+    takenBackKobo: number;
+    returnedKobo: number;
+    netKobo: number;
+    owedKobo: number;
+    owingCustomers: number;
+    writtenOffKobo: number;
+    emailed: number;
+    notEmailed: number;
+  };
+  mailConfigured: boolean;
+  customers: RecoveryCustomer[];
+}
+
+/** What a reversal would do — nothing moves. */
+export interface ReversalPreview {
+  topics: string[];
+  sinceDays: number | null;
+  bets: number;
+  won: number;
+  lost: number;
+  customers: number;
+  takeBackKobo: number;
+  returnKobo: number;
+  netKobo: number;
+  shortCustomers: number;
+  shortKobo: number;
+  openBets: number;
+  events: { title: string; bets: number }[];
+  /** Whether every topic is paused — the run needs it. */
+  paused: boolean;
+}
+
+export interface ReversalBatch {
+  reversed: number;
+  remaining: number;
+  changeKobo: number;
+  writtenOffKobo: number;
+}
+
+export interface ReversalNotice {
+  customers: number;
+  emailed: number;
+  mailConfigured: boolean;
+  dryRun: boolean;
+}
+
+async function adminPost<T>(path: string, body: unknown): Promise<T> {
+  try {
+    const res = await apiFetch<{ data: T }>(path, { method: "POST", body: JSON.stringify(body) });
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/** Module-level, for useAdminResource. */
+export async function fetchRecovery(): Promise<RecoveryReport> {
+  try {
+    const res = await apiFetch<{ data: RecoveryReport }>("/v1/admin/recovery");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+export const previewReversal = (params: { topics: string[]; sinceDays: number | null }) =>
+  adminPost<ReversalPreview>("/v1/admin/recovery/preview", params);
+
+/** One batch; call again until `remaining` is 0. */
+export const runReversalBatch = (params: {
+  topics: string[];
+  sinceDays: number | null;
+  shortfall: Shortfall;
+}) => adminPost<ReversalBatch>("/v1/admin/recovery/run", { ...params, confirm: "REVERSE" });
+
+export const notifyReversals = (dryRun: boolean) =>
+  adminPost<ReversalNotice>("/v1/admin/recovery/notify", { dryRun });
 
 export interface NotifyRefundsResult {
   customers: number;

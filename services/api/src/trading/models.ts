@@ -48,6 +48,7 @@ export const LEDGER_TYPES = [
   "trade_stake", // debit when buying into a market
   "payout", // credit for a winning position
   "refund", // credit for a voided position / failed conversion repair
+  "reversal", // a settled bet undone by the desk: stake back, winnings taken back (may go negative)
 ] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];
 
@@ -134,6 +135,18 @@ const positionSchema = new Schema(
     settlementId: { type: String },
     /** When the customer was emailed that this bet was refunded (paused topics). */
     refundNotifiedAt: { type: Date },
+    /**
+     * Undone by the desk after it settled (trading/reversals.ts): what it
+     * was before (won / lost / open), when, and the signed change to the
+     * customer's balance — stake back, minus any winnings paid on it.
+     */
+    reversedFrom: { type: String, enum: ["won", "lost", "open"] },
+    reversedAt: { type: Date },
+    reversalKobo: { type: Number },
+    /** Take-back written off because the balance couldn't cover it (a capped run). */
+    reversalShortKobo: { type: Number },
+    /** When the customer was emailed about the reversal. */
+    reversalNotifiedAt: { type: Date },
   },
   { timestamps: true },
 );

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeftIcon as ArrowLeft,
+  ArrowUturnLeftIcon as Recovery,
   BanknotesIcon as Coins,
   ClipboardDocumentCheckIcon as Settled,
   Cog6ToothIcon as Settings,
@@ -21,6 +22,7 @@ const NAV = [
   { href: "/admin/markets", label: "Markets", icon: PenSquare },
   { href: "/admin/traders", label: "Traders", icon: Users },
   { href: "/admin/settled", label: "Settled bets", icon: Settled },
+  { href: "/admin/recovery", label: "Recovery", icon: Recovery },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ] as const;
 

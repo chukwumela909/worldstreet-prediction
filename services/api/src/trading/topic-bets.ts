@@ -38,6 +38,8 @@ export interface TopicBet {
   /** What a win paid (₦100 a share); paid only when won. */
   payoutKobo: number;
   status: SettledStatus;
+  /** Set when the desk reversed it after it settled (trading/reversals.ts). */
+  reversedFrom: "won" | "lost" | "open" | null;
   placedAt: string | null;
   settledAt: string | null;
 }
@@ -157,6 +159,7 @@ export async function getTopicBets(
         priceKobo: 1,
         potentialPayoutKobo: 1,
         status: 1,
+        reversedFrom: 1,
         createdAt: 1,
         settledAt: 1,
       },
@@ -288,6 +291,7 @@ export async function getTopicBets(
       priceKobo: b.priceKobo,
       payoutKobo: b.potentialPayoutKobo,
       status: b.status as SettledStatus,
+      reversedFrom: (b.reversedFrom as TopicBet["reversedFrom"]) ?? null,
       placedAt: iso(b.createdAt),
       settledAt: iso(b.settledAt),
     })),

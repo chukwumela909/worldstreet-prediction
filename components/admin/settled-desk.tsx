@@ -492,6 +492,10 @@ function BetLine({
   withTime?: boolean;
 }) {
   const back = bet.status === "won" ? bet.payoutKobo : bet.status === "voided" ? bet.stakeKobo : 0;
+  // reversed by Recovery after it settled: say so, and what it was
+  const chip = bet.reversedFrom
+    ? { label: `Reversed (${bet.reversedFrom})`, className: "bg-warning-tint text-warning" }
+    : STATUS_CHIP[bet.status];
   return (
     <li className="flex flex-wrap items-center gap-x-3 gap-y-0.5 py-1.5 text-sm">
       {withTime && (
@@ -509,9 +513,9 @@ function BetLine({
       </span>
       <span className="w-24 text-right tabular-nums">{money.format(bet.stakeKobo)}</span>
       <span
-        className={`w-20 rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold ${STATUS_CHIP[bet.status].className}`}
+        className={`w-24 rounded-md px-1.5 py-0.5 text-center text-[11px] font-semibold ${chip.className}`}
       >
-        {STATUS_CHIP[bet.status].label}
+        {chip.label}
       </span>
       <span className="w-24 text-right tabular-nums">{back > 0 ? money.format(back) : "—"}</span>
     </li>

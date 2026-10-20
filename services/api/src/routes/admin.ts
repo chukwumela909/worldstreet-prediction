@@ -23,6 +23,12 @@ import {
   updateBookSettings,
 } from "../trading/settings.js";
 import { getTopicBets } from "../trading/topic-bets.js";
+import {
+  getRecovery,
+  notifyReversals,
+  previewReversal,
+  runReversalBatch,
+} from "../trading/reversals.js";
 import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds, notifyPausedRefunds } from "../trading/pause-refunds.js";
@@ -88,6 +94,30 @@ const voidPausedBody = z.object({
   reason: z.string().min(3).max(500),
   dryRun: z.boolean(),
 });
+
+const recoveryTopics = z.array(z.string().max(80)).min(1).max(10);
+const recoveryPreviewBody = z.object({
+  topics: recoveryTopics,
+  /** Bets placed in the last N days; null = all time. */
+  sinceDays: z.number().int().min(1).max(3650).nullable(),
+});
+const recoveryRunBody = recoveryPreviewBody.extend({
+  shortfall: z.enum(["negative", "cap"]),
+  /** Typed by the admin — reversing moves real balances. */
+  confirm: z.literal("REVERSE"),
+});
+const recoveryNotifyBody = z.object({ dryRun: z.boolean() });
+
+/** Normalized, checked topics, or a 400 the desk can show. */
+function checkTopics(raw: string[]): string[] {
+  const topics = normalizeTopics(raw);
+  if (topics.length === 0) throw new ApiError(400, "Name at least one topic", "NO_TOPICS");
+  const bad = topics.find((t) => !isUsableTopic(t));
+  if (bad !== undefined) {
+    throw new ApiError(400, `"${bad}" isn't a usable topic — letters, numbers, spaces, dots or dashes`, "BAD_TOPIC");
+  }
+  return topics;
+}
 
 const topicBetsQuery = z.object({
   /** Comma-separated; absent = the paused topics. */
@@ -340,6 +370,70 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
         log: request.log,
       });
       return { success: true, data: { ...result, topics: settings.pausedTopics } };
+    },
+  );
+
+  /**
+   * Recovery: what reversing settled bets has taken back, owed and
+   * written off, per customer and in all (trading/reversals.ts).
+   */
+  app.get("/admin/recovery", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getRecovery() };
+  });
+
+  /** What reversing these topics' bets would do — nothing moves. */
+  app.post("/admin/recovery/preview", { schema: { body: recoveryPreviewBody } }, async (request) => {
+    await requireAdmin(request);
+    const topics = checkTopics(request.body.topics);
+    const { pausedTopics } = await getBookSettings();
+    const preview = await previewReversal(topics, request.body.sinceDays);
+    return {
+      success: true,
+      data: { ...preview, paused: topics.every((t) => pausedTopics.includes(t)) },
+    };
+  });
+
+  /**
+   * Reverse one batch of these topics' settled bets: stake back, any
+   * winnings taken back. The topics must be paused first, so no new bet
+   * lands while it runs. Call again until `remaining` is 0.
+   */
+  app.post(
+    "/admin/recovery/run",
+    { schema: { body: recoveryRunBody }, config: { rateLimit: { max: 120, timeWindow: "1 minute" } } },
+    async (request) => {
+      const user = await requireAdmin(request);
+      const topics = checkTopics(request.body.topics);
+      const { pausedTopics } = await getBookSettings();
+      const unpaused = topics.filter((t) => !pausedTopics.includes(t));
+      if (unpaused.length > 0) {
+        throw new ApiError(
+          409,
+          `Pause these first, so no new bets land while reversing: ${unpaused.join(", ")}`,
+          "NOT_PAUSED",
+        );
+      }
+      return {
+        success: true,
+        data: await runReversalBatch({
+          topics,
+          sinceDays: request.body.sinceDays,
+          shortfall: request.body.shortfall,
+          actor: user.id,
+          log: request.log,
+        }),
+      };
+    },
+  );
+
+  /** Email every customer with reversed bets not yet told, once each; `dryRun` only counts. */
+  app.post(
+    "/admin/recovery/notify",
+    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    async (request) => {
+      await requireAdmin(request);
+      return { success: true, data: await notifyReversals({ dryRun: request.body.dryRun, log: request.log }) };
     },
   );
 

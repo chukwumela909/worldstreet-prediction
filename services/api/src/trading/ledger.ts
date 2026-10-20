@@ -133,6 +133,50 @@ export async function debitNaira(params: {
 }
 
 /**
+ * The desk's signed adjustment: credit when positive, debit when
+ * negative, with NO floor — the one movement that may take a balance
+ * below zero (a reversed winning bet whose winnings were already spent).
+ * A negative balance blocks betting and withdrawing, both guarded debits,
+ * until new credit brings it back. Idempotent by refKey like the rest.
+ */
+export async function adjustNaira(params: {
+  authUserId: string;
+  amountKobo: number;
+  type: LedgerType;
+  refKey: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+}): Promise<ILedgerEntry> {
+  const { authUserId, amountKobo } = params;
+  if (!Number.isInteger(amountKobo) || amountKobo === 0) {
+    throw new ApiError(400, "Invalid adjustment amount", "INVALID_AMOUNT");
+  }
+
+  const existing = await findExistingEntry(params.refKey);
+  if (existing) return existing;
+
+  const account = await NairaAccount.findOneAndUpdate(
+    { authUserId },
+    { $inc: { balanceKobo: amountKobo } },
+    { returnDocument: "after", upsert: true },
+  );
+
+  try {
+    return await appendEntry({
+      authUserId,
+      type: params.type,
+      amountKobo,
+      balanceAfterKobo: account.balanceKobo,
+      refKey: params.refKey,
+      description: params.description,
+      metadata: params.metadata,
+    });
+  } catch (err) {
+    return afterFailedAppend(err, authUserId, params.refKey, amountKobo, account.balanceKobo);
+  }
+}
+
+/**
  * The balance moved by `deltaKobo` but its ledger entry didn't write.
  *
  * A duplicate refKey means a concurrent retry recorded the same

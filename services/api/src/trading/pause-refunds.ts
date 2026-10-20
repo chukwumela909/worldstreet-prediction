@@ -226,7 +226,6 @@ export async function emailRefunds(
       { authUserId: 1, email: 1, username: 1 },
     ).lean()
   ).filter((u) => u.email);
-  const topic = topics[0] ? topics[0].charAt(0).toUpperCase() + topics[0].slice(1) : "Some";
   const naira = (kobo: number) =>
     `₦${(kobo / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
@@ -241,7 +240,7 @@ export async function emailRefunds(
         text: [
           `Hi ${u.username},`,
           "",
-          `We've paused ${topic} markets on WorldStreet Predict for now while we improve them.`,
+          "We've paused some markets on WorldStreet Predict for now while we improve them.",
           "",
           `Your open ${plural ? "bets" : "bet"} on:`,
           ...[...mine.events].map((e) => `• ${e}`),
