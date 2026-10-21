@@ -86,15 +86,18 @@ const games = [
   { id: GAME_STARTED, startDate: new Date(now - 10 * 60_000).toISOString() },
 ];
 
-function event(n: number, extra: { sportGameId?: string; rules?: string }) {
+function event(
+  n: number,
+  extra: { sportGameId?: string; rules?: string; closingDate?: string; resolutionDate?: string },
+) {
   return {
     id: id(n),
     slug: `ev-${n}`,
     title: `Event ${n}`,
     status: "open",
     // Bayse's own close: three hours after kickoff, still ahead
-    closingDate: new Date(now + 3 * HOUR).toISOString(),
-    resolutionDate: new Date(now + 4 * HOUR).toISOString(),
+    closingDate: extra.closingDate ?? new Date(now + 3 * HOUR).toISOString(),
+    resolutionDate: extra.resolutionDate ?? new Date(now + 4 * HOUR).toISOString(),
     ...(extra.sportGameId && { sportGameId: extra.sportGameId }),
     markets: [
       {
@@ -118,6 +121,10 @@ const EVENTS = {
   rulesOnly: event(3, { sportGameId: GAME_UNLISTED, rules: rules(now - 5 * 60_000) }),
   unknown: event(4, { sportGameId: id(904) }),
   notAGame: event(5, {}),
+  // no closing time from Bayse (daily "number of X posts" markets): the
+  // resolution time closes them — this one's day is over, the next isn't
+  noCloseEnded: event(7, { closingDate: "", resolutionDate: new Date(now - 4 * 60_000).toISOString() }),
+  noCloseOpen: event(8, { closingDate: "", resolutionDate: new Date(now + 2 * HOUR).toISOString() }),
   // the list says later, the rules say it already began: earliest wins
   disagree: event(6, { sportGameId: GAME_SOON, rules: rules(now - 60_000) }),
 };
@@ -179,6 +186,11 @@ check("a kickoff found only in the rules still closes it", (await bet(EVENTS.rul
 check("the earlier of the two sources wins", (await bet(EVENTS.disagree)) === "GAME_STARTED");
 check("a game with no known kickoff is refused", (await bet(EVENTS.unknown)) === "GAME_START_UNKNOWN");
 check("a non-game market is unaffected", (await bet(EVENTS.notAGame)) === "ok");
+check(
+  "no closing time: refused once the resolution time has passed",
+  (await bet(EVENTS.noCloseEnded)) === "MARKET_CLOSING",
+);
+check("…and open before it", (await bet(EVENTS.noCloseOpen)) === "ok");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 

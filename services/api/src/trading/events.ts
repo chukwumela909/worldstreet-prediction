@@ -77,7 +77,11 @@ function fromBayse(event: BayseEventLive): TradableEvent {
     slug: event.slug,
     title: event.title,
     status: event.status,
-    closingDate: event.closingDate,
+    // Bayse often leaves closingDate empty (daily "number of X posts"
+    // markets, for one) and keeps the market open until it resolves —
+    // after the result is known. With no closing time, betting stops at
+    // the resolution time, as the website already shows it.
+    closingDate: event.closingDate || event.resolutionDate,
     resolutionDate: event.resolutionDate,
     countdown: event.countdown,
     markets: event.markets.map((m) => ({
