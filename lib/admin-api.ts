@@ -1112,6 +1112,7 @@ export interface TraderPosition {
   status: "open" | "won" | "lost" | "voided";
   /** Set when the desk reversed it after it settled — voided, but not a refund. */
   reversedFrom?: "won" | "lost" | "open" | null;
+  reversalReason?: string | null;
   createdAt: string | null;
   settledAt: string | null;
 }
@@ -1132,10 +1133,21 @@ export interface AccountAction {
   at: string;
 }
 
+/** Every money movement of one kind on an account, all time. */
+export interface MoneyTotal {
+  /** The ledger type: conversion_in, conversion_out, trade_stake, payout, refund, reversal, debt_writeoff. */
+  type: string;
+  /** Signed: + into the balance, − out of it. */
+  amountKobo: number;
+  count: number;
+}
+
 export interface TraderDetail {
   trader: TraderRow;
   positions: TraderPosition[];
   ledger: TraderLedgerEntry[];
+  /** What the balance is made of, by kind; absent on an older API. */
+  money?: MoneyTotal[];
   /** Suspensions and reinstatements, newest first. */
   accountActions?: AccountAction[];
 }

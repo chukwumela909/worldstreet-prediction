@@ -174,6 +174,15 @@ check("lifting twice is refused (NOT_SUSPENDED)", (await admin("POST", "/v1/admi
 const actions = ((await admin("GET", "/v1/admin/traders/u-ada")).json() as { data: { accountActions: { action: string }[] } }).data
   .accountActions;
 check("both actions are on their record, newest first", actions.length === 2 && actions[0]!.action === "reinstate");
+const breakdown = ((await admin("GET", "/v1/admin/traders/u-ada")).json() as {
+  data: { money: { type: string; amountKobo: number; count: number }[] };
+}).data.money;
+const kind = (t: string) => breakdown.find((m) => m.type === t);
+check(
+  "their money, all time by kind, adds up to the balance",
+  kind("conversion_in")?.amountKobo === 5_000_000 && kind("trade_stake")?.count === 2 && kind("payout")?.count === 1 &&
+    breakdown.reduce((s, m) => s + m.amountKobo, 0) === (await getNairaBalanceKobo("u-ada")),
+);
 await admin("POST", "/v1/admin/traders/u-bola/reinstate", { notify: true });
 check("reinstating someone never suspended sends nothing", sent.length === 1);
 

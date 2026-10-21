@@ -15,6 +15,7 @@ import {
   TRADER_SORTS,
   fetchTrader,
   fetchTraders,
+  type MoneyTotal,
   type TraderDetail,
   type TraderList,
   type TraderRow,
@@ -690,6 +691,10 @@ function TraderDetailPanel({
         }}
       />
 
+      {detail?.money && (
+        <BalanceBreakdown totals={detail.money} balanceKobo={trader.balanceKobo} money={money} />
+      )}
+
       {failed ? (
         <p className="py-3 text-sm text-secondary">
           Couldn&rsquo;t load this trader&rsquo;s bets.{" "}
@@ -835,6 +840,91 @@ function Field({
         {sub && <span className="font-medium text-tertiary"> · {sub}</span>}
       </dd>
     </div>
+  );
+}
+
+/** Each kind of money movement, in the order a balance is built up. */
+const MONEY_KINDS: { type: string; label: string; hint: string }[] = [
+  { type: "conversion_in", label: "Added from their wallet", hint: "dollars converted to credit" },
+  { type: "conversion_out", label: "Withdrawn to their wallet", hint: "credit converted to dollars" },
+  { type: "trade_stake", label: "Staked on bets", hint: "every bet placed" },
+  { type: "payout", label: "Winnings paid", hint: "bets that won" },
+  { type: "refund", label: "Refunds", hint: "voided bets and failed withdrawals" },
+  { type: "reversal", label: "Reversals", hint: "stakes returned, winnings taken back" },
+  { type: "debt_writeoff", label: "Debts waived", hint: "negative balances cleared" },
+];
+
+/**
+ * Where an account's balance comes from: every movement since it opened,
+ * by kind, adding up to the balance. The answer to "why is my balance
+ * what it is" — the movements list below only shows the latest 50. If
+ * the sum and the balance ever disagree, it says so: that is a bug.
+ */
+function BalanceBreakdown({
+  totals,
+  balanceKobo,
+  money,
+}: {
+  totals: MoneyTotal[];
+  balanceKobo: number;
+  money: AdminMoney;
+}) {
+  const known = new Set(MONEY_KINDS.map((k) => k.type));
+  const rows = [
+    ...MONEY_KINDS.map((k) => ({ ...k, total: totals.find((t) => t.type === k.type) })),
+    ...totals
+      .filter((t) => !known.has(t.type))
+      .map((t) => ({ type: t.type, label: t.type, hint: "", total: t })),
+  ].filter((r) => r.total && r.total.count > 0);
+  const sumKobo = totals.reduce((s, t) => s + t.amountKobo, 0);
+  const gapKobo = balanceKobo - sumKobo;
+
+  if (rows.length === 0) return null;
+  return (
+    <details className="mb-3 rounded-md border border-border bg-surface px-3 py-2.5" open>
+      <summary className="cursor-pointer text-[13px] font-semibold">Where the balance comes from</summary>
+      <table className="mt-2 w-full text-[13px]">
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.type} className="border-b border-border last:border-0">
+              <td className="py-1.5 pr-3">
+                <span className="font-medium text-primary">{r.label}</span>
+                <span className="ml-1.5 text-xs text-tertiary">
+                  {count(r.total!.count)} {r.total!.count === 1 ? "time" : "times"}
+                  {r.hint && ` · ${r.hint}`}
+                </span>
+              </td>
+              <td
+                className={`whitespace-nowrap py-1.5 text-right font-semibold tabular-nums ${
+                  r.total!.amountKobo > 0 ? "text-yes" : r.total!.amountKobo < 0 ? "text-no" : ""
+                }`}
+              >
+                {money.formatSigned(r.total!.amountKobo)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td className="pt-2 pr-3 font-semibold">Balance now</td>
+            <td
+              className={`whitespace-nowrap pt-2 text-right text-base font-semibold tabular-nums ${
+                balanceKobo < 0 ? "text-no" : ""
+              }`}
+            >
+              {money.format(balanceKobo)}
+            </td>
+          </tr>
+        </tfoot>
+      </table>
+      {gapKobo !== 0 && (
+        <p className={`mt-2 rounded-md px-2.5 py-1.5 text-xs font-semibold ${FLAG_TONE.caution.chip}`}>
+          These add up to {money.format(sumKobo)}, {money.format(Math.abs(gapKobo))}{" "}
+          {gapKobo > 0 ? "less" : "more"} than the balance — something moved it outside the ledger.
+          Tell the developers.
+        </p>
+      )}
+    </details>
   );
 }
 

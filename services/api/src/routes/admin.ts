@@ -585,16 +585,23 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       throw new ApiError(404, "No such trader", "USER_NOT_FOUND");
     }
 
-    const [positions, ledger, profile] = await Promise.all([
+    const [positions, ledger, profile, money] = await Promise.all([
       Position.find({ authUserId }).sort({ createdAt: -1 }).limit(100).lean(),
       LedgerEntry.find({ authUserId }).sort({ createdAt: -1 }).limit(50).lean(),
       User.findOne({ authUserId }, { accountActions: 1 }).lean(),
+      // all time, by kind — what the balance is made of, which the latest
+      // 50 movements can't show for an account with hundreds of them
+      LedgerEntry.aggregate<{ _id: string; amountKobo: number; count: number }>([
+        { $match: { authUserId } },
+        { $group: { _id: "$type", amountKobo: { $sum: "$amountKobo" }, count: { $sum: 1 } } },
+      ]),
     ]);
 
     return {
       success: true,
       data: {
         trader,
+        money: money.map((m) => ({ type: m._id, amountKobo: m.amountKobo, count: m.count })),
         // suspensions and reinstatements, newest first
         accountActions: [...(profile?.accountActions ?? [])].reverse().map((a) => ({
           action: a.action,
@@ -615,6 +622,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           status: p.status,
           // a voided bet the desk reversed after it settled, not a refund
           reversedFrom: p.reversedFrom ?? null,
+          reversalReason: p.reversalReason ?? null,
           createdAt: p.createdAt?.toISOString?.() ?? null,
           settledAt: p.settledAt?.toISOString?.() ?? null,
         })),
