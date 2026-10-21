@@ -24,6 +24,7 @@ import {
 } from "../trading/settings.js";
 import { getTopicBets } from "../trading/topic-bets.js";
 import {
+  clearDebts,
   getRecovery,
   notifyReversals,
   previewReversal,
@@ -423,6 +424,22 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           actor: user.id,
           log: request.log,
         }),
+      };
+    },
+  );
+
+  /**
+   * Clear what reversal customers owe: everyone below zero back to zero,
+   * lifting their block. Keeps what's been recovered. `dryRun` only counts.
+   */
+  app.post(
+    "/admin/recovery/clear-debts",
+    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    async (request) => {
+      const user = await requireAdmin(request);
+      return {
+        success: true,
+        data: await clearDebts({ dryRun: request.body.dryRun, actor: user.id, log: request.log }),
       };
     },
   );

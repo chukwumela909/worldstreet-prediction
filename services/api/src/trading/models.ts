@@ -49,6 +49,7 @@ export const LEDGER_TYPES = [
   "payout", // credit for a winning position
   "refund", // credit for a voided position / failed conversion repair
   "reversal", // a settled bet undone by the desk: stake back, winnings taken back (may go negative)
+  "debt_writeoff", // the desk clearing a negative balance back to zero
 ] as const;
 export type LedgerType = (typeof LEDGER_TYPES)[number];
 

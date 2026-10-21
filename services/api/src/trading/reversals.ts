@@ -2,8 +2,8 @@ import type { FastifyBaseLogger } from "fastify";
 import mongoose from "mongoose";
 import { User } from "../models.js";
 import { isCustomerMailConfigured, sendCustomerEmails } from "../customer-mail.js";
-import { adjustNaira } from "./ledger.js";
-import { NairaAccount, Position } from "./models.js";
+import { adjustNaira, writeOffDebt } from "./ledger.js";
+import { LedgerEntry, NairaAccount, Position } from "./models.js";
 import { pausedPattern } from "./paused.js";
 
 /**
@@ -278,7 +278,7 @@ export interface RecoveryCustomer {
   takenBackKobo: number;
   /** Stakes returned on lost bets. */
   returnedKobo: number;
-  /** Written off because their balance couldn't cover it (cap runs). */
+  /** Written off: not collected on a capped run, or a debt the desk cleared. */
   writtenOffKobo: number;
   balanceKobo: number;
   /** When the reversal email went; null = not told yet. */
@@ -292,7 +292,7 @@ export interface RecoveryReport {
     customers: number;
     takenBackKobo: number;
     returnedKobo: number;
-    /** takenBack − returned: what the book got back. */
+    /** takenBack − returned − written off: what the book really got back. */
     netKobo: number;
     /** Part of it still owed by customers in negative balance. */
     owedKobo: number;
@@ -354,12 +354,18 @@ export async function getRecovery(): Promise<RecoveryReport> {
     byUser.set(b.authUserId, u);
   }
   const ids = [...byUser.keys()];
-  const [users, accounts] = await Promise.all([
+  const [users, accounts, writeOffs] = await Promise.all([
     User.find({ authUserId: { $in: ids } }, { authUserId: 1, username: 1, email: 1 }).lean(),
     NairaAccount.find({ authUserId: { $in: ids } }, { authUserId: 1, balanceKobo: 1 }).lean(),
+    LedgerEntry.find({ type: "debt_writeoff", authUserId: { $in: ids } }, { authUserId: 1, amountKobo: 1 }).lean(),
   ]);
   const userById = new Map(users.map((u) => [u.authUserId, u]));
   const balanceById = new Map(accounts.map((a) => [a.authUserId, a.balanceKobo]));
+  for (const w of writeOffs) {
+    const u = byUser.get(w.authUserId);
+    if (u) u.off += w.amountKobo;
+  }
+  const debtOffKobo = writeOffs.reduce((sum, w) => sum + w.amountKobo, 0);
 
   const customers: RecoveryCustomer[] = ids.map((id) => {
     const u = byUser.get(id)!;
@@ -388,7 +394,7 @@ export async function getRecovery(): Promise<RecoveryReport> {
       customers: customers.length,
       takenBackKobo,
       returnedKobo,
-      netKobo: takenBackKobo - returnedKobo,
+      netKobo: takenBackKobo - returnedKobo - debtOffKobo,
       owedKobo: owing.reduce((s, c) => s + -c.balanceKobo, 0),
       owingCustomers: owing.length,
       writtenOffKobo: customers.reduce((s, c) => s + c.writtenOffKobo, 0),
@@ -398,6 +404,56 @@ export async function getRecovery(): Promise<RecoveryReport> {
     mailConfigured: isCustomerMailConfigured(),
     customers: customers.slice(0, MAX_ROWS),
   };
+}
+
+/* ---------------- clearing what's owed ---------------- */
+
+export interface DebtClearing {
+  /** Customers with reversed bets now below zero (cleared, unless a dry run). */
+  customers: number;
+  /** What they owe(d) in all. */
+  owedKobo: number;
+  dryRun: boolean;
+}
+
+/**
+ * Forgive what reversal customers owe: every one of them below zero is
+ * brought back to exactly zero (ledger type "debt_writeoff"), which lifts
+ * the block on betting and withdrawing. Everything already recovered
+ * stays recovered. A dry run only counts.
+ */
+export async function clearDebts(params: {
+  dryRun: boolean;
+  actor: string;
+  log: FastifyBaseLogger;
+}): Promise<DebtClearing> {
+  const ids: string[] = await Position.distinct("authUserId", { reversedFrom: { $exists: true } });
+  const owing = await NairaAccount.find(
+    { authUserId: { $in: ids }, balanceKobo: { $lt: 0 } },
+    { authUserId: 1, balanceKobo: 1 },
+  ).lean();
+  const owedKobo = owing.reduce((sum, a) => sum + -a.balanceKobo, 0);
+  if (params.dryRun || owing.length === 0) {
+    return { customers: owing.length, owedKobo, dryRun: params.dryRun };
+  }
+
+  let customers = 0;
+  let cleared = 0;
+  const at = Date.now();
+  for (const a of owing) {
+    const entry = await writeOffDebt({
+      authUserId: a.authUserId,
+      refKey: `writeoff:${a.authUserId}:${at}`,
+      description: "Balance owed after the 15-minute crypto reversal — written off",
+      metadata: { actor: params.actor },
+    });
+    if (entry) {
+      customers += 1;
+      cleared += entry.amountKobo;
+    }
+  }
+  params.log.warn({ customers, cleared, actor: params.actor }, "reversal debts written off");
+  return { customers, owedKobo: cleared, dryRun: false };
 }
 
 /* ---------------- telling them ---------------- */

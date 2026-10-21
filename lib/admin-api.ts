@@ -601,6 +601,16 @@ export const runReversalBatch = (params: {
 export const notifyReversals = (dryRun: boolean) =>
   adminPost<ReversalNotice>("/v1/admin/recovery/notify", { dryRun });
 
+export interface DebtClearing {
+  customers: number;
+  owedKobo: number;
+  dryRun: boolean;
+}
+
+/** Bring every reversal customer below zero back to zero; `dryRun` only counts. */
+export const clearDebts = (dryRun: boolean) =>
+  adminPost<DebtClearing>("/v1/admin/recovery/clear-debts", { dryRun });
+
 export interface NotifyRefundsResult {
   customers: number;
   bets: number;

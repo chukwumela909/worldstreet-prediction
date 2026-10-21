@@ -10,6 +10,7 @@ import { isApiConfigured } from "@/lib/api-client";
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { showToast } from "@/lib/toast-store";
 import {
+  clearDebts,
   fetchBookSettings,
   fetchRecovery,
   notifyReversals,
@@ -17,6 +18,7 @@ import {
   runReversalBatch,
   updateBookSettings,
   useAdminResource,
+  type DebtClearing,
   type RecoveryReport,
   type ReversalNotice,
   type ReversalPreview,
@@ -97,13 +99,14 @@ export function RecoveryDesk() {
             label="Still owed to us"
             value={money.formatHeadline(report.totals.owedKobo)}
             valueClass={report.totals.owedKobo > 0 ? "text-warning" : ""}
-            note={
+            note={[
               report.totals.owingCustomers > 0
                 ? `${report.totals.owingCustomers} customer${report.totals.owingCustomers === 1 ? "" : "s"} below zero`
-                : report.totals.writtenOffKobo > 0
-                  ? `${money.format(report.totals.writtenOffKobo)} written off`
-                  : "nobody below zero"
-            }
+                : "nobody below zero",
+              report.totals.writtenOffKobo > 0 ? `${money.format(report.totals.writtenOffKobo)} written off` : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           />
           <Stat
             label="Customers emailed"
@@ -122,6 +125,15 @@ export function RecoveryDesk() {
         waiting={report?.totals.notEmailed ?? 0}
         onDone={reload}
       />
+      {report && (report.totals.owedKobo > 0 || report.totals.writtenOffKobo > 0) && (
+        <DebtStep
+          owedKobo={report.totals.owedKobo}
+          owing={report.totals.owingCustomers}
+          writtenOffKobo={report.totals.writtenOffKobo}
+          money={money}
+          onDone={reload}
+        />
+      )}
       {report && report.customers.length > 0 && <CustomersCard report={report} money={money} />}
     </div>
   );
@@ -464,6 +476,102 @@ function EmailStep({
             : waiting > 0
               ? `Email ${waiting} customer${waiting === 1 ? "" : "s"} not yet told…`
               : "Everyone has been told"}
+        </button>
+      )}
+      {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}
+    </section>
+  );
+}
+
+/* ---------- step 3: clear what's owed ---------- */
+
+function DebtStep({
+  owedKobo,
+  owing,
+  writtenOffKobo,
+  money,
+  onDone,
+}: {
+  owedKobo: number;
+  owing: number;
+  writtenOffKobo: number;
+  money: AdminMoney;
+  onDone: () => void;
+}) {
+  const [preview, setPreview] = useState<DebtClearing | null>(null);
+  const [busy, setBusy] = useState<"preview" | "clear" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const go = async (dryRun: boolean) => {
+    setBusy(dryRun ? "preview" : "clear");
+    setError(null);
+    try {
+      const result = await clearDebts(dryRun);
+      if (dryRun) setPreview(result);
+      else {
+        setPreview(null);
+        showToast(
+          `Cleared ${money.format(result.owedKobo)} owed by ${result.customers} customer${result.customers === 1 ? "" : "s"}`,
+          "success",
+        );
+        onDone();
+      }
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
+      <h2 className="text-lg font-semibold">3 · Clear what&rsquo;s owed</h2>
+      <p className="mt-0.5 text-sm text-secondary">
+        Customers left below zero are brought back to exactly zero, so they can use their accounts
+        again. Everything already recovered stays recovered.
+      </p>
+      {owedKobo === 0 ? (
+        <p className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-yes">
+          <Check className="size-4" aria-hidden />
+          Nothing owed{writtenOffKobo > 0 ? ` — ${money.format(writtenOffKobo)} written off` : ""}.
+        </p>
+      ) : preview ? (
+        <div className="mt-3 rounded-md bg-element-2 px-3 py-3 text-sm">
+          <p className="font-semibold">
+            {preview.customers} customer{preview.customers === 1 ? "" : "s"} owing{" "}
+            {money.format(preview.owedKobo)}{" "}
+            will be set back to ₦0. This is written off and can&rsquo;t be undone.
+          </p>
+          <div className="mt-2 flex gap-2">
+            {preview.customers > 0 && (
+              <button
+                type="button"
+                onClick={() => go(false)}
+                disabled={busy !== null}
+                className="pressable h-9 rounded-sm bg-no-solid px-4 text-sm font-semibold text-white disabled:opacity-40"
+              >
+                {busy === "clear" ? "Clearing…" : `Clear ${money.format(preview.owedKobo)}`}
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setPreview(null)}
+              className="h-9 rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => go(true)}
+          disabled={busy !== null}
+          className="mt-3 h-9 rounded-sm border border-border px-4 text-sm font-semibold hover:border-border-hover disabled:opacity-40"
+        >
+          {busy === "preview"
+            ? "Checking…"
+            : `Clear ${money.format(owedKobo)} owed by ${owing} customer${owing === 1 ? "" : "s"}…`}
         </button>
       )}
       {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}

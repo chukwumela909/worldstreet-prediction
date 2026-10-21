@@ -229,6 +229,31 @@ check(
   ((await admin("GET", "/v1/admin/recovery")).json() as { data: { totals: { emailed: number } } }).data.totals.emailed === 3,
 );
 
+/* ---------------- clearing what's owed ---------------- */
+console.log("clear debts");
+const owedBefore = -(await bal("u-spent"));
+const clearDry = (await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: true })).json() as {
+  data: { customers: number; owedKobo: number };
+};
+check("the preview finds the one customer below zero and what's owed", clearDry.data.customers === 1 && clearDry.data.owedKobo === owedBefore);
+check("…without moving money", (await bal("u-spent")) === -owedBefore);
+const cleared = (await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false })).json() as {
+  data: { customers: number; owedKobo: number };
+};
+check("clearing brings them back to exactly zero", cleared.data.customers === 1 && (await bal("u-spent")) === 0);
+check("…recorded as a write-off", (await LedgerEntry.countDocuments({ type: "debt_writeoff", authUserId: "u-spent" })) === 1);
+check("…and nobody else's balance moves", (await bal("u-win")) === adaBefore - 2 * (payout - 5_000_000));
+const afterClear = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { totals: Record<string, number> } }).data.totals;
+check(
+  "the report: nothing owed, the write-off counted, recovered net of it",
+  afterClear.owedKobo === 0 && afterClear.writtenOffKobo === owedBefore &&
+    afterClear.netKobo === afterClear.takenBackKobo - afterClear.returnedKobo - owedBefore,
+);
+check(
+  "clearing again does nothing",
+  ((await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false })).json() as { data: { customers: number } }).data.customers === 0,
+);
+
 /* ---------------- capped: take only what's there ---------------- */
 console.log("cap");
 await User.create({ authUserId: "u-cap", email: "chidi@example.test", username: "chidi", displayName: "chidi" });

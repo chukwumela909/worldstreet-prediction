@@ -177,6 +177,50 @@ export async function adjustNaira(params: {
 }
 
 /**
+ * Clear a negative balance back to zero — the desk forgiving what a
+ * customer owes (trading/reversals.ts). Only ever lifts a balance that is
+ * below zero, and only by exactly that much: the update is conditional on
+ * the balance read, so credit arriving at the same moment is never
+ * doubled. Null when there's nothing owed.
+ */
+export async function writeOffDebt(params: {
+  authUserId: string;
+  refKey: string;
+  description: string;
+  metadata?: Record<string, unknown>;
+}): Promise<ILedgerEntry | null> {
+  const { authUserId } = params;
+  const existing = await findExistingEntry(params.refKey);
+  if (existing) return existing;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const current = await NairaAccount.findOne({ authUserId }, { balanceKobo: 1 }).lean();
+    const owed = current ? -current.balanceKobo : 0;
+    if (owed <= 0) return null;
+    const account = await NairaAccount.findOneAndUpdate(
+      { authUserId, balanceKobo: -owed },
+      { $inc: { balanceKobo: owed } },
+      { returnDocument: "after" },
+    );
+    if (!account) continue; // the balance moved under us — read again
+    try {
+      return await appendEntry({
+        authUserId,
+        type: "debt_writeoff",
+        amountKobo: owed,
+        balanceAfterKobo: account.balanceKobo,
+        refKey: params.refKey,
+        description: params.description,
+        metadata: params.metadata,
+      });
+    } catch (err) {
+      return afterFailedAppend(err, authUserId, params.refKey, owed, account.balanceKobo);
+    }
+  }
+  throw new ApiError(409, "That balance kept changing — try again", "BALANCE_BUSY");
+}
+
+/**
  * The balance moved by `deltaKobo` but its ledger entry didn't write.
  *
  * A duplicate refKey means a concurrent retry recorded the same
