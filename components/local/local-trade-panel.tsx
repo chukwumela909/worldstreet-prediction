@@ -748,6 +748,19 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
                 Winning shares pay {formatNaira(PAYOUT_PER_SHARE_KOBO)}. Losing
                 shares pay {formatNaira(0)}. Positions are held to settlement.
               </p>
+              <p className="text-[11px] leading-relaxed text-tertiary">
+                By placing this trade you agree to our{" "}
+                <Link
+                  href="/terms"
+                  target="_blank"
+                  rel="noopener"
+                  className="font-semibold text-secondary underline underline-offset-2 hover:text-primary"
+                >
+                  Terms and Conditions
+                </Link>
+                , including our right to refund, void or reverse bets affected by
+                errors or by activity they don&apos;t allow.
+              </p>
             </div>
           )}
         </TicketDialog>

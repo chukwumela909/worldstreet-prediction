@@ -108,7 +108,13 @@ export function SiteFooter() {
           ))}
         </div>
 
-        <div className="mt-12 flex flex-wrap justify-end gap-4 border-t border-border py-6 text-xs">
+        <div className="mt-12 flex flex-wrap items-center justify-end gap-4 border-t border-border py-6 text-xs">
+          <Link href="/terms" className="transition-colors hover:text-domain">
+            Terms and Conditions
+          </Link>
+          <Link href="/support" className="transition-colors hover:text-domain">
+            Support
+          </Link>
           <small className="text-xs">&copy; 2026 WorldStreet</small>
         </div>
       </div>

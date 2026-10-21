@@ -28,9 +28,14 @@ export function SuspendedNotice() {
             )}
           </span>
         </p>
-        <Link href="/support" className="shrink-0 text-sm font-semibold text-primary underline underline-offset-2">
-          Contact support
-        </Link>
+        <span className="flex shrink-0 gap-4">
+          <Link href="/terms#fair-play" className="text-sm font-semibold text-primary underline underline-offset-2">
+            Our terms
+          </Link>
+          <Link href="/support" className="text-sm font-semibold text-primary underline underline-offset-2">
+            Contact support
+          </Link>
+        </span>
       </div>
     </div>
   );
