@@ -31,7 +31,7 @@ const settings = await import("../src/trading/settings.js");
 const { adminSettleMarket } = await import("../src/trading/settlement.js");
 const { creditNaira, debitNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { getAdminOverview } = await import("../src/trading/overview.js");
-const { getPausedRefunds, notifyPausedRefunds } = await import("../src/trading/pause-refunds.js");
+const { getPausedRefunds } = await import("../src/trading/pause-refunds.js");
 const { LedgerEntry, Position, WorldstreetEvent, WorldstreetMarket, ensureTradingIndexes } = await import(
   "../src/trading/models.js"
 );
@@ -270,11 +270,12 @@ check(
 /* ---------------- the refund email mix-up ---------------- */
 console.log("refund email mix-up");
 const refundReport = await getPausedRefunds(TOPICS, 72);
-const refundDry = await notifyPausedRefunds({ topics: TOPICS, hours: 72, dryRun: true, log });
 check(
   `the paused-markets refund report leaves reversed bets out (got ${refundReport.totals.bets})`,
-  refundReport.totals.bets === 0 && refundDry.customers === 0,
+  refundReport.totals.bets === 0 && refundReport.totals.notEmailed === 0,
 );
+const gone = await admin("POST", "/v1/admin/notify-paused-refunds", { dryRun: true });
+check("…and the desk button that emailed them is gone (404)", gone.statusCode === 404);
 // before that fix, kemi and tunde were told their reversed bets were refunded
 await Position.updateMany(
   { authUserId: { $in: ["u-spent", "u-lose"] }, reversedFrom: { $exists: true } },

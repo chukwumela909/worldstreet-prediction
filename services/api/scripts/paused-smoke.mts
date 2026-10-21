@@ -29,7 +29,7 @@ const { voidPausedMarkets, runSettlementPass, adminVoidMarket, adminSettleMarket
   "../src/trading/settlement.js"
 );
 const { getTopicBets } = await import("../src/trading/topic-bets.js");
-const { getPausedRefunds, notifyPausedRefunds } = await import("../src/trading/pause-refunds.js");
+const { getPausedRefunds } = await import("../src/trading/pause-refunds.js");
 const { creditNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { Position, WorldstreetEvent, WorldstreetMarket, ensureTradingIndexes } = await import(
   "../src/trading/models.js"
@@ -229,17 +229,6 @@ check(
 );
 check("the ETH market's open bets aren't in it", !report.markets.some((m) => m.marketId === ethMarket.marketId));
 
-const notifyPreview = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: true, log });
-check(
-  "the one-off preview finds only kemi, not yet told",
-  notifyPreview.customers === 1 && notifyPreview.bets === 1 && notifyPreview.emailed === 0,
-);
-check("…sending nothing", sent.length === 2);
-const notified = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: false, log });
-check("sending it emails her once", notified.emailed === 1 && sent.length === 3 && sent[2]?.to[0] === "kemi@example.test");
-check("…and now everyone is marked emailed", (await getPausedRefunds(btc, 72)).totals.notEmailed === 0);
-const again = await notifyPausedRefunds({ topics: btc, hours: 72, dryRun: false, log });
-check("running it again emails nobody", again.emailed === 0 && sent.length === 3);
 
 /* ---------------- settled bets on a topic ---------------- */
 console.log("settled bets");

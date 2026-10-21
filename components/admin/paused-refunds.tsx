@@ -1,60 +1,27 @@
 "use client";
 
-import { useState } from "react";
 import {
   ArrowPathIcon as RefreshCw,
   CheckCircleIcon as Check,
-  EnvelopeIcon as Mail,
 } from "@heroicons/react/24/outline";
 import { formatNaira } from "@/lib/format";
-import { showToast } from "@/lib/toast-store";
-import {
-  fetchPausedRefunds,
-  notifyPausedRefunds,
-  useAdminResource,
-  type NotifyRefundsResult,
-} from "@/lib/admin-api";
+import { fetchPausedRefunds, useAdminResource } from "@/lib/admin-api";
 
 /**
  * What the paused topics have refunded over the last three days: every
  * market voided (when, by the automatic pause or by whom) and every
  * customer paid back — how much, on what, and whether they've had the
- * apology email. Customers refunded before the emails existed can be
- * told here, once each, after a preview.
+ * apology email. Read-only: the pause emails each customer as it refunds
+ * them. (A desk button to email the rest once lived here; on 21 Oct it
+ * told customers whose bets were reversed that they'd been refunded, so
+ * it's gone — Recovery sends the emails for reversed bets.)
  */
 export function PausedRefundsReport() {
-  const [version, setVersion] = useState(0);
-  const resource = useAdminResource(fetchPausedRefunds, true, version);
-  const [preview, setPreview] = useState<NotifyRefundsResult | null>(null);
-  const [pending, setPending] = useState<"preview" | "send" | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const resource = useAdminResource(fetchPausedRefunds, true);
   const report = resource.data;
 
   // an API without the report: nothing to show yet
   if (resource.errorCode === "NOT_FOUND") return null;
-
-  const notify = async (dryRun: boolean) => {
-    if (pending) return;
-    setPending(dryRun ? "preview" : "send");
-    setError(null);
-    try {
-      const result = await notifyPausedRefunds(dryRun);
-      if (dryRun) {
-        setPreview(result);
-      } else {
-        setPreview(null);
-        setVersion((v) => v + 1);
-        showToast(
-          `Apology email sent to ${result.emailed} customer${result.emailed === 1 ? "" : "s"}`,
-          result.emailed > 0 ? "success" : "error",
-        );
-      }
-    } catch (err) {
-      setError(err instanceof Error && err.message ? err.message : "Couldn't send. Try again.");
-    } finally {
-      setPending(null);
-    }
-  };
 
   return (
     <section className="mt-6 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
@@ -97,60 +64,12 @@ export function PausedRefundsReport() {
 
           {!report.mailConfigured && (
             <p className="mt-3 rounded-md bg-warning-tint px-3 py-2.5 text-sm font-semibold text-warning">
-              Customer email isn&rsquo;t set up on the API, so nobody can be emailed yet. Set
-              RESEND_API_KEY and a sender (CUSTOMER_EMAIL_FROM) in the API&rsquo;s env and redeploy.
+              Customer email isn&rsquo;t set up on the API, so refunded customers aren&rsquo;t
+              emailed. Set RESEND_API_KEY and a sender (CUSTOMER_EMAIL_FROM) in the API&rsquo;s env
+              and redeploy.
             </p>
           )}
 
-          {report.mailConfigured && report.totals.notEmailed > 0 && (
-            <div className="mt-3">
-              {preview ? (
-                <div className="rounded-md bg-element-2 px-3 py-3 text-sm">
-                  <p className="font-semibold">
-                    {preview.customers === 0
-                      ? "Everyone refunded has been told."
-                      : `${preview.customers} customer${preview.customers === 1 ? "" : "s"} (${preview.bets} bet${
-                          preview.bets === 1 ? "" : "s"
-                        }, ${formatNaira(preview.refundKobo)} refunded) will get the apology email.`}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    {preview.customers > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => notify(false)}
-                        disabled={pending !== null}
-                        className="pressable flex h-9 items-center gap-1.5 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
-                      >
-                        <Mail className="size-4" aria-hidden />
-                        {pending === "send" ? "Sending…" : `Send ${preview.customers} email${preview.customers === 1 ? "" : "s"}`}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => setPreview(null)}
-                      disabled={pending !== null}
-                      className="flex h-9 items-center rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => notify(true)}
-                  disabled={pending !== null}
-                  className="flex h-9 items-center gap-1.5 rounded-sm border border-border px-4 text-sm font-semibold hover:border-border-hover disabled:opacity-40"
-                >
-                  <Mail className="size-4" aria-hidden />
-                  {pending === "preview"
-                    ? "Checking…"
-                    : `Email ${report.totals.notEmailed} customer${report.totals.notEmailed === 1 ? "" : "s"} not yet told…`}
-                </button>
-              )}
-            </div>
-          )}
-          {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
 
           <h3 className="mt-5 text-sm font-semibold">Customers refunded</h3>
           <div className="mt-2 overflow-x-auto">

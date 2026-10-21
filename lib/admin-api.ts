@@ -643,28 +643,6 @@ export interface RefundCorrection {
 export const correctRefundEmails = (dryRun: boolean) =>
   adminPost<RefundCorrection>("/v1/admin/recovery/correct-refund-email", { dryRun });
 
-export interface NotifyRefundsResult {
-  customers: number;
-  bets: number;
-  refundKobo: number;
-  emailed: number;
-  mailConfigured: boolean;
-  dryRun: boolean;
-}
-
-/** Email the refunded customers not yet told, once each; `dryRun` only counts. */
-export async function notifyPausedRefunds(dryRun: boolean): Promise<NotifyRefundsResult> {
-  try {
-    const res = await apiFetch<{ data: NotifyRefundsResult }>("/v1/admin/notify-paused-refunds", {
-      method: "POST",
-      body: JSON.stringify({ dryRun, hours: 72 }),
-    });
-    return res.data;
-  } catch (err) {
-    throw unwrapNestedError(err);
-  }
-}
-
 /* ------------------------------------------------------------------ */
 /* Worldstreet's own markets                                           */
 /* ------------------------------------------------------------------ */

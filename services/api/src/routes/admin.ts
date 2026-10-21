@@ -36,7 +36,7 @@ import {
 } from "../trading/reversals.js";
 import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
-import { getPausedRefunds, notifyPausedRefunds } from "../trading/pause-refunds.js";
+import { getPausedRefunds } from "../trading/pause-refunds.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 
@@ -155,10 +155,6 @@ const refundsQuery = z.object({
   hours: z.coerce.number().int().min(1).max(720).default(72),
 });
 
-const notifyBody = z.object({
-  dryRun: z.boolean(),
-  hours: z.number().int().min(1).max(720).default(72),
-});
 
 const voidBody = z.object({
   eventId: eventOrMarketId,
@@ -529,31 +525,6 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const settings = await getBookSettings();
     return { success: true, data: await getPausedRefunds(settings.pausedTopics, request.query.hours) };
   });
-
-  /**
-   * Email the customers a paused topic refunded who haven't been told
-   * yet, once each. `dryRun` only counts, so the desk previews first.
-   */
-  app.post(
-    "/admin/notify-paused-refunds",
-    { schema: { body: notifyBody }, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
-    async (request) => {
-      await requireAdmin(request);
-      const settings = await getBookSettings();
-      if (settings.pausedTopics.length === 0) {
-        throw new ApiError(409, "No topics are paused", "NOTHING_PAUSED");
-      }
-      return {
-        success: true,
-        data: await notifyPausedRefunds({
-          topics: settings.pausedTopics,
-          hours: request.body.hours,
-          dryRun: request.body.dryRun,
-          log: request.log,
-        }),
-      };
-    },
-  );
 
   /** Void a market — refunds every open stake, audited. */
   app.post("/admin/void", { schema: { body: voidBody } }, async (request) => {

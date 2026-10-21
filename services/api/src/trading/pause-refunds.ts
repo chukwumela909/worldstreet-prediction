@@ -16,8 +16,9 @@ import { pausedPattern } from "./paused.js";
  * reversed after it settled is voided too, but it's no refund — its
  * winnings were taken back (reversals.ts) — so it's left out. Each bet records when
  * its customer was told (`refundNotifiedAt`), so nobody is emailed twice:
- * the automatic void emails as it refunds, and the desk's one-off action
- * reaches whoever was refunded before the emails existed.
+ * the automatic void emails as it refunds. (A desk action to email the
+ * rest is gone: on 21 Oct it told reversed customers they'd been
+ * refunded.)
  */
 
 const ACTOR_AUTO = "system:paused";
@@ -264,36 +265,4 @@ export async function emailRefunds(
     await Position.updateMany({ _id: { $in: told } }, { $set: { refundNotifiedAt: new Date() } });
   }
   return results.filter(Boolean).length;
-}
-
-export interface NotifyResult {
-  /** Customers refunded in the window who haven't been told yet. */
-  customers: number;
-  /** Their refunded bets, and what came back on them. */
-  bets: number;
-  refundKobo: number;
-  /** Emails accepted (0 on a dry run). */
-  emailed: number;
-  mailConfigured: boolean;
-  dryRun: boolean;
-}
-
-/** The desk's one-off: email whoever a paused topic refunded but nobody has told yet. */
-export async function notifyPausedRefunds(params: {
-  topics: readonly string[];
-  hours: number;
-  dryRun: boolean;
-  log: FastifyBaseLogger;
-}): Promise<NotifyResult> {
-  const untold = (await refundedBets(params.topics, params.hours)).filter((b) => !b.refundNotifiedAt);
-  const base = {
-    customers: new Set(untold.map((b) => b.authUserId)).size,
-    bets: untold.length,
-    refundKobo: untold.reduce((sum, b) => sum + b.stakeKobo, 0),
-    mailConfigured: isCustomerMailConfigured(),
-  };
-  if (params.dryRun || untold.length === 0) return { ...base, emailed: 0, dryRun: params.dryRun };
-  const emailed = await emailRefunds(untold, params.topics, params.log);
-  params.log.warn({ emailed, customers: base.customers }, "paused-refund emails sent");
-  return { ...base, emailed, dryRun: false };
 }
