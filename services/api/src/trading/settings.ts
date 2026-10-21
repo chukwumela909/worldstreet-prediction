@@ -39,6 +39,13 @@ export interface BookSettings {
    * risk, with no cap. 0 turns it off.
    */
   autoSpreadStepKobo: number;
+  /**
+   * The highest price we sell a share at, kobo per ₦100 share; 0 = no
+   * limit. A side quoted above it is almost decided — bought late by
+   * people who already know the answer (the 15-minute crypto rounds, the
+   * "number of X posts today" counts) — so it isn't on sale.
+   */
+  maxQuoteKobo: number;
   /** Basis points taken on USD ⇄ NGN conversion, each direction. */
   fxSpreadBps: number;
   minStakeKobo: number;
@@ -84,6 +91,7 @@ export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = 
   polymarketSpreadBps: { min: 0, max: 2_000 },
   localSpreadBps: { min: 0, max: 2_000 },
   autoSpreadStepKobo: { min: 0, max: 100_000_000_000 }, // 0 (off), else ₦1,000 – ₦1B
+  maxQuoteKobo: { min: 0, max: 9_900 }, // 0 (off), else ₦50 – ₦99
   fxSpreadBps: { min: 0, max: 2_000 },
   minStakeKobo: { min: 10_000, max: 100_000_000 }, // ₦100 – ₦1M
   maxStakeKobo: { min: 10_000, max: 1_000_000_000 }, // ₦100 – ₦10M
@@ -98,6 +106,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "polymarketSpreadBps",
   "localSpreadBps",
   "autoSpreadStepKobo",
+  "maxQuoteKobo",
   "fxSpreadBps",
   "minStakeKobo",
   "maxStakeKobo",
@@ -124,6 +133,7 @@ export function defaultSettings(): BookSettings {
     polymarketSpreadBps: config.POLYMARKET_SPREAD_BPS,
     localSpreadBps: 200, // 2 points on Bayse's price
     autoSpreadStepKobo: 4_000_000, // +1 point per ₦40,000 at risk on the exposed side
+    maxQuoteKobo: 9_000, // nothing sold above ₦90 a share
     fxSpreadBps: config.FX_SPREAD_BPS,
     minStakeKobo: MIN_STAKE_FLOOR_KOBO,
     maxStakeKobo: config.TRADE_MAX_STAKE_KOBO,
@@ -264,6 +274,9 @@ export async function updateBookSettings(
 
   if (next.minStakeKobo > next.maxStakeKobo) {
     invalid("The minimum stake can't be above the maximum stake");
+  }
+  if (next.maxQuoteKobo > 0 && next.maxQuoteKobo < 5_000) {
+    invalid("The highest price we sell must be 0 (no limit) or at least ₦50");
   }
   if (next.autoSpreadStepKobo > 0 && next.autoSpreadStepKobo < MIN_AUTO_SPREAD_STEP_KOBO) {
     invalid("The auto-adjust amount must be 0 (off) or at least ₦1,000");

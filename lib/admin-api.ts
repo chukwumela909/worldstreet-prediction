@@ -914,6 +914,8 @@ export interface BookSettings {
   fxSpreadBps: number;
   /** Auto-adjusting spread: a market's exposed side rises 1 point per this much at risk, kobo, uncapped; 0 = off. */
   autoSpreadStepKobo: number;
+  /** The highest price we sell a share at, kobo; 0 = no limit. */
+  maxQuoteKobo: number;
   minStakeKobo: number;
   maxStakeKobo: number;
   /** The most the house may lose on one market. */

@@ -87,7 +87,7 @@ export function OutcomeList({ event }: { event: MarketEvent }) {
  * shows. A mirrored market reads "Yes 60¢", the source's price.
  */
 export function useOutcomePills(event: MarketEvent): (market: Market, side: 0 | 1) => string {
-  const { quoteKobo, international, autoAdjusting } = useQuote();
+  const { quoteKobo, nearCertain, international, autoAdjusting } = useQuote();
   // a Local event is always on our book; an international one only while the switch is on
   const tradeable = isLocalBook(event) || international;
   const rise = useMarketRises(
@@ -96,9 +96,11 @@ export function useOutcomePills(event: MarketEvent): (market: Market, side: 0 | 
   );
   return (m, i) => {
     const label = (m.outcomeLabels ?? ["Yes", "No"])[i];
-    return tradeable
-      ? `Buy ${label} ${formatQuote(quoteKobo(event, m.outcomePrices[i], rise(m.id, m.outcomeIds?.[i])))}`
-      : `${label} ${toCents(m.outcomePrices[i])}`;
+    if (!tradeable) return `${label} ${toCents(m.outcomePrices[i])}`;
+    const r = rise(m.id, m.outcomeIds?.[i]);
+    // almost decided: priced above the desk's ceiling, so not sold
+    if (nearCertain(event, m.outcomePrices[i], r)) return `${label} · not on sale`;
+    return `Buy ${label} ${formatQuote(quoteKobo(event, m.outcomePrices[i], r))}`;
   };
 }
 

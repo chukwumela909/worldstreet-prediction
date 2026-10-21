@@ -209,6 +209,16 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
   if (freshPriceKobo < 1 || freshPriceKobo > 9_999) {
     throw new ApiError(409, "This outcome is not currently priceable", "MARKET_CLOSED");
   }
+  // the desk's ceiling: a side priced above it is almost decided, and
+  // only someone who already knows the answer buys it there
+  if (settings.maxQuoteKobo > 0 && freshPriceKobo > settings.maxQuoteKobo) {
+    throw new ApiError(
+      409,
+      "This side is almost decided — it isn't on sale now",
+      "NEAR_CERTAIN",
+      { freshPriceKobo, maxQuoteKobo: settings.maxQuoteKobo },
+    );
+  }
   if (Math.abs(freshPriceKobo - body.expectedPriceKobo) > settings.priceToleranceKobo) {
     throw new ApiError(409, "The price moved — confirm the new price", "PRICE_MOVED", {
       freshPriceKobo,

@@ -80,6 +80,7 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
   const BIG_EXPOSURE_KOBO = 1_000_000_000; // over 10,000,000 credit
   const LOOSE_TOLERANCE_KOBO = 500; // over 5 credit
   const SHORT_CUTOFF_SECONDS = 30;
+  const HIGH_CEILING_KOBO = 9_500; // selling sides above ₦95
 
   const {
     internationalTrading,
@@ -92,6 +93,7 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
     priceToleranceKobo: tolerance,
     countdownCutoffSeconds: cutoff,
     lossAlertKobo: lossAlert,
+    maxQuoteKobo: ceiling,
   } = values;
   const risks: SettingRisk[] = [];
 
@@ -183,6 +185,19 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
       field: "countdownCutoffSeconds",
       level: "risky",
       reason: "Late bets when the result is nearly known.",
+    });
+  }
+  if (ceiling === 0) {
+    risks.push({
+      field: "maxQuoteKobo",
+      level: "high",
+      reason: "No ceiling — customers can buy sides that are already almost decided.",
+    });
+  } else if (ceiling !== undefined && ceiling > HIGH_CEILING_KOBO) {
+    risks.push({
+      field: "maxQuoteKobo",
+      level: "risky",
+      reason: "Near-certain sides are still on sale.",
     });
   }
   if (lossAlert === 0) {

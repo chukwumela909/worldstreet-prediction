@@ -206,6 +206,7 @@ const bookSettingsSchema = new Schema(
     polymarketSpreadBps: { type: Number },
     localSpreadBps: { type: Number },
     autoSpreadStepKobo: { type: Number },
+    maxQuoteKobo: { type: Number },
     fxSpreadBps: { type: Number },
     minStakeKobo: { type: Number },
     maxStakeKobo: { type: Number },

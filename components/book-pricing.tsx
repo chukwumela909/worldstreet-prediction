@@ -6,6 +6,7 @@ import type { BookPricing } from "@/lib/book-pricing";
 import {
   DEFAULT_MAX_STAKE_KOBO,
   DEFAULT_MIN_STAKE_KOBO,
+  isNearCertain,
   quoteKobo,
   quoteMultiplier,
 } from "@/lib/book";
@@ -54,6 +55,9 @@ export function useQuote() {
         quoteKobo(event, price, pricing, riseBps),
       quoteMultiplier: (event: Pick<MarketEvent, "source">, price: string, riseBps = 0) =>
         quoteMultiplier(event, price, pricing, riseBps),
+      /** Off sale: priced above the desk's ceiling, almost decided. */
+      nearCertain: (event: Pick<MarketEvent, "source">, price: string, riseBps = 0) =>
+        isNearCertain(event, price, pricing, riseBps),
       international: pricing?.internationalTrading === true,
       autoAdjusting: (pricing?.autoSpreadStepKobo ?? 0) > 0,
       minStakeKobo: pricing?.minStakeKobo ?? DEFAULT_MIN_STAKE_KOBO,

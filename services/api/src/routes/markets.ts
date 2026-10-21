@@ -49,6 +49,7 @@ export const marketRoutes: FastifyPluginAsync = async (rawApp) => {
         polymarketSpreadBps: s.polymarketSpreadBps,
         localSpreadBps: s.localSpreadBps,
         autoSpreadStepKobo: s.autoSpreadStepKobo,
+        maxQuoteKobo: s.maxQuoteKobo,
         pausedTopics: s.pausedTopics,
         minStakeKobo: s.minStakeKobo,
         maxStakeKobo: s.maxStakeKobo,

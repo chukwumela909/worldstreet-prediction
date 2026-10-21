@@ -162,7 +162,8 @@ check("…and the typed REVERSE confirmation", noConfirm.statusCode === 400);
 
 /* ---------------- run ---------------- */
 console.log("run");
-await settings.updateBookSettings({ pausedTopics: [...TOPICS] }, "smoke");
+// the ₦95 test market would also hit the price ceiling; this suite is about balances
+await settings.updateBookSettings({ pausedTopics: [...TOPICS], maxQuoteKobo: 0 }, "smoke");
 const run = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", confirm: "REVERSE" })).json() as {
   data: { reversed: number; remaining: number; changeKobo: number };
 };
@@ -191,13 +192,14 @@ check(
 
 const negativeBet = await (async () => {
   try {
-    await placeOrder("u-spent", { eventId: other.eventId, marketId: other.marketId, outcomeId: other.up, stakeKobo: 10_000, expectedPriceKobo: 9_500, idempotencyKey: "after-key-1" }, log);
+    const fresh = await ownMarket("Will it rain in Abuja tomorrow?");
+    await placeOrder("u-spent", { eventId: fresh.eventId, marketId: fresh.marketId, outcomeId: fresh.down, stakeKobo: 10_000, expectedPriceKobo: 1_000, idempotencyKey: "after-key-1" }, log);
     return "ok";
   } catch (err) {
     return err instanceof ApiError ? err.code : "error";
   }
 })();
-check("a negative balance can't bet", negativeBet !== "ok");
+check(`a negative balance can't bet (got ${negativeBet})`, negativeBet === "INSUFFICIENT_FUNDS");
 
 /* ---------------- the Recovery report ---------------- */
 console.log("report");

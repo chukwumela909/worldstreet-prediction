@@ -154,7 +154,8 @@ interface Receipt {
 export function LocalTradePanel({ event }: { event: MarketEvent }) {
   // the stake limits are the API's: min so the ticket can explain the
   // floor before submitting, max so typing more clamps to it
-  const { quoteKobo, international, autoAdjusting, minStakeKobo, maxStakeKobo } = useQuote();
+  const { quoteKobo, nearCertain, international, autoAdjusting, minStakeKobo, maxStakeKobo } =
+    useQuote();
   const { marketId, side, select, setSide } = useTradeSelection();
   const { user, openAuth } = useAuth();
   const { balanceKobo } = useNairaWallet(Boolean(user));
@@ -251,6 +252,10 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
 
   // no outcome ids or no quote: not on our book
   const tradeable = Boolean(market.outcomeIds) && shownPriceKobo > 0;
+  // priced above the desk's ceiling: almost decided, so not on sale
+  const offSale =
+    !mirror &&
+    nearCertain(event, market.outcomePrices[sideIndex], rise(market.id, market.outcomeIds?.[sideIndex]));
   // the team behind the picked outcome on a game, for the reference's crest
   const team = event.game?.teams.find((t) => t.name === market.groupItemTitle);
   /** An answer pill's price: our quote when it trades here, the source's cents on a mirror. */
@@ -577,7 +582,13 @@ export function LocalTradePanel({ event }: { event: MarketEvent }) {
           {/* action — a shut market says so before it asks anyone to log in */}
           {closed || !tradeable ? (
             <button type="button" disabled className={MUTED_PILL}>
-              {closed ? "Trading closed" : mirror ? "Trading opens soon" : "Not tradeable"}
+              {closed
+                ? "Trading closed"
+                : mirror
+                  ? "Trading opens soon"
+                  : offSale
+                    ? "Almost decided — not on sale"
+                    : "Not tradeable"}
             </button>
           ) : !user ? (
             <button type="button" onClick={openAuth} className={PRIMARY_PILL}>

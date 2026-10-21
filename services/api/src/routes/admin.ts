@@ -79,6 +79,7 @@ const settingsBody = z
     polymarketSpreadBps: z.number().int(),
     localSpreadBps: z.number().int(),
     autoSpreadStepKobo: z.number().int(),
+    maxQuoteKobo: z.number().int(),
     fxSpreadBps: z.number().int(),
     minStakeKobo: z.number().int(),
     maxStakeKobo: z.number().int(),

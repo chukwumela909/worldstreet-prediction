@@ -82,6 +82,37 @@ export function quoteKobo(
   pricing: BookPricing | null,
   riseBps = 0,
 ): number {
+  const quote = uncappedQuoteKobo(event, decimalPrice, pricing, riseBps);
+  return overCeiling(quote, pricing) ? 0 : quote;
+}
+
+/**
+ * Whether this side is off sale because it's priced above the desk's
+ * ceiling (`maxQuoteKobo`) — almost decided, so only someone who already
+ * knows the answer would buy it. The bet slip and pills say so instead
+ * of a bare "—"; the API refuses it with NEAR_CERTAIN.
+ */
+export function isNearCertain(
+  event: Pick<MarketEvent, "source">,
+  decimalPrice: string,
+  pricing: BookPricing | null,
+  riseBps = 0,
+): boolean {
+  return overCeiling(uncappedQuoteKobo(event, decimalPrice, pricing, riseBps), pricing);
+}
+
+function overCeiling(quoteKobo: number, pricing: BookPricing | null): boolean {
+  const ceiling = pricing?.maxQuoteKobo ?? 0;
+  return ceiling > 0 && quoteKobo > ceiling;
+}
+
+/** The price rule before the desk's ceiling. */
+function uncappedQuoteKobo(
+  event: Pick<MarketEvent, "source">,
+  decimalPrice: string,
+  pricing: BookPricing | null,
+  riseBps: number,
+): number {
   const base = baseSpreadBps(event, pricing);
   if (base === null) return 0;
   const p = parseFloat(decimalPrice);

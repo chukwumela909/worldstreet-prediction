@@ -230,6 +230,53 @@ await MarketLock.updateOne(
 const busy = await outcomeOf(() => withMarketLock("lock-market-b", async () => undefined));
 check("a market held too long answers MARKET_BUSY", busy === "MARKET_BUSY");
 
+/* ---------------- the highest price we sell ---------------- */
+console.log("near-certain sides");
+const decided = await WorldstreetEvent.create({
+  slug: "count-already-past-60",
+  title: "Will the count reach 60 today?",
+  category: "Social",
+  status: "open",
+  createdBy: "admin_1",
+});
+const decidedMarket = await WorldstreetMarket.create({
+  eventId: decided.eventId,
+  title: "60 or more",
+  status: "open",
+  outcomes: [
+    { label: "Yes", priceKobo: 9_500 },
+    // priced so a ₦100 bet fits under this suite's ₦1,000 loss limit
+    { label: "No", priceKobo: 4_000 },
+  ],
+});
+await fund("u-late", 1_000_000);
+const lateBet = (side: 0 | 1, key: string) =>
+  outcomeOf(() =>
+    placeOrder(
+      "u-late",
+      {
+        eventId: decided.eventId,
+        marketId: decidedMarket.marketId,
+        outcomeId: decidedMarket.outcomes[side]!.outcomeId,
+        stakeKobo: 10_000,
+        expectedPriceKobo: side === 0 ? 9_500 : 4_000,
+        idempotencyKey: key,
+      },
+      log,
+    ),
+  );
+check("ships with a ₦90 ceiling", (await settings.getBookSettings()).maxQuoteKobo === 9_000);
+check("a side priced ₦95 isn't sold (NEAR_CERTAIN)", (await lateBet(0, "late-key-0001")) === "NEAR_CERTAIN");
+check("…nothing charged", (await getNairaBalanceKobo("u-late")) === 1_000_000);
+const otherSide = await lateBet(1, "late-key-0002");
+check(`the other side still is (got ${otherSide})`, otherSide === "ok");
+await settings.updateBookSettings({ maxQuoteKobo: 0 }, "smoke");
+check("with the ceiling off, it sells", (await lateBet(0, "late-key-0003")) === "ok");
+check(
+  "a ceiling under ₦50 (other than 0) is refused",
+  (await outcomeOf(() => settings.updateBookSettings({ maxQuoteKobo: 4_000 }, "smoke"))) === "INVALID_SETTINGS",
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 
 await mongoose.disconnect();

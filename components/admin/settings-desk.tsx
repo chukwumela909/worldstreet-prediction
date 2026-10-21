@@ -98,6 +98,13 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     step: 5_000,
     info: "When most of a market's money is on one side — so we'd lose if that side wins — that side's price goes up 1 point for every this much we'd lose. At ₦40,000: ₦200,000 at risk is +5 points, ₦1,000,000 is +25. There's no top limit — the price keeps rising with the bets, up to ₦99 — and Maximum loss per market still stops new bets. The other side stays at the normal price. A smaller amount makes prices rise faster. Set to 0 to switch auto-adjusting off.",
   },
+  maxQuoteKobo: {
+    key: "maxQuoteKobo",
+    label: "Highest price we sell",
+    unit: "credit",
+    step: 1,
+    info: "We don't sell any side priced above this. A side at ₦95 is almost decided — the people who buy it there usually already know the answer from a live count, a price feed or the match itself, and that's how the 15-minute crypto and \"number of X posts\" markets lost money. At ₦90, a side priced 89% or more isn't on sale; the other side still is. Set to 0 for no limit.",
+  },
   fxSpreadBps: {
     key: "fxSpreadBps",
     label: "Conversion spread",
@@ -162,6 +169,7 @@ const ORDER: FormKey[] = [
   "minStakeKobo",
   "maxStakeKobo",
   "maxMarketExposureKobo",
+  "maxQuoteKobo",
   "priceToleranceKobo",
   "countdownCutoffSeconds",
   "lossAlertKobo",
@@ -192,8 +200,8 @@ const GROUPS: { title: string; note: string; rows: FormKey[] }[] = [
   },
   {
     title: "Safety",
-    note: "Guards against stale prices and last-second bets.",
-    rows: ["priceToleranceKobo", "countdownCutoffSeconds"],
+    note: "Guards against stale prices, late bets and buying what's already decided.",
+    rows: ["maxQuoteKobo", "priceToleranceKobo", "countdownCutoffSeconds"],
   },
   {
     title: "Alerts",
