@@ -518,6 +518,20 @@ export interface RecoveryCustomer {
   reversedAt: string | null;
 }
 
+/** Every bet reversed for the same reason — one incident. */
+export interface RecoveryIncident {
+  /** As the desk wrote it; "" for the first reversals, before reasons were kept. */
+  reason: string;
+  bets: number;
+  customers: number;
+  takenBackKobo: number;
+  returnedKobo: number;
+  netKobo: number;
+  firstAt: string | null;
+  lastAt: string | null;
+  untoldBets: number;
+}
+
 /** What reversing has recovered so far. */
 export interface RecoveryReport {
   totals: {
@@ -533,6 +547,10 @@ export interface RecoveryReport {
     notEmailed: number;
   };
   mailConfigured: boolean;
+  /** Newest first; absent on an API older than reasons. */
+  incidents?: RecoveryIncident[];
+  /** Customers wrongly emailed that their reversed bets were refunded. */
+  refundCorrection?: { waiting: number; corrected: number };
   customers: RecoveryCustomer[];
 }
 
@@ -551,7 +569,7 @@ export interface ReversalPreview {
   shortKobo: number;
   openBets: number;
   events: { title: string; bets: number }[];
-  /** Whether every topic is paused — the run needs it. */
+  /** Whether every topic is paused — needed only while bets are open. */
   paused: boolean;
 }
 
@@ -591,11 +609,12 @@ export async function fetchRecovery(): Promise<RecoveryReport> {
 export const previewReversal = (params: { topics: string[]; sinceDays: number | null }) =>
   adminPost<ReversalPreview>("/v1/admin/recovery/preview", params);
 
-/** One batch; call again until `remaining` is 0. */
+/** One batch; call again until `remaining` is 0. The reason goes in the customers' email. */
 export const runReversalBatch = (params: {
   topics: string[];
   sinceDays: number | null;
   shortfall: Shortfall;
+  reason: string;
 }) => adminPost<ReversalBatch>("/v1/admin/recovery/run", { ...params, confirm: "REVERSE" });
 
 export const notifyReversals = (dryRun: boolean) =>
@@ -610,6 +629,19 @@ export interface DebtClearing {
 /** Bring every reversal customer below zero back to zero; `dryRun` only counts. */
 export const clearDebts = (dryRun: boolean) =>
   adminPost<DebtClearing>("/v1/admin/recovery/clear-debts", { dryRun });
+
+export interface RefundCorrection {
+  customers: number;
+  /** Still below zero — the email says it's waived, so the send waits for them. */
+  owing: number;
+  emailed: number;
+  mailConfigured: boolean;
+  dryRun: boolean;
+}
+
+/** The apology for the refund email reversed customers got by mistake; `dryRun` only counts. */
+export const correctRefundEmails = (dryRun: boolean) =>
+  adminPost<RefundCorrection>("/v1/admin/recovery/correct-refund-email", { dryRun });
 
 export interface NotifyRefundsResult {
   customers: number;
@@ -1068,6 +1100,9 @@ export interface TraderRow {
   /** Realized profit for the trader; the house's side of it is the inverse. */
   realizedPnlKobo: number;
   lastTradeAt: string | null;
+  /** Set while the account is suspended; absent on an older API. */
+  suspendedAt?: string | null;
+  suspendedReason?: string;
 }
 
 export interface TraderSummary {
@@ -1097,6 +1132,8 @@ export interface TraderPosition {
   priceKobo: number;
   potentialPayoutKobo: number;
   status: "open" | "won" | "lost" | "voided";
+  /** Set when the desk reversed it after it settled — voided, but not a refund. */
+  reversedFrom?: "won" | "lost" | "open" | null;
   createdAt: string | null;
   settledAt: string | null;
 }
@@ -1110,10 +1147,19 @@ export interface TraderLedgerEntry {
   createdAt: string | null;
 }
 
+export interface AccountAction {
+  action: "suspend" | "reinstate";
+  reason: string;
+  by: string;
+  at: string;
+}
+
 export interface TraderDetail {
   trader: TraderRow;
   positions: TraderPosition[];
   ledger: TraderLedgerEntry[];
+  /** Suspensions and reinstatements, newest first. */
+  accountActions?: AccountAction[];
 }
 
 /** The people list. Searches username, display name and email. */
@@ -1123,6 +1169,7 @@ export async function fetchTraders(params: {
   limit?: number;
   offset?: number;
   activeOnly?: boolean;
+  suspendedOnly?: boolean;
 }): Promise<TraderList> {
   const qs = new URLSearchParams();
   if (params.search) qs.set("search", params.search);
@@ -1130,6 +1177,7 @@ export async function fetchTraders(params: {
   if (params.limit) qs.set("limit", String(params.limit));
   if (params.offset) qs.set("offset", String(params.offset));
   if (params.activeOnly) qs.set("activeOnly", "true");
+  if (params.suspendedOnly) qs.set("suspendedOnly", "true");
   const res = await apiFetch<{ data: TraderList }>(
     `/v1/admin/traders?${qs.toString()}`,
   );
@@ -1143,3 +1191,115 @@ export async function fetchTrader(authUserId: string): Promise<TraderDetail> {
   );
   return res.data;
 }
+
+export interface AccountActionResult {
+  authUserId: string;
+  suspended: boolean;
+  suspendedAt: string | null;
+  reason: string;
+  /** Whether the customer's email went out; null when none was asked for. */
+  emailed: boolean | null;
+}
+
+/**
+ * Suspend an account: no new bets, no money in or out, until lifted. The
+ * reason is the customer's to read; `notify` emails it to them.
+ */
+export const suspendAccount = (authUserId: string, params: { reason: string; notify: boolean }) =>
+  adminPost<AccountActionResult>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/suspend`, params);
+
+export const reinstateAccount = (authUserId: string, params: { reason: string; notify: boolean }) =>
+  adminPost<AccountActionResult>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/reinstate`, params);
+
+/* ------------------------------------------------------------------ */
+/* Support desk                                                        */
+/* ------------------------------------------------------------------ */
+
+export type SupportStatus = "open" | "answered" | "closed";
+export type SupportCategory = "money" | "bets" | "account" | "other";
+
+export const SUPPORT_CATEGORY_LABEL: Record<SupportCategory, string> = {
+  money: "Deposits & withdrawals",
+  bets: "A bet or market",
+  account: "My account",
+  other: "Something else",
+};
+
+export interface SupportTicketRow {
+  ref: string;
+  authUserId: string;
+  email: string;
+  username: string;
+  category: SupportCategory;
+  subject: string;
+  status: SupportStatus;
+  createdAt: string | null;
+  lastMessageAt: string;
+  messageCount: number;
+  /** Who wrote last — "customer" means it's waiting on us. */
+  lastFrom: "customer" | "support";
+  preview: string;
+}
+
+export interface SupportInbox {
+  tickets: SupportTicketRow[];
+  total: number;
+  counts: Record<SupportStatus, number>;
+  mailConfigured: boolean;
+}
+
+export interface SupportMessage {
+  from: "customer" | "support";
+  body: string;
+  /** Who on the desk wrote it; empty for the customer's. */
+  by: string;
+  at: string;
+}
+
+export interface SupportTicketDetail {
+  ticket: Omit<SupportTicketRow, "messageCount" | "lastFrom" | "preview"> & { messages: SupportMessage[] };
+  account: {
+    joinedAt: string | null;
+    balanceKobo: number;
+    bets: number;
+    suspendedAt: string | null;
+    suspendedReason: string;
+  };
+}
+
+export async function fetchSupportInbox(params: {
+  status: SupportStatus | "all";
+  search?: string;
+  offset?: number;
+}): Promise<SupportInbox> {
+  const qs = new URLSearchParams({ status: params.status });
+  if (params.search) qs.set("search", params.search);
+  if (params.offset) qs.set("offset", String(params.offset));
+  try {
+    const res = await apiFetch<{ data: SupportInbox }>(`/v1/admin/support?${qs.toString()}`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+export async function fetchSupportTicket(ref: string): Promise<SupportTicketDetail> {
+  try {
+    const res = await apiFetch<{ data: SupportTicketDetail }>(`/v1/admin/support/${encodeURIComponent(ref)}`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/** Answer a request — added to the thread and emailed to the customer. */
+export const replySupport = (ref: string, params: { message: string; close: boolean }) =>
+  adminPost<{ ticket: SupportTicketDetail["ticket"]; emailed: boolean }>(
+    `/v1/admin/support/${encodeURIComponent(ref)}/reply`,
+    params,
+  );
+
+export const setSupportStatus = (ref: string, status: "open" | "closed") =>
+  adminPost<{ ticket: SupportTicketDetail["ticket"] }>(`/v1/admin/support/${encodeURIComponent(ref)}/status`, {
+    status,
+  });

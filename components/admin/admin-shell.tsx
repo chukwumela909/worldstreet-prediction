@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon as ArrowLeft,
   ArrowUturnLeftIcon as Recovery,
   BanknotesIcon as Coins,
+  ChatBubbleLeftRightIcon as Support,
   ClipboardDocumentCheckIcon as Settled,
   Cog6ToothIcon as Settings,
   PencilSquareIcon as PenSquare,
@@ -23,6 +24,7 @@ const NAV = [
   { href: "/admin/traders", label: "Traders", icon: Users },
   { href: "/admin/settled", label: "Settled bets", icon: Settled },
   { href: "/admin/recovery", label: "Recovery", icon: Recovery },
+  { href: "/admin/support", label: "Support", icon: Support },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ] as const;
 

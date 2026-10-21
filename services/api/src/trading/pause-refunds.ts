@@ -12,7 +12,9 @@ import { pausedPattern } from "./paused.js";
  *
  * A refunded bet is a voided position on a market the paused topics
  * cover, voided within the report's window (so an old, unrelated void
- * of a Bitcoin market isn't mistaken for this one). Each bet records when
+ * of a Bitcoin market isn't mistaken for this one). A bet the desk
+ * reversed after it settled is voided too, but it's no refund — its
+ * winnings were taken back (reversals.ts) — so it's left out. Each bet records when
  * its customer was told (`refundNotifiedAt`), so nobody is emailed twice:
  * the automatic void emails as it refunds, and the desk's one-off action
  * reaches whoever was refunded before the emails existed.
@@ -41,6 +43,8 @@ async function refundedBets(topics: readonly string[], hours: number): Promise<R
   return Position.find(
     {
       status: "voided",
+      // reversed, not refunded: its own email says what happened (reversals.ts)
+      reversedFrom: { $exists: false },
       settledAt: { $gte: since },
       $or: [{ eventTitle: pattern }, { eventSlug: pattern }, { marketTitle: pattern }],
     },

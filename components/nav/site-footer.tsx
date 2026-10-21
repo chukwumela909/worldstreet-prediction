@@ -45,6 +45,7 @@ const COLUMNS: { title: string; links: { label: string; href: string; external?:
       { label: "Portfolio", href: "/portfolio" },
       { label: "Watchlist", href: "/portfolio?tab=watchlist" },
       { label: "Settled positions", href: "/portfolio?tab=settled" },
+      { label: "Support", href: "/support" },
     ],
   },
   {

@@ -54,6 +54,9 @@ export interface TraderRow {
   /** Realized profit in kobo, settled positions only; negative is a loss. */
   realizedPnlKobo: number;
   lastTradeAt: string | null;
+  /** Set while the desk has the account suspended (accounts.ts). */
+  suspendedAt: string | null;
+  suspendedReason: string;
 }
 
 export interface TraderSummary {
@@ -89,6 +92,8 @@ interface ProfileDoc {
   email: string;
   avatar?: string | null;
   createdAt?: Date | null;
+  suspendedAt?: Date | null;
+  suspendedReason?: string | null;
 }
 
 interface PositionStats {
@@ -121,6 +126,8 @@ export interface TraderQuery {
   offset?: number | undefined;
   /** Drop profiles that have never staked. */
   activeOnly?: boolean | undefined;
+  /** Only accounts the desk has suspended, staked or not. */
+  suspendedOnly?: boolean | undefined;
 }
 
 export async function listTraders(params: TraderQuery): Promise<TraderList> {
@@ -129,16 +136,19 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
   const offset = Math.max(params.offset ?? 0, 0);
   const search = (params.search ?? "").trim();
 
-  const filter = search
-    ? {
-        $or: [
-          { username: { $regex: escapeRegex(search), $options: "i" } },
-          { displayName: { $regex: escapeRegex(search), $options: "i" } },
-          { email: { $regex: escapeRegex(search), $options: "i" } },
-          { authUserId: search },
-        ],
-      }
-    : {};
+  const filter = {
+    ...(search
+      ? {
+          $or: [
+            { username: { $regex: escapeRegex(search), $options: "i" } },
+            { displayName: { $regex: escapeRegex(search), $options: "i" } },
+            { email: { $regex: escapeRegex(search), $options: "i" } },
+            { authUserId: search },
+          ],
+        }
+      : {}),
+    ...(params.suspendedOnly ? { suspendedAt: { $ne: null } } : {}),
+  };
 
   const projection = {
     authUserId: 1,
@@ -147,6 +157,8 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
     email: 1,
     avatar: 1,
     createdAt: 1,
+    suspendedAt: 1,
+    suspendedReason: 1,
   };
 
   // Everyone who has ever staked — the list must never lose one of
@@ -156,7 +168,10 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
 
   let truncated = false;
   let scanned: ProfileDoc[];
-  if (params.activeOnly) {
+  if (params.suspendedOnly) {
+    // few enough to read whole, bettors or not
+    scanned = await User.find(filter, projection).lean<ProfileDoc[]>();
+  } else if (params.activeOnly) {
     // the bettors themselves, matched against the search
     scanned = await User.find(
       { ...filter, authUserId: { $in: bettorIds } },
@@ -187,7 +202,7 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
   // creates one on the first request), but money is never hidden: list
   // them under their id rather than drop them.
   const profiled = new Set(scanned.map((u) => u.authUserId));
-  for (const id of bettorIds) {
+  for (const id of params.suspendedOnly ? [] : bettorIds) {
     if (profiled.has(id)) continue;
     if (search && search !== id) continue;
     scanned.push({
@@ -292,6 +307,8 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
       openPayoutKobo: s?.openPayoutKobo ?? 0,
       realizedPnlKobo: Math.round(s?.realizedPnlKobo ?? 0),
       lastTradeAt: s?.lastTradeAt ? new Date(s.lastTradeAt).toISOString() : null,
+      suspendedAt: u.suspendedAt ? new Date(u.suspendedAt).toISOString() : null,
+      suspendedReason: u.suspendedReason ?? "",
     };
   });
 

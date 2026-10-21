@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { assertNotSuspended } from "../accounts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
 import {
@@ -122,6 +123,10 @@ export async function convertNaira(authUserId: string, body: ConvertBody, log: F
       },
     };
   }
+
+  // a suspended account moves no money in or out (accounts.ts); a
+  // conversion that already went through still reports itself above
+  await assertNotSuspended(authUserId);
 
   const fx = await getFxQuote();
 

@@ -2,8 +2,9 @@
  * Recovery: reversing every settled bet on the 15-minute crypto markets
  * — winnings taken back, stakes returned, balances allowed below zero or
  * capped at what's there — through the real admin routes, plus the
- * report and the customer email. In-memory database, our own markets,
- * Resend answered by a canned reply.
+ * report, its incidents, the customer email quoting the desk's reason,
+ * and reversing one finished market by its slug. In-memory database, our
+ * own markets, Resend answered by a canned reply.
  *
  *   npx tsx scripts/recovery-smoke.mts
  */
@@ -30,6 +31,7 @@ const settings = await import("../src/trading/settings.js");
 const { adminSettleMarket } = await import("../src/trading/settlement.js");
 const { creditNaira, debitNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { getAdminOverview } = await import("../src/trading/overview.js");
+const { getPausedRefunds, notifyPausedRefunds } = await import("../src/trading/pause-refunds.js");
 const { LedgerEntry, Position, WorldstreetEvent, WorldstreetMarket, ensureTradingIndexes } = await import(
   "../src/trading/models.js"
 );
@@ -136,6 +138,13 @@ const bolaBefore = await bal("u-other");
 const payout = Math.floor((5_000_000 / 9_500) * 10_000); // 5,263,157
 
 const TOPICS = ["up or down 15 minutes", "up or down 15m"];
+const REASON = "Prices on the 15-minute crypto markets were wrong because of a glitch, and it was being exploited.";
+
+// one round still open — a reversal waits for its markets to be paused
+const ada2 = await ownMarket("Cardano Up or Down - 15 minutes?");
+await User.create({ authUserId: "u-open", email: "femi@example.test", username: "femi", displayName: "femi" });
+await creditNaira({ authUserId: "u-open", amountKobo: 1_000_000, type: "conversion_in", refKey: "fund:u-open", description: "funds" });
+await bet(ada2, "u-open", "up", 500_000, 5_000);
 
 /* ---------------- preview ---------------- */
 console.log("preview");
@@ -144,7 +153,7 @@ const pv = (await admin("POST", "/v1/admin/recovery/preview", { topics: TOPICS, 
 };
 const p = pv.data as unknown as {
   bets: number; won: number; lost: number; customers: number; takeBackKobo: number; returnKobo: number;
-  netKobo: number; shortCustomers: number; paused: boolean; events: { title: string }[];
+  netKobo: number; shortCustomers: number; paused: boolean; openBets: number; events: { title: string }[];
 };
 check(`all-time preview finds the 4 round bets, not the other market (got ${p.bets})`, p.bets === 4 && p.won === 3 && p.lost === 1 && p.customers === 3);
 check(
@@ -153,18 +162,21 @@ check(
 );
 check("…who'd go below zero", p.shortCustomers === 1);
 check("…which markets matched", p.events.length === 2 && !p.events.some((e) => e.title.includes("Friday")));
-check("…and that they aren't paused yet", p.paused === false);
+check("…that they aren't paused yet, with one bet still open", p.paused === false && p.openBets === 1);
 
-const blocked = await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", confirm: "REVERSE" });
-check("running needs the topics paused first (NOT_PAUSED)", blocked.statusCode === 409 && (blocked.json() as { code: string }).code === "NOT_PAUSED");
-const noConfirm = await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", confirm: "yes" });
-check("…and the typed REVERSE confirmation", noConfirm.statusCode === 400);
+const blocked = await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", reason: REASON, confirm: "REVERSE" });
+check("with bets open, running needs the markets paused first (NOT_PAUSED)", blocked.statusCode === 409 && (blocked.json() as { code: string }).code === "NOT_PAUSED");
+const noConfirm = await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", reason: REASON, confirm: "yes" });
+check("…the typed REVERSE confirmation", noConfirm.statusCode === 400);
+const noReason = await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", confirm: "REVERSE" });
+const shortReason = await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", reason: "glitch", confirm: "REVERSE" });
+check("…and a reason the customer can read", noReason.statusCode === 400 && shortReason.statusCode === 400);
 
 /* ---------------- run ---------------- */
 console.log("run");
 // the ₦95 test market would also hit the price ceiling; this suite is about balances
 await settings.updateBookSettings({ pausedTopics: [...TOPICS], maxQuoteKobo: 0 }, "smoke");
-const run = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", confirm: "REVERSE" })).json() as {
+const run = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", reason: REASON, confirm: "REVERSE" })).json() as {
   data: { reversed: number; remaining: number; changeKobo: number };
 };
 check(`one batch reverses all 4 (got ${run.data.reversed}, ${run.data.remaining} left)`, run.data.reversed === 4 && run.data.remaining === 0);
@@ -177,8 +189,10 @@ check(
   (await Position.countDocuments({ reversedFrom: { $in: ["won", "lost"] }, status: "voided" })) === 4,
 );
 check("each in the ledger as a reversal", (await LedgerEntry.countDocuments({ type: "reversal" })) === 4);
+check("…each bet keeping the reason", (await Position.countDocuments({ reversalReason: REASON })) === 4);
+check("the open bet isn't reversed", (await Position.countDocuments({ authUserId: "u-open", status: "open" })) === 1);
 
-const again = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", confirm: "REVERSE" })).json() as {
+const again = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "negative", reason: REASON, confirm: "REVERSE" })).json() as {
   data: { reversed: number };
 };
 check("running again reverses nothing twice", again.data.reversed === 0 && (await bal("u-lose")) === tundeBefore + 3_000_000);
@@ -203,9 +217,23 @@ check(`a negative balance can't bet (got ${negativeBet})`, negativeBet === "INSU
 
 /* ---------------- the Recovery report ---------------- */
 console.log("report");
+// ada's two read as the first reversals did, before reasons were kept
+await Position.updateMany({ authUserId: "u-win" }, { $unset: { reversalReason: 1 } });
 const rep = (await admin("GET", "/v1/admin/recovery")).json() as {
-  data: { totals: Record<string, number>; customers: { username: string; balanceKobo: number; emailedAt: string | null }[] };
+  data: {
+    totals: Record<string, number>;
+    incidents: { reason: string; bets: number; customers: number; netKobo: number; untoldBets: number }[];
+    customers: { username: string; balanceKobo: number; emailedAt: string | null }[];
+  };
 };
+const inc = rep.data.incidents;
+const withReason = inc.find((i) => i.reason === REASON);
+const unrecorded = inc.find((i) => i.reason === "");
+check(
+  `incidents: one per reason, each with its own bets and people (got ${inc.length})`,
+  inc.length === 2 && withReason?.bets === 2 && withReason.customers === 2 && unrecorded?.bets === 2 &&
+    unrecorded.customers === 1 && unrecorded.netKobo === 2 * (payout - 5_000_000) && withReason.untoldBets === 2,
+);
 const rt = rep.data.totals;
 check(
   `totals: taken back, returned, net, owed (got ${rt.takenBackKobo}/${rt.returnedKobo}/${rt.netKobo}/${rt.owedKobo})`,
@@ -220,15 +248,46 @@ const dry = (await admin("POST", "/v1/admin/recovery/notify", { dryRun: true }))
 check("the preview counts 3, sends none", dry.data.customers === 3 && dry.data.emailed === 0 && sent.length === 0);
 const real = (await admin("POST", "/v1/admin/recovery/notify", { dryRun: false })).json() as { data: { emailed: number } };
 const toKemi = sent.find((m) => m.to[0] === "kemi@example.test");
+const toAda = sent.find((m) => m.to[0] === "ada@example.test");
 check("sending emails each of them once", real.data.emailed === 3 && sent.length === 3);
 check(
-  "…saying why and what changed",
-  Boolean(toKemi?.text.includes("glitch in our system") && toKemi.text.includes("below zero") && toKemi.subject.includes("reversed")),
+  "…quoting the desk's reason, with what changed",
+  Boolean(
+    toKemi?.text.includes(`Why: ${REASON}`) && toKemi.text.includes("Ethereum Up or Down") &&
+      toKemi.text.includes("below zero") && toKemi.subject === "Important: some of your bets have been reversed",
+  ),
+);
+check(
+  "…and the first reversals keep their own email",
+  Boolean(toAda?.text.includes("glitch in our system") && toAda.subject.includes("15-minute crypto") && !toAda.text.includes("Why:")),
 );
 check("…and nobody twice", ((await admin("POST", "/v1/admin/recovery/notify", { dryRun: false })).json() as { data: { emailed: number } }).data.emailed === 0);
 check(
   "the report shows them emailed",
   ((await admin("GET", "/v1/admin/recovery")).json() as { data: { totals: { emailed: number } } }).data.totals.emailed === 3,
+);
+
+/* ---------------- the refund email mix-up ---------------- */
+console.log("refund email mix-up");
+const refundReport = await getPausedRefunds(TOPICS, 72);
+const refundDry = await notifyPausedRefunds({ topics: TOPICS, hours: 72, dryRun: true, log });
+check(
+  `the paused-markets refund report leaves reversed bets out (got ${refundReport.totals.bets})`,
+  refundReport.totals.bets === 0 && refundDry.customers === 0,
+);
+// before that fix, kemi and tunde were told their reversed bets were refunded
+await Position.updateMany(
+  { authUserId: { $in: ["u-spent", "u-lose"] }, reversedFrom: { $exists: true } },
+  { $set: { refundNotifiedAt: new Date() } },
+);
+const corrDry = (await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: true })).json() as {
+  data: { customers: number; owing: number };
+};
+check("the correction finds the two told wrongly, one still below zero", corrDry.data.customers === 2 && corrDry.data.owing === 1);
+const corrBlocked = await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: false });
+check(
+  "…and won't send while someone still owes (DEBTS_NOT_CLEARED)",
+  corrBlocked.statusCode === 409 && (corrBlocked.json() as { code: string }).code === "DEBTS_NOT_CLEARED",
 );
 
 /* ---------------- clearing what's owed ---------------- */
@@ -256,6 +315,37 @@ check(
   ((await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false })).json() as { data: { customers: number } }).data.customers === 0,
 );
 
+/* ---------------- the correction, once debts are cleared ---------------- */
+console.log("correction");
+sent.length = 0;
+const corr = (await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: false })).json() as {
+  data: { emailed: number };
+};
+const kemiFix = sent.find((m) => m.to[0] === "kemi@example.test");
+const tundeFix = sent.find((m) => m.to[0] === "tunde@example.test");
+const owedNaira = `₦${(owedBefore / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+check("the correction goes to both", corr.data.emailed === 2 && sent.length === 2);
+check(
+  "…kemi's apologises and says what she owed is waived",
+  Boolean(
+    kemiFix?.subject.startsWith("Correction") && kemiFix.text.includes("sent by mistake") &&
+      kemiFix.text.includes(`the ${owedNaira} you owed has been cleared`) && kemiFix.text.includes("Your balance now: ₦0.00"),
+  ),
+);
+check(
+  "…saying when the wrong email went, in Lagos time",
+  /^On \d{1,2} [A-Z][a-z]+ at \d{1,2}:\d{2} (AM|PM), we sent you an email titled "Your bet has been refunded"/m.test(kemiFix?.text ?? ""),
+);
+check("…tunde's, who never owed, doesn't mention a debt", Boolean(tundeFix?.text.includes("sent by mistake") && !tundeFix.text.includes("waived")));
+check(
+  "…and nobody gets it twice",
+  ((await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: false })).json() as { data: { emailed: number } }).data
+    .emailed === 0,
+);
+const fixState = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { refundCorrection: { waiting: number; corrected: number } } })
+  .data.refundCorrection;
+check("the report shows them corrected", fixState.waiting === 0 && fixState.corrected === 2);
+
 /* ---------------- capped: take only what's there ---------------- */
 console.log("cap");
 await User.create({ authUserId: "u-cap", email: "chidi@example.test", username: "chidi", displayName: "chidi" });
@@ -265,13 +355,51 @@ await bet(sol, "u-cap", "up", 5_000_000, 9_500);
 await adminSettleMarket({ eventId: sol.eventId, marketId: sol.marketId, winningOutcomeId: sol.up, actor: "auto", log });
 await debitNaira({ authUserId: "u-cap", amountKobo: 5_000_000, type: "trade_stake", refKey: "cap-spent", description: "spent" });
 const capBefore = await bal("u-cap"); // payout − 5,000,000 = 263,157 left
-const capRun = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "cap", confirm: "REVERSE" })).json() as {
+const capRun = (await admin("POST", "/v1/admin/recovery/run", { topics: TOPICS, sinceDays: null, shortfall: "cap", reason: REASON, confirm: "REVERSE" })).json() as {
   data: { reversed: number; writtenOffKobo: number };
 };
 check(
   `capped: takes the ₦${capBefore / 100} that's there, stops at zero, writes off the rest`,
   capRun.data.reversed === 1 && (await bal("u-cap")) === 0 && capRun.data.writtenOffKobo === payout - 5_000_000 - capBefore,
 );
+
+/* ---------------- any market, by its link ---------------- */
+console.log("one market by its slug");
+const tv = await ownMarket("Channels TV number of X posts today - 60 or more?");
+const tvSlug = tv.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/-+$/, "");
+await bet(tv, "u-other", "up", 1_000_000, 9_500);
+await adminSettleMarket({ eventId: tv.eventId, marketId: tv.marketId, winningOutcomeId: tv.up, actor: "auto", log });
+const TV_REASON = "The post count was public before the market closed, so the result was already known.";
+const tvPreview = (await admin("POST", "/v1/admin/recovery/preview", { topics: [tvSlug], sinceDays: null })).json() as {
+  data: { bets: number; paused: boolean; openBets: number; events: { title: string }[] };
+};
+check(
+  "its slug finds that one market, unpaused, nothing open",
+  tvPreview.data.bets === 1 && !tvPreview.data.paused && tvPreview.data.openBets === 0 && tvPreview.data.events.length === 1,
+);
+const bolaBeforeTv = await bal("u-other");
+const tvRun = (await admin("POST", "/v1/admin/recovery/run", { topics: [tvSlug], sinceDays: null, shortfall: "negative", reason: TV_REASON, confirm: "REVERSE" })).json() as {
+  data: { reversed: number };
+};
+check(
+  "a finished market reverses without pausing",
+  tvRun.data.reversed === 1 && (await bal("u-other")) === bolaBeforeTv - (Math.floor((1_000_000 / 9_500) * 10_000) - 1_000_000),
+);
+check(
+  "…and leaves bola's other market alone",
+  (await Position.countDocuments({ authUserId: "u-other", status: "won" })) === 1,
+);
+sent.length = 0;
+await admin("POST", "/v1/admin/recovery/notify", { dryRun: false });
+// chidi (the capped run) is told in the same send
+const toBola = sent.filter((m) => m.to[0] === "bola@example.test");
+check(
+  "bola's email gives that market's reason",
+  toBola.length === 1 && toBola[0]!.text.includes(`Why: ${TV_REASON}`) && toBola[0]!.text.includes("Market: Channels TV") &&
+    sent.length === 2,
+);
+const incidents = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { incidents: { reason: string }[] } }).data.incidents;
+check("the report now has three incidents, newest first", incidents.length === 3 && incidents[0]!.reason === TV_REASON);
 
 console.log(`\n${passed} passed, ${failed} failed`);
 

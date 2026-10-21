@@ -146,8 +146,19 @@ const positionSchema = new Schema(
     reversalKobo: { type: Number },
     /** Take-back written off because the balance couldn't cover it (a capped run). */
     reversalShortKobo: { type: Number },
+    /**
+     * Why the desk reversed it, in the words the customer's email uses.
+     * Unset on the first reversals (the 15-minute crypto glitch), which
+     * keep that email's own wording.
+     */
+    reversalReason: { type: String },
     /** When the customer was emailed about the reversal. */
     reversalNotifiedAt: { type: Date },
+    /**
+     * A reversed bet the paused-topic refund email wrongly called a refund
+     * (both read as voided): when the customer got the correction.
+     */
+    refundCorrectedAt: { type: Date },
   },
   { timestamps: true },
 );

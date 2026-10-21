@@ -1,8 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { reinstateAccount, suspendAccount } from "../accounts.js";
 import { requireAdmin } from "../admin-auth.js";
 import { ApiError } from "../errors.js";
+import { User } from "../models.js";
 import { getFxQuote } from "../trading/fx.js";
 import { FxRate, LedgerEntry, Position, Settlement } from "../trading/models.js";
 import {
@@ -25,8 +27,10 @@ import {
 import { getTopicBets } from "../trading/topic-bets.js";
 import {
   clearDebts,
+  correctRefundEmails,
   getRecovery,
   notifyReversals,
+  openBetsMatching,
   previewReversal,
   runReversalBatch,
 } from "../trading/reversals.js";
@@ -70,6 +74,20 @@ const tradersQuery = z.object({
     .enum(["true", "false", "1", "0"])
     .transform((v) => v === "true" || v === "1")
     .optional(),
+  suspendedOnly: z
+    .enum(["true", "false", "1", "0"])
+    .transform((v) => v === "true" || v === "1")
+    .optional(),
+});
+
+/** Suspending: the reason is the customer's to read (accounts.ts). */
+const suspendBody = z.object({
+  reason: z.string().trim().min(5, "Give a reason the customer will understand").max(500),
+  notify: z.boolean(),
+});
+const reinstateBody = z.object({
+  reason: z.string().trim().max(500).default(""),
+  notify: z.boolean(),
 });
 
 /** Any subset of the book settings; bounds are checked in trading/settings.ts. */
@@ -97,7 +115,8 @@ const voidPausedBody = z.object({
   dryRun: z.boolean(),
 });
 
-const recoveryTopics = z.array(z.string().max(80)).min(1).max(10);
+// a market's slug (pasted as its link) can run past a topic's usual 80
+const recoveryTopics = z.array(z.string().max(200)).min(1).max(10);
 const recoveryPreviewBody = z.object({
   topics: recoveryTopics,
   /** Bets placed in the last N days; null = all time. */
@@ -105,16 +124,21 @@ const recoveryPreviewBody = z.object({
 });
 const recoveryRunBody = recoveryPreviewBody.extend({
   shortfall: z.enum(["negative", "cap"]),
+  /** Why — the customer's email says it in these words. */
+  reason: z.string().trim().min(10, "Say why, in words the customer will understand").max(1000),
   /** Typed by the admin — reversing moves real balances. */
   confirm: z.literal("REVERSE"),
 });
 const recoveryNotifyBody = z.object({ dryRun: z.boolean() });
 
-/** Normalized, checked topics, or a 400 the desk can show. */
+/** One market named by its slug — what the desk gets from pasting its link. */
+const MARKET_SLUG = /^[a-z0-9][a-z0-9-]{1,199}$/;
+
+/** Normalized, checked topics (or market slugs), or a 400 the desk can show. */
 function checkTopics(raw: string[]): string[] {
   const topics = normalizeTopics(raw);
   if (topics.length === 0) throw new ApiError(400, "Name at least one topic", "NO_TOPICS");
-  const bad = topics.find((t) => !isUsableTopic(t));
+  const bad = topics.find((t) => !isUsableTopic(t) && !MARKET_SLUG.test(t));
   if (bad !== undefined) {
     throw new ApiError(400, `"${bad}" isn't a usable topic — letters, numbers, spaces, dots or dashes`, "BAD_TOPIC");
   }
@@ -397,9 +421,10 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   });
 
   /**
-   * Reverse one batch of these topics' settled bets: stake back, any
-   * winnings taken back. The topics must be paused first, so no new bet
-   * lands while it runs. Call again until `remaining` is 0.
+   * Reverse one batch of these markets' settled bets: stake back, any
+   * winnings taken back, and the reason kept for the customer's email.
+   * Markets with open bets must be paused first, so no new bet lands
+   * while it runs. Call again until `remaining` is 0.
    */
   app.post(
     "/admin/recovery/run",
@@ -407,12 +432,15 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     async (request) => {
       const user = await requireAdmin(request);
       const topics = checkTopics(request.body.topics);
+      // markets still holding bets are paused first, so nothing new lands
+      // while reversing and the open bets are refunded; finished markets
+      // can be reversed as they are
       const { pausedTopics } = await getBookSettings();
       const unpaused = topics.filter((t) => !pausedTopics.includes(t));
-      if (unpaused.length > 0) {
+      if (unpaused.length > 0 && (await openBetsMatching(topics)) > 0) {
         throw new ApiError(
           409,
-          `Pause these first, so no new bets land while reversing: ${unpaused.join(", ")}`,
+          `These markets still have open bets — pause them first: ${unpaused.join(", ")}`,
           "NOT_PAUSED",
         );
       }
@@ -422,6 +450,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           topics,
           sinceDays: request.body.sinceDays,
           shortfall: request.body.shortfall,
+          reason: request.body.reason,
           actor: user.id,
           log: request.log,
         }),
@@ -442,6 +471,20 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
         success: true,
         data: await clearDebts({ dryRun: request.body.dryRun, actor: user.id, log: request.log }),
       };
+    },
+  );
+
+  /**
+   * Apologize to the customers whose reversed bets the refund email
+   * wrongly called refunded — once each, saying any negative balance is
+   * waived (so it refuses while one isn't cleared). `dryRun` only counts.
+   */
+  app.post(
+    "/admin/recovery/correct-refund-email",
+    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    async (request) => {
+      await requireAdmin(request);
+      return { success: true, data: await correctRefundEmails({ dryRun: request.body.dryRun, log: request.log }) };
     },
   );
 
@@ -540,7 +583,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     { schema: { querystring: tradersQuery } },
     async (request) => {
       await requireAdmin(request);
-      const { search, sort, limit, offset, activeOnly } = request.query;
+      const { search, sort, limit, offset, activeOnly, suspendedOnly } = request.query;
       return {
         success: true,
         data: await listTraders({
@@ -549,6 +592,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           limit,
           offset,
           activeOnly,
+          suspendedOnly,
         }),
       };
     },
@@ -570,15 +614,23 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       throw new ApiError(404, "No such trader", "USER_NOT_FOUND");
     }
 
-    const [positions, ledger] = await Promise.all([
+    const [positions, ledger, profile] = await Promise.all([
       Position.find({ authUserId }).sort({ createdAt: -1 }).limit(100).lean(),
       LedgerEntry.find({ authUserId }).sort({ createdAt: -1 }).limit(50).lean(),
+      User.findOne({ authUserId }, { accountActions: 1 }).lean(),
     ]);
 
     return {
       success: true,
       data: {
         trader,
+        // suspensions and reinstatements, newest first
+        accountActions: [...(profile?.accountActions ?? [])].reverse().map((a) => ({
+          action: a.action,
+          reason: a.reason ?? "",
+          by: a.by,
+          at: a.at.toISOString(),
+        })),
         positions: positions.map((p) => ({
           id: String(p._id),
           eventId: p.eventId,
@@ -590,6 +642,8 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           priceKobo: p.priceKobo,
           potentialPayoutKobo: p.potentialPayoutKobo,
           status: p.status,
+          // a voided bet the desk reversed after it settled, not a refund
+          reversedFrom: p.reversedFrom ?? null,
           createdAt: p.createdAt?.toISOString?.() ?? null,
           settledAt: p.settledAt?.toISOString?.() ?? null,
         })),
@@ -604,6 +658,50 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       },
     };
   });
+
+  /**
+   * Suspend an account: no new bets, no money in or out, until lifted.
+   * Open bets settle as usual. The reason is recorded and, with
+   * `notify`, emailed to the customer (accounts.ts).
+   */
+  app.post(
+    "/admin/traders/:authUserId/suspend",
+    { schema: { body: suspendBody }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      const { authUserId } = request.params as { authUserId: string };
+      return {
+        success: true,
+        data: await suspendAccount({
+          authUserId,
+          reason: request.body.reason,
+          notify: request.body.notify,
+          actor: actor.label,
+          log: request.log,
+        }),
+      };
+    },
+  );
+
+  /** Lift a suspension; `notify` emails the customer that they're back. */
+  app.post(
+    "/admin/traders/:authUserId/reinstate",
+    { schema: { body: reinstateBody }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      const { authUserId } = request.params as { authUserId: string };
+      return {
+        success: true,
+        data: await reinstateAccount({
+          authUserId,
+          reason: request.body.reason,
+          notify: request.body.notify,
+          actor: actor.label,
+          log: request.log,
+        }),
+      };
+    },
+  );
 
   /** Recent settlements, newest first — the audit trail. */
   app.get("/admin/settlements", async (request) => {

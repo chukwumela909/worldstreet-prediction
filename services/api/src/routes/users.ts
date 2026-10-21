@@ -16,6 +16,13 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
           displayName: user.dbUser.displayName,
           avatar: user.dbUser.avatar,
           role: user.role,
+          // the site's suspended notice reads this (accounts.ts)
+          suspension: user.dbUser.suspendedAt
+            ? {
+                at: user.dbUser.suspendedAt.toISOString(),
+                reason: user.dbUser.suspendedReason ?? "",
+              }
+            : null,
         },
       },
     };

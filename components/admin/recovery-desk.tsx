@@ -11,6 +11,7 @@ import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { showToast } from "@/lib/toast-store";
 import {
   clearDebts,
+  correctRefundEmails,
   fetchBookSettings,
   fetchRecovery,
   notifyReversals,
@@ -19,6 +20,8 @@ import {
   updateBookSettings,
   useAdminResource,
   type DebtClearing,
+  type RefundCorrection,
+  type RecoveryIncident,
   type RecoveryReport,
   type ReversalNotice,
   type ReversalPreview,
@@ -27,17 +30,38 @@ import {
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
- * Recovery: undoing the bets placed on the 15-minute crypto markets
- * while a pricing glitch let them be exploited, and what that got back.
+ * Recovery: undoing the bets on a market after an incident — a pricing
+ * glitch someone exploited, a result that was public before the market
+ * closed — and what that got back.
  *
  * Top: what's been recovered — winnings taken back, stakes returned, the
- * net, and what's still owed by customers left below zero. Then the two
- * steps, in order: 1) reverse the bets (preview → type REVERSE → it runs
- * in batches), 2) email the customers. Then everyone affected. Amounts
- * follow the desk's ₦/$ switch.
+ * net, and what's still owed by customers left below zero — then each
+ * incident on its own line. Then the steps, in order: 1) reverse the bets
+ * (name the markets by words or a pasted link, say why, preview → type
+ * REVERSE → it runs in batches), 2) email the customers, who read the
+ * reason as written, 3) clear what's owed. Then everyone affected.
+ * Amounts follow the desk's ₦/$ switch.
  */
 
-const DEFAULT_TOPICS = "up or down 15 minutes, up or down 15m";
+const MIN_REASON = 10;
+/** The first reversals carried no reason; this is what they were for. */
+const UNRECORDED_REASON = "15-minute crypto pricing glitch (before reasons were recorded)";
+
+/**
+ * The comma-separated box: words in market titles, or a market's link —
+ * a pasted link is reduced to its last path segment, the market's slug.
+ */
+function parseTopics(text: string): string[] {
+  return text
+    .split(",")
+    .map((raw) => {
+      const t = raw.trim();
+      if (!t.includes("/")) return t.toLowerCase();
+      const path = t.split(/[?#]/)[0]!.replace(/\/+$/, "");
+      return (path.split("/").pop() ?? "").toLowerCase();
+    })
+    .filter(Boolean);
+}
 const PERIODS: { key: string; label: string; days: number | null }[] = [
   { key: "all", label: "All time", days: null },
   { key: "98", label: "14 weeks", days: 98 },
@@ -69,7 +93,8 @@ export function RecoveryDesk() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Recovery</h1>
           <p className="mt-1 text-sm text-secondary">
-            Reversing the 15-minute crypto bets, and what it got back.
+            Reverse the bets on any market after an incident, tell the customers why, and see what
+            it got back.
           </p>
         </div>
         <button
@@ -118,6 +143,9 @@ export function RecoveryDesk() {
       {summary.error && !report && (
         <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {summary.error}</p>
       )}
+      {report?.incidents && report.incidents.length > 0 && (
+        <IncidentsCard incidents={report.incidents} money={money} />
+      )}
 
       <ReverseStep money={money} onDone={reload} />
       <EmailStep
@@ -134,6 +162,17 @@ export function RecoveryDesk() {
           onDone={reload}
         />
       )}
+      {report?.refundCorrection &&
+        (report.refundCorrection.waiting > 0 || report.refundCorrection.corrected > 0) && (
+          <CorrectionStep
+            waiting={report.refundCorrection.waiting}
+            corrected={report.refundCorrection.corrected}
+            owedKobo={report.totals.owedKobo}
+            mailConfigured={report.mailConfigured}
+            money={money}
+            onDone={reload}
+          />
+        )}
       {report && report.customers.length > 0 && <CustomersCard report={report} money={money} />}
     </div>
   );
@@ -142,7 +181,8 @@ export function RecoveryDesk() {
 /* ---------- step 1: reverse ---------- */
 
 function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void }) {
-  const [topicsText, setTopicsText] = useState(DEFAULT_TOPICS);
+  const [topicsText, setTopicsText] = useState("");
+  const [reason, setReason] = useState("");
   const [period, setPeriod] = useState("all");
   const [shortfall, setShortfall] = useState<Shortfall>("negative");
   const [preview, setPreview] = useState<ReversalPreview | null>(null);
@@ -151,10 +191,8 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const topics = topicsText
-    .split(",")
-    .map((t) => t.trim().toLowerCase())
-    .filter(Boolean);
+  const topics = parseTopics(topicsText);
+  const reasonReady = reason.trim().length >= MIN_REASON;
   const sinceDays = PERIODS.find((p) => p.key === period)?.days ?? null;
   const reset = () => {
     setPreview(null);
@@ -198,13 +236,14 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
     setProgress({ done, total: preview.bets });
     try {
       for (let guard = 0; guard < 1_000; guard++) {
-        const batch = await runReversalBatch({ topics, sinceDays, shortfall });
+        const batch = await runReversalBatch({ topics, sinceDays, shortfall, reason: reason.trim() });
         done += batch.reversed;
         setProgress({ done, total: Math.max(preview.bets, done + batch.remaining) });
         if (batch.remaining === 0 || batch.reversed === 0) break;
       }
-      showToast(`Reversed ${done} bet${done === 1 ? "" : "s"}`, "success");
+      showToast(`Reversed ${done} bet${done === 1 ? "" : "s"} — now email the customers below`, "success");
       reset();
+      setReason("");
       onDone();
     } catch (err) {
       setError(`${message(err)} — ${done} reversed so far; run it again to finish.`);
@@ -225,14 +264,17 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
 
       <div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]">
         <label className="min-w-0">
-          <span className="block text-xs font-medium text-secondary">Markets matching (comma-separated)</span>
+          <span className="block text-xs font-medium text-secondary">
+            Which markets — words in their titles, or paste a market&rsquo;s link (comma-separated)
+          </span>
           <input
             value={topicsText}
             onChange={(e) => {
               setTopicsText(e.target.value);
               reset();
             }}
-            className="mt-1 h-10 w-full rounded-md border border-border bg-sunken px-3 text-sm outline-none focus:border-accent"
+            placeholder="e.g. up or down 15 minutes, or https://…/local/channels-tv-number-of-x-posts-…"
+            className="mt-1 h-10 w-full rounded-md border border-border bg-sunken px-3 text-sm outline-none placeholder:text-tertiary focus:border-accent"
           />
         </label>
         <div>
@@ -285,6 +327,20 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
         </div>
       </fieldset>
 
+      <label className="mt-3 block">
+        <span className="block text-xs font-medium text-secondary">
+          Why — the customers&rsquo; email gives this reason, word for word
+        </span>
+        <textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          rows={2}
+          maxLength={1000}
+          placeholder="e.g. The post count was public before the market closed, so the result was already known."
+          className="mt-1 w-full resize-y rounded-md border border-border bg-sunken px-3 py-2 text-sm outline-none placeholder:text-tertiary focus:border-accent"
+        />
+      </label>
+
       {!preview ? (
         <button
           type="button"
@@ -324,7 +380,7 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
               {shortfall === "negative" ? "they'll go below zero and owe it." : "it will be written off."}
             </p>
           )}
-          {preview.openBets > 0 && (
+          {preview.openBets > 0 && preview.paused && (
             <p className="mt-2 text-xs text-secondary">
               {preview.openBets} open bet{preview.openBets === 1 ? "" : "s"} on these markets are refunded by the
               pause instead, within a minute.
@@ -341,9 +397,12 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
             </ul>
           </details>
 
-          {!preview.paused ? (
+          {!preview.paused && preview.openBets > 0 ? (
             <div className={`mt-4 rounded-md border px-3 py-3 ${FLAG_TONE.caution.banner}`}>
-              <p className="font-semibold">Pause these markets first, so no new bets land while reversing.</p>
+              <p className="font-semibold">
+                {preview.openBets} bet{preview.openBets === 1 ? " is" : "s are"} still open on these markets — pause
+                them first, so they&rsquo;re refunded and nothing new lands while reversing.
+              </p>
               <button
                 type="button"
                 onClick={pause}
@@ -355,6 +414,11 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
             </div>
           ) : (
             <div className="mt-4 flex flex-wrap items-center gap-2">
+              {!reasonReady && (
+                <p className="w-full text-xs font-semibold text-warning">
+                  Write why above (at least {MIN_REASON} characters) — the customers&rsquo; email gives it.
+                </p>
+              )}
               <input
                 aria-label="Type REVERSE to confirm"
                 value={confirmText}
@@ -365,7 +429,7 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
               <button
                 type="button"
                 onClick={run}
-                disabled={busy !== null || confirmText !== "REVERSE"}
+                disabled={busy !== null || confirmText !== "REVERSE" || !reasonReady}
                 className="pressable h-10 rounded-sm bg-no-solid px-4 text-sm font-semibold text-white disabled:opacity-40"
               >
                 {busy === "run" && progress
@@ -426,9 +490,8 @@ function EmailStep({
     <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
       <h2 className="text-lg font-semibold">2 · Email the customers</h2>
       <p className="mt-0.5 text-sm text-secondary">
-        One email each: a glitch in our system affected these markets&rsquo; prices and was being
-        exploited, so every bet on them was cancelled — with their stakes, payouts taken back, and
-        new balance. Sent once per customer.
+        One email per customer for each incident: the reason you wrote, the markets, the stakes
+        returned and payouts taken back, and their new balance. Nobody is told twice.
       </p>
       {!mailConfigured && (
         <p className="mt-3 rounded-md bg-warning-tint px-3 py-2 text-sm font-semibold text-warning">
@@ -575,6 +638,157 @@ function DebtStep({
         </button>
       )}
       {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}
+    </section>
+  );
+}
+
+/* ---------- putting right the refund email ---------- */
+
+/**
+ * The paused-markets refund email once went to customers whose bets had
+ * been reversed, telling them their stake was back to spend. This sends
+ * each of them one apology — what really happened, that any balance below
+ * zero is waived, and their balance now — and waits until nobody affected
+ * is still below zero, since the email says so.
+ */
+function CorrectionStep({
+  waiting,
+  corrected,
+  owedKobo,
+  mailConfigured,
+  money,
+  onDone,
+}: {
+  waiting: number;
+  corrected: number;
+  owedKobo: number;
+  mailConfigured: boolean;
+  money: AdminMoney;
+  onDone: () => void;
+}) {
+  const [preview, setPreview] = useState<RefundCorrection | null>(null);
+  const [busy, setBusy] = useState<"preview" | "send" | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const go = async (dryRun: boolean) => {
+    setBusy(dryRun ? "preview" : "send");
+    setError(null);
+    try {
+      const result = await correctRefundEmails(dryRun);
+      if (dryRun) setPreview(result);
+      else {
+        setPreview(null);
+        showToast(
+          `Correction sent to ${result.emailed} customer${result.emailed === 1 ? "" : "s"}`,
+          result.emailed > 0 ? "success" : "error",
+        );
+        onDone();
+      }
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const blocked = owedKobo > 0;
+  return (
+    <section className={`mt-4 rounded-xl border p-4 shadow-card sm:p-5 ${waiting > 0 ? FLAG_TONE.caution.banner : "border-border bg-surface"}`}>
+      <h2 className="text-lg font-semibold">Correct the mistaken refund email</h2>
+      <p className="mt-0.5 text-sm text-secondary">
+        Customers whose bets were reversed were also sent &ldquo;Your bets have been refunded&rdquo;
+        by mistake. This sends each of them one apology: what really happened to their bets, that
+        any balance below zero has been waived, and their balance now.
+      </p>
+      {waiting === 0 ? (
+        <p className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-yes">
+          <Check className="size-4" aria-hidden />
+          All {corrected} customer{corrected === 1 ? " has" : "s have"} had the correction.
+        </p>
+      ) : (
+        <>
+          {blocked && (
+            <p className="mt-3 rounded-md bg-warning-tint px-3 py-2 text-sm font-semibold text-warning">
+              Clear what&rsquo;s owed first ({money.format(owedKobo)}, step 3) — this email tells them
+              their negative balance is waived.
+            </p>
+          )}
+          {!mailConfigured && (
+            <p className="mt-3 rounded-md bg-warning-tint px-3 py-2 text-sm font-semibold text-warning">
+              Customer email isn&rsquo;t set up on the API, so nothing can be sent yet.
+            </p>
+          )}
+          {preview ? (
+            <div className="mt-3 rounded-md bg-element-2 px-3 py-3 text-sm">
+              <p className="font-semibold">
+                {preview.customers} customer{preview.customers === 1 ? "" : "s"} will get the apology.
+              </p>
+              <div className="mt-2 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => go(false)}
+                  disabled={busy !== null || blocked || preview.owing > 0 || !mailConfigured}
+                  className="pressable flex h-9 items-center gap-1.5 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
+                >
+                  <Mail className="size-4" aria-hidden />
+                  {busy === "send" ? "Sending…" : `Send ${preview.customers} email${preview.customers === 1 ? "" : "s"}`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreview(null)}
+                  className="h-9 rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => go(true)}
+              disabled={busy !== null}
+              className="mt-3 flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface px-4 text-sm font-semibold hover:border-border-hover disabled:opacity-40"
+            >
+              <Mail className="size-4" aria-hidden />
+              {busy === "preview" ? "Checking…" : `Apologise to ${waiting} customer${waiting === 1 ? "" : "s"}…`}
+            </button>
+          )}
+        </>
+      )}
+      {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}
+    </section>
+  );
+}
+
+/* ---------- each incident ---------- */
+
+function IncidentsCard({ incidents, money }: { incidents: RecoveryIncident[]; money: AdminMoney }) {
+  return (
+    <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
+      <h2 className="text-lg font-semibold">Incidents</h2>
+      <p className="mt-0.5 text-sm text-secondary">Each reason you reversed bets for, newest first.</p>
+      <ul className="mt-3 flex flex-col gap-2">
+        {incidents.map((i) => (
+          <li key={i.reason || "unrecorded"} className="rounded-md border border-border bg-page px-3 py-2.5">
+            <p className="text-sm font-semibold">{i.reason || UNRECORDED_REASON}</p>
+            <p className="mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-secondary">
+              <span>{i.lastAt ? fmtDateTime(i.lastAt) : "—"}</span>
+              <span>
+                {i.bets} bet{i.bets === 1 ? "" : "s"} · {i.customers} customer{i.customers === 1 ? "" : "s"}
+              </span>
+              <span>
+                Net for us{" "}
+                <span className={`font-semibold ${i.netKobo > 0 ? "text-yes" : i.netKobo < 0 ? "text-no" : ""}`}>
+                  {money.formatSigned(i.netKobo)}
+                </span>
+              </span>
+              <span className={i.untoldBets > 0 ? "font-semibold text-warning" : "text-yes"}>
+                {i.untoldBets > 0 ? `${i.untoldBets} bet${i.untoldBets === 1 ? "" : "s"} not emailed yet` : "everyone told"}
+              </span>
+            </p>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

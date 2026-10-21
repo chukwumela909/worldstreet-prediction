@@ -1,6 +1,7 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
+import { assertNotSuspended } from "../accounts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
@@ -121,6 +122,9 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
 
   const placed = await alreadyPlaced();
   if (placed) return placed;
+
+  // a suspended account places nothing new (accounts.ts)
+  await assertNotSuspended(authUserId);
 
   const settings = await getBookSettings();
   const naira = (kobo: number) => `₦${(kobo / 100).toLocaleString("en-US")}`;

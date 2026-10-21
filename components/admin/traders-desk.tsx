@@ -23,6 +23,8 @@ import {
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { localPref, useLocalPref } from "@/lib/admin-prefs";
 import { UsdRateNote } from "@/components/admin/currency-switch";
+import { AccountControl } from "@/components/admin/account-control";
+import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
  * Who is playing the book, written for the owner rather than an engineer.
@@ -40,12 +42,14 @@ import { UsdRateNote } from "@/components/admin/currency-switch";
  * per person with every one of those values — nothing is hidden on a
  * small screen. The tab and sort are remembered in this browser.
  *
- * Read-only on purpose: nothing here moves anyone's money. Settlement
- * is the Local book desk, and it acts on markets, not on people.
- * Amounts follow the desk's ₦/$ switch (useAdminMoney).
+ * Nothing here moves anyone's money. The one action is on a person, not
+ * a market: suspending an account (and lifting it), from the opened
+ * person — with a third view, "Suspended", listing who is. Settlement is
+ * the Local book desk. Amounts follow the desk's ₦/$ switch
+ * (useAdminMoney).
  */
 
-type TraderTab = "active" | "all";
+type TraderTab = "active" | "all" | "suspended";
 
 const TABS: { key: TraderTab; label: string; blurb: string }[] = [
   {
@@ -57,6 +61,11 @@ const TABS: { key: TraderTab; label: string; blurb: string }[] = [
     key: "all",
     label: "All accounts",
     blurb: "Everyone who has signed up, whether they have placed a bet or not.",
+  },
+  {
+    key: "suspended",
+    label: "Suspended",
+    blurb: "Accounts that can't bet or move money until the suspension is lifted.",
   },
 ];
 
@@ -96,7 +105,7 @@ const viewPref = localPref<TradersView>("ws-admin-traders-view", DEFAULT_VIEW, (
   if (!raw || typeof raw !== "object") return null;
   const { tab, sort } = raw as { tab?: unknown; sort?: unknown };
   return {
-    tab: tab === "all" ? "all" : "active",
+    tab: tab === "all" || tab === "suspended" ? tab : "active",
     sort: (TRADER_SORTS as readonly unknown[]).includes(sort)
       ? (sort as TraderSort)
       : DEFAULT_VIEW.sort,
@@ -156,6 +165,7 @@ export function TradersDesk() {
       offset,
       limit: PAGE,
       activeOnly: tab === "active",
+      suspendedOnly: tab === "suspended",
     })
       .then((data) => {
         if (!cancelled) {
@@ -341,7 +351,9 @@ export function TradersDesk() {
               ? `Nobody matches “${query}”.`
               : tab === "active"
                 ? "Nobody has staked yet."
-                : "No accounts yet."}
+                : tab === "suspended"
+                  ? "No accounts are suspended."
+                  : "No accounts yet."}
           </p>
         ) : (
           <>
@@ -379,7 +391,13 @@ export function TradersDesk() {
                   </thead>
                   <tbody>
                     {rows.map((t) => (
-                      <TraderTableRow key={t.authUserId} trader={t} now={now} money={money} />
+                      <TraderTableRow
+                        key={t.authUserId}
+                        trader={t}
+                        now={now}
+                        money={money}
+                        onChanged={() => setReloads((n) => n + 1)}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -389,7 +407,13 @@ export function TradersDesk() {
             {/* phones: one card per person, every value shown */}
             <ul className="flex flex-col gap-3 md:hidden">
               {rows.map((t) => (
-                <TraderCard key={t.authUserId} trader={t} now={now} money={money} />
+                <TraderCard
+                  key={t.authUserId}
+                  trader={t}
+                  now={now}
+                  money={money}
+                  onChanged={() => setReloads((n) => n + 1)}
+                />
               ))}
             </ul>
           </>
@@ -461,10 +485,12 @@ function TraderTableRow({
   trader,
   now,
   money,
+  onChanged,
 }: {
   trader: TraderRow;
   now: number;
   money: AdminMoney;
+  onChanged: () => void;
 }) {
   const d = useTraderDetail(trader.authUserId);
   const result = theirResult(trader, money);
@@ -480,7 +506,10 @@ function TraderTableRow({
           <div className="flex min-w-0 items-center gap-3">
             <Avatar name={name} />
             <div className="min-w-0">
-              <p className="truncate text-sm font-semibold">{name}</p>
+              <p className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+                <span className="truncate">{name}</span>
+                {trader.suspendedAt && <SuspendedChip />}
+              </p>
               <p className="truncate text-xs font-medium text-tertiary">
                 {[trader.username && `@${trader.username}`, trader.email]
                   .filter(Boolean)
@@ -531,7 +560,7 @@ function TraderTableRow({
       {d.open && (
         <tr>
           <td colSpan={8} className="border-t border-border bg-page px-4 py-3">
-            <TraderDetailPanel trader={trader} state={d} money={money} />
+            <TraderDetailPanel trader={trader} state={d} money={money} onChanged={onChanged} />
           </td>
         </tr>
       )}
@@ -543,10 +572,12 @@ function TraderCard({
   trader,
   now,
   money,
+  onChanged,
 }: {
   trader: TraderRow;
   now: number;
   money: AdminMoney;
+  onChanged: () => void;
 }) {
   const d = useTraderDetail(trader.authUserId);
   const result = theirResult(trader, money);
@@ -557,7 +588,10 @@ function TraderCard({
       <div className="flex min-w-0 items-center gap-3 px-4 pt-3">
         <Avatar name={name} />
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{name}</p>
+          <p className="flex min-w-0 items-center gap-2 text-sm font-semibold">
+            <span className="truncate">{name}</span>
+            {trader.suspendedAt && <SuspendedChip />}
+          </p>
           {trader.username && (
             <p className="truncate text-xs font-medium text-tertiary">
               @{trader.username}
@@ -607,22 +641,24 @@ function TraderCard({
 
       {d.open && (
         <div className="border-t border-border bg-page px-4 py-3">
-          <TraderDetailPanel trader={trader} state={d} money={money} />
+          <TraderDetailPanel trader={trader} state={d} money={money} onChanged={onChanged} />
         </div>
       )}
     </li>
   );
 }
 
-/** Opened: the person's record and every bet they have placed. */
+/** Opened: the person's record, the suspend control, and every bet they have placed. */
 function TraderDetailPanel({
   trader,
   state,
   money,
+  onChanged,
 }: {
   trader: TraderRow;
   state: DetailState;
   money: AdminMoney;
+  onChanged: () => void;
 }) {
   const { detail, failed, load } = state;
   return (
@@ -644,6 +680,15 @@ function TraderDetailPanel({
         />
         <Meta label="User id" value={trader.authUserId} mono />
       </dl>
+
+      <AccountControl
+        trader={trader}
+        actions={detail?.accountActions}
+        onChanged={() => {
+          load();
+          onChanged();
+        }}
+      />
 
       {failed ? (
         <p className="py-3 text-sm text-secondary">
@@ -678,7 +723,7 @@ function TraderDetailPanel({
               <span className="shrink-0 text-right text-[13px] font-semibold tabular-nums">
                 {money.format(p.stakeKobo)}
               </span>
-              <StatusPill status={p.status} />
+              <StatusPill status={p.reversedFrom ? "reversed" : p.status} />
             </li>
           ))}
         </ul>
@@ -793,11 +838,22 @@ function Field({
   );
 }
 
+function SuspendedChip() {
+  return (
+    <span
+      className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FLAG_TONE.danger.chip}`}
+    >
+      Suspended
+    </span>
+  );
+}
+
 const STATUS: Record<string, { label: string; className: string }> = {
   open: { label: "Open", className: "bg-element-2 text-secondary" },
   won: { label: "Won", className: "bg-yes-tint text-yes" },
   lost: { label: "Lost", className: "bg-no-tint text-no" },
   voided: { label: "Refunded", className: "bg-element-2 text-tertiary" },
+  reversed: { label: "Reversed", className: FLAG_TONE.caution.chip },
 };
 
 function StatusPill({ status }: { status: string }) {

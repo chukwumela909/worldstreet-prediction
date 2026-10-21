@@ -4,6 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { AuthProvider } from "@/components/auth/auth-context";
 import { MobileDock } from "@/components/nav/mobile-dock";
 import { SiteChrome } from "@/components/nav/site-chrome";
+import { SuspendedNotice } from "@/components/account/suspended-notice";
 import { SiteHeader } from "@/components/nav/site-header";
 import { Toaster } from "@/components/toaster";
 import { BookPricingProvider } from "@/components/book-pricing";
@@ -65,6 +66,7 @@ export default async function RootLayout({
                 navigation, so only the page below it swaps */}
             <SiteChrome>
               <SiteHeader />
+              <SuspendedNotice />
             </SiteChrome>
             {children}
             <SiteFooter />

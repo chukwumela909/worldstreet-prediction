@@ -7,6 +7,7 @@ import {
   ArrowRightEndOnRectangleIcon as LogIn,
   ArrowRightStartOnRectangleIcon as LogOut,
   Bars3Icon as Menu,
+  ChatBubbleLeftRightIcon as Chat,
   MoonIcon as Moon,
   SunIcon as Sun,
   TrophyIcon as Trophy,
@@ -169,6 +170,9 @@ function MenuDropdown() {
           </MenuLink>
           <MenuLink href="/leaderboard" icon={<Trophy className="size-4" />} onNavigate={close}>
             Leaderboard
+          </MenuLink>
+          <MenuLink href="/support" icon={<Chat className="size-4" />} onNavigate={close}>
+            Help &amp; support
           </MenuLink>
           <button onClick={toggleTheme} className={MENU_ITEM}>
             {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
