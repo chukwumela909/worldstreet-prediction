@@ -277,6 +277,23 @@ check(
   (await outcomeOf(() => settings.updateBookSettings({ maxQuoteKobo: 4_000 }, "smoke"))) === "INVALID_SETTINGS",
 );
 
+/* ---------------- a voided market takes no new bets ---------------- */
+console.log("after the desk voids a market");
+const { Settlement } = await import("../src/trading/models.js");
+const stillOpen = await ownMarket("Will the NGX close higher this week?");
+await fund("u-void", 1_000_000);
+// as a void leaves a Bayse market the source still lists open
+await Settlement.create({ eventId: stillOpen.eventId, marketId: stillOpen.marketId, voided: true, source: "admin", actor: "key:josh" });
+const afterVoid = await outcomeOf(() =>
+  placeOrder(
+    "u-void",
+    { eventId: stillOpen.eventId, marketId: stillOpen.marketId, outcomeId: stillOpen.yes, stakeKobo: 10_000, expectedPriceKobo: 5_500, idempotencyKey: "void-key-0001" },
+    log,
+  ),
+);
+check(`a market already voided refuses new bets (got ${afterVoid})`, afterVoid === "MARKET_CLOSED");
+check("…charging nothing", (await getNairaBalanceKobo("u-void")) === 1_000_000);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 
 await mongoose.disconnect();

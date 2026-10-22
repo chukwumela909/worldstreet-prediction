@@ -18,7 +18,7 @@ import {
 import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { withMarketLock } from "../trading/market-lock.js";
 import { isPausedMarket } from "../trading/paused.js";
-import { Position, type IPosition } from "../trading/models.js";
+import { Position, Settlement, type IPosition } from "../trading/models.js";
 
 /**
  * Hold-to-settlement trades on both books — the Local one (Bayse-fed
@@ -160,6 +160,12 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
   }
   const market = requireMarket(event, body.marketId);
   if (market.status !== "open") {
+    throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
+  }
+  // one the desk has already settled or voided takes nothing new, even
+  // while its source still lists it open: a bet placed now could never
+  // settle (a market settles once — its Settlement row is unique)
+  if (await Settlement.exists({ marketId: market.id })) {
     throw new ApiError(409, "This market is not open for trading", "MARKET_CLOSED");
   }
 
