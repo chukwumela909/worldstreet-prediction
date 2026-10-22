@@ -37,6 +37,8 @@ import {
 import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds } from "../trading/pause-refunds.js";
+import { getAbuseWatch } from "../trading/abuse.js";
+import { resolveWithdrawalCheck } from "../trading/withdrawals.js";
 import { sendAlert } from "../alerts.js";
 import { config } from "../config.js";
 
@@ -78,6 +80,16 @@ const tradersQuery = z.object({
     .enum(["true", "false", "1", "0"])
     .transform((v) => v === "true" || v === "1")
     .optional(),
+});
+
+const abuseQuery = z.object({
+  /** Bets placed in the last N days; 0 = all time. Money in and out is always all time. */
+  days: z.coerce.number().int().min(0).max(3650).default(30),
+});
+const withdrawalResolveBody = z.object({
+  refKey: z.string().min(8).max(300),
+  /** retry: ask the wallet again; paid / return: the desk's own call. */
+  action: z.enum(["retry", "paid", "return"]),
 });
 
 /** Suspending: the reason is the customer's to read (accounts.ts). */
@@ -675,6 +687,40 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           authUserId,
           reason: request.body.reason,
           notify: request.body.notify,
+          actor: actor.label,
+          log: request.log,
+        }),
+      };
+    },
+  );
+
+  /**
+   * Abuse watch: accounts beating the odds, buying near-certain sides,
+   * moving in pairs, cashing out more than they put in, balances off
+   * their ledger, and withdrawals the wallet never confirmed
+   * (trading/abuse.ts). Read-only.
+   */
+  app.get("/admin/abuse", { schema: { querystring: abuseQuery } }, async (request) => {
+    await requireAdmin(request);
+    const days = request.query.days === 0 ? null : request.query.days;
+    return { success: true, data: await getAbuseWatch(days) };
+  });
+
+  /**
+   * Settle a withdrawal the wallet never confirmed: ask it again under
+   * the same reference, or mark it paid / return the credit by hand
+   * (trading/withdrawals.ts).
+   */
+  app.post(
+    "/admin/withdrawal-checks/resolve",
+    { schema: { body: withdrawalResolveBody }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      return {
+        success: true,
+        data: await resolveWithdrawalCheck({
+          refKey: request.body.refKey,
+          action: request.body.action,
           actor: actor.label,
           log: request.log,
         }),

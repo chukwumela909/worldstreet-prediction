@@ -11,6 +11,7 @@ import {
   ClipboardDocumentCheckIcon as Settled,
   Cog6ToothIcon as Settings,
   PencilSquareIcon as PenSquare,
+  ShieldExclamationIcon as Shield,
   UsersIcon as Users,
 } from "@heroicons/react/24/outline";
 import { useAuth } from "@/components/auth/auth-context";
@@ -25,6 +26,7 @@ const NAV = [
   { href: "/admin/settled", label: "Settled bets", icon: Settled },
   { href: "/admin/recovery", label: "Recovery", icon: Recovery },
   { href: "/admin/support", label: "Support", icon: Support },
+  { href: "/admin/abuse", label: "Abuse watch", icon: Shield },
   { href: "/admin/settings", label: "Settings", icon: Settings },
 ] as const;
 

@@ -27,6 +27,7 @@
     "smoke:paused": "tsx scripts/paused-smoke.mts",
     "smoke:recovery": "tsx scripts/recovery-smoke.mts",
     "smoke:accounts": "tsx scripts/accounts-smoke.mts",
+    "smoke:abuse": "tsx scripts/abuse-smoke.mts",
     "verify:leaderboard": "tsx scripts/verify-leaderboard.ts",
     "verify:traders": "tsx scripts/verify-traders.ts",
     "inspect:settlement": "tsx scripts/inspect-settlement.ts"

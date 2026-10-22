@@ -23,12 +23,18 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 const MIN_REASON = 5;
 
+/** What the control needs to know about the account — any desk's row will do. */
+export type AccountRef = Pick<
+  TraderRow,
+  "authUserId" | "displayName" | "username" | "email" | "suspendedAt" | "suspendedReason"
+>;
+
 export function AccountControl({
   trader,
   actions,
   onChanged,
 }: {
-  trader: TraderRow;
+  trader: AccountRef;
   /** Newest first; undefined until the person's detail loads. */
   actions: AccountAction[] | undefined;
   onChanged: () => void;

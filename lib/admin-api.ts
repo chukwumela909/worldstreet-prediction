@@ -1293,3 +1293,102 @@ export const setSupportStatus = (ref: string, status: "open" | "closed") =>
   adminPost<{ ticket: SupportTicketDetail["ticket"] }>(`/v1/admin/support/${encodeURIComponent(ref)}/status`, {
     status,
   });
+
+/* ------------------------------------------------------------------ */
+/* Abuse watch                                                         */
+/* ------------------------------------------------------------------ */
+
+/** Who a flagged row is about. */
+export interface AbusePerson {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  balanceKobo: number;
+  suspendedAt: string | null;
+  suspendedReason: string;
+}
+
+export interface OddsRow extends AbusePerson {
+  bets: number;
+  won: number;
+  /** What the prices paid said they'd win. */
+  expectedWins: number;
+  /** Standard deviations above that — 3 is about 1 in 1,000 by luck. */
+  z: number;
+  avgPriceKobo: number;
+  stakedKobo: number;
+  profitKobo: number;
+  markets: string[];
+  lastBetAt: string | null;
+}
+
+export interface NearCertainRow extends AbusePerson {
+  bets: number;
+  won: number;
+  avgPriceKobo: number;
+  stakedKobo: number;
+  profitKobo: number;
+  markets: string[];
+  lastBetAt: string | null;
+}
+
+export interface TwinRow {
+  a: AbusePerson;
+  b: AbusePerson;
+  sharedMarkets: number;
+  examples: string[];
+  lastAt: string | null;
+}
+
+export interface CashOutRow extends AbusePerson {
+  addedKobo: number;
+  withdrawnKobo: number;
+  extraKobo: number;
+  betProfitKobo: number;
+  reversedKobo: number;
+}
+
+export interface LedgerGapRow extends AbusePerson {
+  ledgerKobo: number;
+  gapKobo: number;
+}
+
+export interface WithdrawalCheckRow {
+  refKey: string;
+  authUserId: string;
+  username: string;
+  email: string;
+  amountKobo: number;
+  amountUsdMinor: number;
+  status: "unconfirmed" | "checking" | "paid" | "returned";
+  lastCode: string;
+  lastMessage: string;
+  createdAt: string | null;
+  resolvedBy: string;
+  resolvedAt: string | null;
+}
+
+export interface AbuseWatch {
+  days: number | null;
+  beatingOdds: OddsRow[];
+  nearCertain: NearCertainRow[];
+  twins: TwinRow[];
+  cashOut: CashOutRow[];
+  ledgerGaps: LedgerGapRow[];
+  withdrawals: WithdrawalCheckRow[];
+}
+
+/** The scans; `days` bounds the betting ones (0 = all time). */
+export async function fetchAbuseWatch(days: number): Promise<AbuseWatch> {
+  try {
+    const res = await apiFetch<{ data: AbuseWatch }>(`/v1/admin/abuse?days=${days}`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/** Settle a withdrawal the wallet never confirmed. */
+export const resolveWithdrawal = (refKey: string, action: "retry" | "paid" | "return") =>
+  adminPost<{ status: string; message: string }>("/v1/admin/withdrawal-checks/resolve", { refKey, action });
