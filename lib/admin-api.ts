@@ -1349,6 +1349,15 @@ export interface CashOutRow extends AbusePerson {
   reversedKobo: number;
 }
 
+export interface BelowZeroRow extends AbusePerson {
+  owedKobo: number;
+  /** Available in their WorldStreet dollar wallet, cents; null when the wallet couldn't say. */
+  walletUsdMinor: number | null;
+  reversedBets: number;
+  /** Debt of theirs already written off — they were told they owe nothing. */
+  waivedKobo: number;
+}
+
 export interface LedgerGapRow extends AbusePerson {
   ledgerKobo: number;
   gapKobo: number;
@@ -1377,6 +1386,8 @@ export interface AbuseWatch {
   cashOut: CashOutRow[];
   ledgerGaps: LedgerGapRow[];
   withdrawals: WithdrawalCheckRow[];
+  /** Absent on an API older than the list. */
+  belowZero?: BelowZeroRow[];
 }
 
 /** The scans; `days` bounds the betting ones (0 = all time). */

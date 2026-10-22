@@ -1,4 +1,5 @@
 import { User } from "../models.js";
+import { getWalletUsdBalance } from "../wallet.js";
 import { LedgerEntry, NairaAccount, Position } from "./models.js";
 import { listWithdrawalChecks, type WithdrawalCheckRow } from "./withdrawals.js";
 
@@ -20,7 +21,11 @@ import { listWithdrawalChecks, type WithdrawalCheckRow } from "./withdrawals.js"
  *  - ledgerGaps: balances that don't equal the sum of their ledger —
  *    money that moved outside the ledger, which should never happen;
  *  - withdrawals: credit → dollar withdrawals the wallet never confirmed,
- *    held for the desk (trading/withdrawals.ts).
+ *    held for the desk (trading/withdrawals.ts);
+ *  - belowZero: every balance below zero — what's owed, what the customer
+ *    holds in their WorldStreet dollar wallet, what caused it, and whether
+ *    a debt of theirs was waived before (they were told they owe nothing).
+ *    Only a list: nothing here takes money from anyone's wallet.
  *
  * Read-only. Bets the desk has reversed are left out of the betting
  * scans: they've already been dealt with. Kobo throughout.
@@ -89,6 +94,16 @@ export interface CashOutRow extends Person {
   reversedKobo: number;
 }
 
+export interface BelowZeroRow extends Person {
+  owedKobo: number;
+  /** Available in their WorldStreet dollar wallet, cents; null when the wallet couldn't say. */
+  walletUsdMinor: number | null;
+  /** Bets the desk reversed — the only way a balance goes below zero. */
+  reversedBets: number;
+  /** Debt of theirs already written off — they were told they owe nothing. */
+  waivedKobo: number;
+}
+
 export interface LedgerGapRow extends Person {
   ledgerKobo: number;
   /** balance − ledger. */
@@ -103,6 +118,7 @@ export interface AbuseWatch {
   cashOut: CashOutRow[];
   ledgerGaps: LedgerGapRow[];
   withdrawals: WithdrawalCheckRow[];
+  belowZero: BelowZeroRow[];
 }
 
 interface Bet {
@@ -237,6 +253,7 @@ export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
     withdrawn: number;
     returned: number;
     reversed: number;
+    waived: number;
   }>([
     {
       $group: {
@@ -262,6 +279,7 @@ export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
         reversed: {
           $sum: { $cond: [{ $and: [{ $eq: ["$type", "reversal"] }, { $lt: ["$amountKobo", 0] }] }, { $multiply: ["$amountKobo", -1] }, 0] },
         },
+        waived: { $sum: { $cond: [{ $eq: ["$type", "debt_writeoff"] }, "$amountKobo", 0] } },
       },
     },
   ]);
@@ -283,6 +301,29 @@ export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
       .filter((a) => !ledgerIds.has(a.authUserId) && a.balanceKobo !== 0)
       .map((a) => ({ id: a.authUserId, ledgerKobo: 0, gapKobo: a.balanceKobo })),
   ].slice(0, ROWS);
+
+  /* ---- below zero ---- */
+  const waivedById = new Map(ledger.map((l) => [l._id, l.waived]));
+  const below = accounts
+    .filter((a) => a.balanceKobo < 0)
+    .sort((a, b) => a.balanceKobo - b.balanceKobo)
+    .slice(0, ROWS);
+  const belowIds = below.map((a) => a.authUserId);
+  const [reversedCounts, wallets] = await Promise.all([
+    Position.aggregate<{ _id: string; n: number }>([
+      { $match: { authUserId: { $in: belowIds }, reversedFrom: { $exists: true } } },
+      { $group: { _id: "$authUserId", n: { $sum: 1 } } },
+    ]),
+    // what each holds in their dollar wallet — asked, never charged
+    Promise.all(
+      belowIds.map(async (id) => {
+        const r = await getWalletUsdBalance(id);
+        return [id, r.ok ? r.data.balances.USD.availableMinor : null] as const;
+      }),
+    ),
+  ]);
+  const reversedById = new Map(reversedCounts.map((r) => [r._id, r.n]));
+  const walletById = new Map(wallets);
 
   // settled, unreversed bet profit for the cash-out rows, all time
   const cashIds = cash.map((c) => c._id);
@@ -315,6 +356,7 @@ export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
     ...twinPairs.flatMap(([k]) => k.split("|")),
     ...cashIds,
     ...gaps.map((g) => g.id),
+    ...belowIds,
   ]);
   const users = await User.find(
     { authUserId: { $in: [...ids] } },
@@ -358,5 +400,12 @@ export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
     })),
     ledgerGaps: gaps.map((g) => ({ ...person(g.id), ledgerKobo: g.ledgerKobo, gapKobo: g.gapKobo })),
     withdrawals: await listWithdrawalChecks(),
+    belowZero: below.map((a) => ({
+      ...person(a.authUserId),
+      owedKobo: -a.balanceKobo,
+      walletUsdMinor: walletById.get(a.authUserId) ?? null,
+      reversedBets: reversedById.get(a.authUserId) ?? 0,
+      waivedKobo: waivedById.get(a.authUserId) ?? 0,
+    })),
   };
 }

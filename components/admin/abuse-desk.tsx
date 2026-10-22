@@ -24,7 +24,8 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  * them right there. Withdrawals the wallet never confirmed come first,
  * because they hold a customer's money until the desk settles them.
  * Betting scans follow the period picked; money in and out is all time.
- * Read-only apart from those two actions (trading/abuse.ts).
+ * Read-only apart from those two actions (trading/abuse.ts) — the
+ * below-zero list shows each customer's dollar wallet but never charges it.
  */
 
 const PERIODS = [
@@ -80,6 +81,7 @@ export function AbuseDesk() {
   const loading = fresh === null;
   const reload = () => setReloads((n) => n + 1);
   const waiting = watch?.withdrawals.filter((w) => w.status === "unconfirmed").length ?? 0;
+  const belowZero = watch?.belowZero ?? [];
 
   return (
     <div className="max-w-5xl">
@@ -129,8 +131,9 @@ export function AbuseDesk() {
         </div>
       ) : (
         <>
-          <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+          <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
             <Count label="Withdrawals to confirm" n={waiting} />
+            <Count label="Below zero" n={belowZero.length} />
             <Count label="Beating the odds" n={watch.beatingOdds.length} />
             <Count label="Near-certain buyers" n={watch.nearCertain.length} />
             <Count label="Accounts in pairs" n={watch.twins.length} />
@@ -148,6 +151,31 @@ export function AbuseDesk() {
                   <WithdrawalItem key={w.refKey} w={w} money={money} onDone={reload} />
                 ))}
               </ul>
+            </Card>
+          )}
+
+          {watch.belowZero && (
+            <Card
+              title="Below zero"
+              blurb={`Customers who owe money: a reversal took back more than their balance held. Shown next to what's in their WorldStreet dollar wallet — nothing here charges it. Owed in all: ${money.format(
+                belowZero.reduce((s, r) => s + r.owedKobo, 0),
+              )}.`}
+              empty={belowZero.length === 0}
+            >
+              {belowZero.map((r) => (
+                <PersonRow key={r.authUserId} person={r} money={money} onChanged={reload}>
+                  <b className="text-no">Owes {money.format(r.owedKobo)}</b> · dollar wallet{" "}
+                  <b className="text-primary">
+                    {r.walletUsdMinor === null ? "unknown" : `$${(r.walletUsdMinor / 100).toFixed(2)}`}
+                  </b>{" "}
+                  · from {r.reversedBets} reversed bet{r.reversedBets === 1 ? "" : "s"}.
+                  {r.waivedKobo > 0 && (
+                    <span className={`mt-1 block rounded-md px-2 py-1 text-xs font-semibold ${FLAG_TONE.caution.chip}`}>
+                      {money.format(r.waivedKobo)} of their debt was waived before — they were told they owe nothing.
+                    </span>
+                  )}
+                </PersonRow>
+              ))}
             </Card>
           )}
 

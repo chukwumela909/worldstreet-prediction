@@ -20,7 +20,7 @@ const mongod = await MongoMemoryServer.create();
 await mongoose.connect(mongod.getUri(), { dbName: "test" });
 
 const { buildApp } = await import("../src/app.js");
-const { creditNaira, debitNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
+const { adjustNaira, creditNaira, debitNaira, getNairaBalanceKobo, writeOffDebt } = await import("../src/trading/ledger.js");
 const { NairaAccount, Position, WithdrawalCheck, ensureTradingIndexes } = await import("../src/trading/models.js");
 const { User } = await import("../src/models.js");
 await ensureTradingIndexes();
@@ -40,7 +40,7 @@ function check(name: string, cond: boolean) {
 const admin = (method: "GET" | "POST", url: string, payload?: unknown) =>
   app.inject({ method, url, headers: { "x-admin-key": KEY }, ...(payload !== undefined && { payload: payload as object }) });
 
-for (const name of ["lucky", "fair", "near", "twin1", "twin2", "cash", "gap"]) {
+for (const name of ["lucky", "fair", "near", "twin1", "twin2", "cash", "gap", "owes", "waived"]) {
   await User.create({ authUserId: `u-${name}`, email: `${name}@example.test`, username: name, displayName: name });
 }
 
@@ -102,6 +102,15 @@ await debitNaira({ authUserId: "u-fair", amountKobo: 1_000_000, type: "conversio
 await creditNaira({ authUserId: "u-gap", amountKobo: 100_000, type: "conversion_in", refKey: "convert:u-gap:in-1", description: "in" });
 await NairaAccount.updateOne({ authUserId: "u-gap" }, { $inc: { balanceKobo: 500 } });
 
+// owes: a reversal took back more than the balance held
+await creditNaira({ authUserId: "u-owes", amountKobo: 200_000, type: "conversion_in", refKey: "convert:u-owes:in-1", description: "in" });
+await adjustNaira({ authUserId: "u-owes", amountKobo: -700_000, type: "reversal", refKey: "reverse:owes-1", description: "reversed", metadata: {} });
+await bet("u-owes", { priceKobo: 9_500, won: true, reversed: true });
+// waived: a debt written off before, then below zero again
+await adjustNaira({ authUserId: "u-waived", amountKobo: -300_000, type: "reversal", refKey: "reverse:waived-1", description: "reversed", metadata: {} });
+await writeOffDebt({ authUserId: "u-waived", refKey: "writeoff:waived-1", description: "waived", metadata: {} });
+await adjustNaira({ authUserId: "u-waived", amountKobo: -100_000, type: "reversal", refKey: "reverse:waived-2", description: "reversed", metadata: {} });
+
 // a withdrawal the wallet never confirmed, credit already taken
 await creditNaira({ authUserId: "u-fair", amountKobo: 400_000, type: "conversion_in", refKey: "convert:u-fair:in-2", description: "in" });
 await debitNaira({ authUserId: "u-fair", amountKobo: 300_000, type: "conversion_out", refKey: "convert:u-fair:out-9", description: "out" });
@@ -116,6 +125,7 @@ type Watch = {
   cashOut: { username: string; addedKobo: number; withdrawnKobo: number; extraKobo: number }[];
   ledgerGaps: { username: string; gapKobo: number }[];
   withdrawals: { refKey: string; status: string; username: string }[];
+  belowZero: { username: string; owedKobo: number; walletUsdMinor: number | null; reversedBets: number; waivedKobo: number }[];
 };
 const res = await admin("GET", "/v1/admin/abuse?days=0");
 const w = (res.json() as { data: Watch }).data;
@@ -140,6 +150,17 @@ check(
 );
 check("ledger gap: gap's ₦5 that no entry explains, and nobody else", w.ledgerGaps.length === 1 && w.ledgerGaps[0]!.username === "gap" && w.ledgerGaps[0]!.gapKobo === 500);
 check("held withdrawals are listed, waiting first", w.withdrawals.length === 2 && w.withdrawals[0]!.status === "unconfirmed");
+const owes = w.belowZero.find((r) => r.username === "owes");
+const waived = w.belowZero.find((r) => r.username === "waived");
+check(
+  "below zero: owes ₦5,000 from a reversal, largest debt first",
+  w.belowZero.length === 2 && w.belowZero[0]!.username === "owes" && owes?.owedKobo === 500_000 && owes.reversedBets === 1,
+);
+check(
+  "…waived shows the ₦3,000 already written off, so it's clear they were told they owe nothing",
+  waived?.owedKobo === 100_000 && waived.waivedKobo === 300_000 && owes?.waivedKobo === 0,
+);
+check("…and with no wallet to ask, their dollar balance reads unknown — nothing is charged", owes?.walletUsdMinor === null);
 
 const recent = (await admin("GET", "/v1/admin/abuse?days=1")).json() as { data: Watch };
 check("a 1-day window leaves out the twins from days ago", recent.data.twins.length === 0);
