@@ -2,7 +2,6 @@ import type { FastifyBaseLogger } from "fastify";
 import mongoose from "mongoose";
 import { User } from "../models.js";
 import { isCustomerMailConfigured, sendCustomerEmails } from "../customer-mail.js";
-import { ApiError } from "../errors.js";
 import { adjustNaira, writeOffDebt } from "./ledger.js";
 import { LedgerEntry, NairaAccount, Position } from "./models.js";
 import { pausedPattern } from "./paused.js";
@@ -340,11 +339,6 @@ export interface RecoveryReport {
   mailConfigured: boolean;
   /** Newest first. */
   incidents: RecoveryIncident[];
-  /**
-   * Customers whose reversed bets the refund email wrongly called refunded:
-   * still waiting for the correction, and already sent it.
-   */
-  refundCorrection: { waiting: number; corrected: number };
   customers: RecoveryCustomer[];
 }
 
@@ -360,8 +354,6 @@ interface Reversed {
   reversalShortKobo?: number | null;
   reversalReason?: string | null;
   reversalNotifiedAt?: Date | null;
-  refundNotifiedAt?: Date | null;
-  refundCorrectedAt?: Date | null;
 }
 
 async function reversedBets(): Promise<Reversed[]> {
@@ -378,8 +370,6 @@ async function reversedBets(): Promise<Reversed[]> {
       reversalShortKobo: 1,
       reversalReason: 1,
       reversalNotifiedAt: 1,
-      refundNotifiedAt: 1,
-      refundCorrectedAt: 1,
     },
   ).lean<Reversed[]>();
 }
@@ -486,16 +476,9 @@ export async function getRecovery(): Promise<RecoveryReport> {
     },
     mailConfigured: isCustomerMailConfigured(),
     incidents: incidentsOf(bets),
-    refundCorrection: {
-      waiting: new Set(bets.filter(wronglyCalledRefunded).map((b) => b.authUserId)).size,
-      corrected: new Set(bets.filter((b) => b.refundCorrectedAt).map((b) => b.authUserId)).size,
-    },
     customers: customers.slice(0, MAX_ROWS),
   };
 }
-
-/** Reversed, but its customer was emailed it had been refunded, and not yet corrected. */
-const wronglyCalledRefunded = (b: Reversed) => Boolean(b.refundNotifiedAt) && !b.refundCorrectedAt;
 
 /* ---------------- clearing what's owed ---------------- */
 
@@ -559,9 +542,13 @@ export interface ReversalNotice {
 /**
  * One email per customer per incident they haven't been told about: what
  * was undone, what changed on their balance, and why — in the desk's own
- * words for the reason. The first reversals, which carry no reason, keep
- * their original email about the 15-minute crypto glitch.
+ * words for the reason. The first reversals, made before reasons were
+ * kept, give the reason they were made for (UNRECORDED_REASON).
  */
+/** What the first reversals were for — they were made before reasons were kept. */
+const UNRECORDED_REASON =
+  "A glitch in our system affected the prices on our 15-minute crypto markets, and it was being exploited.";
+
 export async function notifyReversals(params: {
   dryRun: boolean;
   log: FastifyBaseLogger;
@@ -598,7 +585,7 @@ export async function notifyReversals(params: {
     params.log,
     sendable.map(([id, bets]) => {
       const u = userById.get(id)!;
-      const reason = bets[0]?.reversalReason ?? "";
+      const reason = bets[0]?.reversalReason || UNRECORDED_REASON;
       const staked = bets.reduce((s, b) => s + b.stakeKobo, 0);
       const winnings = bets
         .filter((b) => b.reversedFrom === "won")
@@ -620,24 +607,6 @@ export async function notifyReversals(params: {
             ]
           : []),
       ];
-      if (!reason) {
-        // the first reversals, sent before reasons were recorded
-        return {
-          to: u.email,
-          subject: "Important: your 15-minute crypto bets have been reversed",
-          text: [
-            `Hi ${u.username},`,
-            "",
-            "We found a glitch in our system that affected the prices on our 15-minute crypto markets (Bitcoin, Ethereum and others), and it was being exploited. To keep the platform safe and fair for everyone, we have cancelled every bet placed on these markets.",
-            "",
-            ...effect,
-            "",
-            "We're sorry for the disruption, and thank you for bearing with us while we fix it.",
-            "",
-            "The WorldStreet team",
-          ].join("\n"),
-        };
-      }
       return {
         to: u.email,
         subject: "Important: some of your bets have been reversed",
@@ -667,106 +636,4 @@ export async function notifyReversals(params: {
   const emailedTo = new Set(sendable.filter((_, i) => results[i]).map(([id]) => id));
   params.log.warn({ emails: results.filter(Boolean).length, customers: byUser.size }, "reversal emails sent");
   return { ...base, emailed: emailedTo.size, dryRun: false };
-}
-
-/* ---------------- correcting the mistaken refund email ---------------- */
-
-export interface RefundCorrection {
-  /** Customers wrongly told their reversed bets were refunded, not yet corrected. */
-  customers: number;
-  /** Of those, still below zero — the email says what they owed is waived, so clear it first. */
-  owing: number;
-  emailed: number;
-  mailConfigured: boolean;
-  dryRun: boolean;
-}
-
-/**
- * Put right the paused-topic refund email that went to customers whose
- * bets had been reversed: the refund report read their reversed bets
- * (voided, like a refund) as refunds, so they were told "your full stake
- * is back — use it right away". One apology each, once: what really
- * happened, that any balance below zero has been waived, and their
- * balance now. Refused while any of them is still below zero, since the
- * email tells them that's been waived (clear it first: clearDebts).
- */
-export async function correctRefundEmails(params: {
-  dryRun: boolean;
-  log: FastifyBaseLogger;
-}): Promise<RefundCorrection> {
-  const wrong = (await reversedBets()).filter(wronglyCalledRefunded);
-  const byUser = new Map<string, Reversed[]>();
-  for (const b of wrong) byUser.set(b.authUserId, [...(byUser.get(b.authUserId) ?? []), b]);
-  const ids = [...byUser.keys()];
-  const [users, accounts, writeOffs] = await Promise.all([
-    User.find({ authUserId: { $in: ids } }, { authUserId: 1, username: 1, email: 1 }).lean(),
-    NairaAccount.find({ authUserId: { $in: ids } }, { authUserId: 1, balanceKobo: 1 }).lean(),
-    LedgerEntry.find({ type: "debt_writeoff", authUserId: { $in: ids } }, { authUserId: 1, amountKobo: 1 }).lean(),
-  ]);
-  const balanceById = new Map(accounts.map((a) => [a.authUserId, a.balanceKobo]));
-  const waivedById = new Map<string, number>();
-  for (const w of writeOffs) waivedById.set(w.authUserId, (waivedById.get(w.authUserId) ?? 0) + w.amountKobo);
-  const owing = ids.filter((id) => (balanceById.get(id) ?? 0) < 0).length;
-  const base = { customers: byUser.size, owing, mailConfigured: isCustomerMailConfigured() };
-  if (params.dryRun || byUser.size === 0) return { ...base, emailed: 0, dryRun: params.dryRun };
-  if (owing > 0) {
-    throw new ApiError(
-      409,
-      `${owing} of these customers ${owing === 1 ? "is" : "are"} still below zero — clear what's owed first, since this email says it's waived`,
-      "DEBTS_NOT_CLEARED",
-    );
-  }
-
-  const naira = (kobo: number) =>
-    `${kobo < 0 ? "−" : ""}₦${(Math.abs(kobo) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-  // when the wrong email went, in the customers' own time: "21 October at 10:21 AM"
-  const sentAt = (bets: Reversed[]) => {
-    const at = new Date(Math.min(...bets.map((b) => b.refundNotifiedAt!.getTime())));
-    const day = at.toLocaleDateString("en-GB", { timeZone: "Africa/Lagos", day: "numeric", month: "long" });
-    const time = at.toLocaleTimeString("en-US", { timeZone: "Africa/Lagos", hour: "numeric", minute: "2-digit" });
-    return `${day} at ${time}`;
-  };
-  const recipients = users.filter((u) => u.email);
-  const results = await sendCustomerEmails(
-    params.log,
-    recipients.map((u) => {
-      const bets = byUser.get(u.authUserId)!;
-      const waived = waivedById.get(u.authUserId) ?? 0;
-      const markets = [...new Set(bets.map((b) => b.eventTitle))];
-      const title = bets.length > 1 ? "Your bets have been refunded" : "Your bet has been refunded";
-      return {
-        to: u.email,
-        subject: "Correction: please ignore our email about refunded bets",
-        text: [
-          `Hi ${u.username},`,
-          "",
-          `On ${sentAt(bets)}, we sent you an email titled "${title}". That email was sent by mistake, and we're sorry for the confusion it caused.`,
-          "",
-          `Your bets on ${markets.slice(0, 3).join("; ")}${markets.length > 3 ? ` and ${markets.length - 3} other markets` : ""} were reversed, as our earlier email explained: your stakes on them were returned and any payouts on them were taken back. They were not refunded as open bets.`,
-          ...(waived > 0
-            ? [
-                "",
-                `Because some of those payouts had already been used, your balance went below zero. We've waived that: the ${naira(waived)} you owed has been cleared, and you don't owe us anything.`,
-              ]
-            : []),
-          "",
-          `Your balance now: ${naira(balanceById.get(u.authUserId) ?? 0)}`,
-          "",
-          "If you have any questions, contact us from the Support page on WorldStreet Predict.",
-          "",
-          "Again, we're sorry for the mix-up, and thank you for your patience.",
-          "",
-          "The WorldStreet team",
-        ].join("\n"),
-      };
-    }),
-  );
-
-  const corrected = recipients.filter((_, i) => results[i]).flatMap((u) => byUser.get(u.authUserId)!.map((b) => b._id));
-  if (corrected.length > 0) {
-    await Position.updateMany({ _id: { $in: corrected } }, { $set: { refundCorrectedAt: new Date() } });
-  }
-  const emailed = results.filter(Boolean).length;
-  params.log.warn({ emailed, customers: byUser.size }, "refund-email corrections sent");
-  return { ...base, emailed, dryRun: false };
 }

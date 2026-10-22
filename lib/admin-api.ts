@@ -549,8 +549,6 @@ export interface RecoveryReport {
   mailConfigured: boolean;
   /** Newest first; absent on an API older than reasons. */
   incidents?: RecoveryIncident[];
-  /** Customers wrongly emailed that their reversed bets were refunded. */
-  refundCorrection?: { waiting: number; corrected: number };
   customers: RecoveryCustomer[];
 }
 
@@ -629,19 +627,6 @@ export interface DebtClearing {
 /** Bring every reversal customer below zero back to zero; `dryRun` only counts. */
 export const clearDebts = (dryRun: boolean) =>
   adminPost<DebtClearing>("/v1/admin/recovery/clear-debts", { dryRun });
-
-export interface RefundCorrection {
-  customers: number;
-  /** Still below zero — the email says it's waived, so the send waits for them. */
-  owing: number;
-  emailed: number;
-  mailConfigured: boolean;
-  dryRun: boolean;
-}
-
-/** The apology for the refund email reversed customers got by mistake; `dryRun` only counts. */
-export const correctRefundEmails = (dryRun: boolean) =>
-  adminPost<RefundCorrection>("/v1/admin/recovery/correct-refund-email", { dryRun });
 
 /* ------------------------------------------------------------------ */
 /* Worldstreet's own markets                                           */

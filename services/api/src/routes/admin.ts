@@ -27,7 +27,6 @@ import {
 import { getTopicBets } from "../trading/topic-bets.js";
 import {
   clearDebts,
-  correctRefundEmails,
   getRecovery,
   notifyReversals,
   openBetsMatching,
@@ -493,20 +492,6 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
         success: true,
         data: await clearDebts({ dryRun: request.body.dryRun, actor: user.id, log: request.log }),
       };
-    },
-  );
-
-  /**
-   * Apologize to the customers whose reversed bets the refund email
-   * wrongly called refunded — once each, saying any negative balance is
-   * waived (so it refuses while one isn't cleared). `dryRun` only counts.
-   */
-  app.post(
-    "/admin/recovery/correct-refund-email",
-    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
-    async (request) => {
-      await requireAdmin(request);
-      return { success: true, data: await correctRefundEmails({ dryRun: request.body.dryRun, log: request.log }) };
     },
   );
 

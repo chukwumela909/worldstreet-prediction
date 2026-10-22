@@ -258,8 +258,8 @@ check(
   ),
 );
 check(
-  "…and the first reversals keep their own email",
-  Boolean(toAda?.text.includes("glitch in our system") && toAda.subject.includes("15-minute crypto") && !toAda.text.includes("Why:")),
+  "…and the first reversals, kept without a reason, give the crypto glitch as theirs",
+  Boolean(toAda?.text.includes("Why: A glitch in our system") && toAda.subject === "Important: some of your bets have been reversed"),
 );
 check("…and nobody twice", ((await admin("POST", "/v1/admin/recovery/notify", { dryRun: false })).json() as { data: { emailed: number } }).data.emailed === 0);
 check(
@@ -276,20 +276,6 @@ check(
 );
 const gone = await admin("POST", "/v1/admin/notify-paused-refunds", { dryRun: true });
 check("…and the desk button that emailed them is gone (404)", gone.statusCode === 404);
-// before that fix, kemi and tunde were told their reversed bets were refunded
-await Position.updateMany(
-  { authUserId: { $in: ["u-spent", "u-lose"] }, reversedFrom: { $exists: true } },
-  { $set: { refundNotifiedAt: new Date() } },
-);
-const corrDry = (await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: true })).json() as {
-  data: { customers: number; owing: number };
-};
-check("the correction finds the two told wrongly, one still below zero", corrDry.data.customers === 2 && corrDry.data.owing === 1);
-const corrBlocked = await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: false });
-check(
-  "…and won't send while someone still owes (DEBTS_NOT_CLEARED)",
-  corrBlocked.statusCode === 409 && (corrBlocked.json() as { code: string }).code === "DEBTS_NOT_CLEARED",
-);
 
 /* ---------------- clearing what's owed ---------------- */
 console.log("clear debts");
@@ -315,37 +301,6 @@ check(
   "clearing again does nothing",
   ((await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false })).json() as { data: { customers: number } }).data.customers === 0,
 );
-
-/* ---------------- the correction, once debts are cleared ---------------- */
-console.log("correction");
-sent.length = 0;
-const corr = (await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: false })).json() as {
-  data: { emailed: number };
-};
-const kemiFix = sent.find((m) => m.to[0] === "kemi@example.test");
-const tundeFix = sent.find((m) => m.to[0] === "tunde@example.test");
-const owedNaira = `₦${(owedBefore / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-check("the correction goes to both", corr.data.emailed === 2 && sent.length === 2);
-check(
-  "…kemi's apologises and says what she owed is waived",
-  Boolean(
-    kemiFix?.subject.startsWith("Correction") && kemiFix.text.includes("sent by mistake") &&
-      kemiFix.text.includes(`the ${owedNaira} you owed has been cleared`) && kemiFix.text.includes("Your balance now: ₦0.00"),
-  ),
-);
-check(
-  "…saying when the wrong email went, in Lagos time",
-  /^On \d{1,2} [A-Z][a-z]+ at \d{1,2}:\d{2} (AM|PM), we sent you an email titled "Your bet has been refunded"/m.test(kemiFix?.text ?? ""),
-);
-check("…tunde's, who never owed, doesn't mention a debt", Boolean(tundeFix?.text.includes("sent by mistake") && !tundeFix.text.includes("waived")));
-check(
-  "…and nobody gets it twice",
-  ((await admin("POST", "/v1/admin/recovery/correct-refund-email", { dryRun: false })).json() as { data: { emailed: number } }).data
-    .emailed === 0,
-);
-const fixState = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { refundCorrection: { waiting: number; corrected: number } } })
-  .data.refundCorrection;
-check("the report shows them corrected", fixState.waiting === 0 && fixState.corrected === 2);
 
 /* ---------------- capped: take only what's there ---------------- */
 console.log("cap");

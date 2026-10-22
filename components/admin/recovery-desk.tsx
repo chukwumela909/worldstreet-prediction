@@ -11,7 +11,6 @@ import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { showToast } from "@/lib/toast-store";
 import {
   clearDebts,
-  correctRefundEmails,
   fetchBookSettings,
   fetchRecovery,
   notifyReversals,
@@ -20,7 +19,6 @@ import {
   updateBookSettings,
   useAdminResource,
   type DebtClearing,
-  type RefundCorrection,
   type RecoveryIncident,
   type RecoveryReport,
   type ReversalNotice,
@@ -162,17 +160,6 @@ export function RecoveryDesk() {
           onDone={reload}
         />
       )}
-      {report?.refundCorrection &&
-        (report.refundCorrection.waiting > 0 || report.refundCorrection.corrected > 0) && (
-          <CorrectionStep
-            waiting={report.refundCorrection.waiting}
-            corrected={report.refundCorrection.corrected}
-            owedKobo={report.totals.owedKobo}
-            mailConfigured={report.mailConfigured}
-            money={money}
-            onDone={reload}
-          />
-        )}
       {report && report.customers.length > 0 && <CustomersCard report={report} money={money} />}
     </div>
   );
@@ -636,124 +623,6 @@ function DebtStep({
             ? "Checking…"
             : `Clear ${money.format(owedKobo)} owed by ${owing} customer${owing === 1 ? "" : "s"}…`}
         </button>
-      )}
-      {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}
-    </section>
-  );
-}
-
-/* ---------- putting right the refund email ---------- */
-
-/**
- * The paused-markets refund email once went to customers whose bets had
- * been reversed, telling them their stake was back to spend. This sends
- * each of them one apology — what really happened, that any balance below
- * zero is waived, and their balance now — and waits until nobody affected
- * is still below zero, since the email says so.
- */
-function CorrectionStep({
-  waiting,
-  corrected,
-  owedKobo,
-  mailConfigured,
-  money,
-  onDone,
-}: {
-  waiting: number;
-  corrected: number;
-  owedKobo: number;
-  mailConfigured: boolean;
-  money: AdminMoney;
-  onDone: () => void;
-}) {
-  const [preview, setPreview] = useState<RefundCorrection | null>(null);
-  const [busy, setBusy] = useState<"preview" | "send" | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const go = async (dryRun: boolean) => {
-    setBusy(dryRun ? "preview" : "send");
-    setError(null);
-    try {
-      const result = await correctRefundEmails(dryRun);
-      if (dryRun) setPreview(result);
-      else {
-        setPreview(null);
-        showToast(
-          `Correction sent to ${result.emailed} customer${result.emailed === 1 ? "" : "s"}`,
-          result.emailed > 0 ? "success" : "error",
-        );
-        onDone();
-      }
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const blocked = owedKobo > 0;
-  return (
-    <section className={`mt-4 rounded-xl border p-4 shadow-card sm:p-5 ${waiting > 0 ? FLAG_TONE.caution.banner : "border-border bg-surface"}`}>
-      <h2 className="text-lg font-semibold">Correct the mistaken refund email</h2>
-      <p className="mt-0.5 text-sm text-secondary">
-        Customers whose bets were reversed were also sent &ldquo;Your bets have been refunded&rdquo;
-        by mistake. This sends each of them one apology: what really happened to their bets, that
-        any balance below zero has been waived, and their balance now.
-      </p>
-      {waiting === 0 ? (
-        <p className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-yes">
-          <Check className="size-4" aria-hidden />
-          All {corrected} customer{corrected === 1 ? " has" : "s have"} had the correction.
-        </p>
-      ) : (
-        <>
-          {blocked && (
-            <p className="mt-3 rounded-md bg-warning-tint px-3 py-2 text-sm font-semibold text-warning">
-              Clear what&rsquo;s owed first ({money.format(owedKobo)}, step 3) — this email tells them
-              their negative balance is waived.
-            </p>
-          )}
-          {!mailConfigured && (
-            <p className="mt-3 rounded-md bg-warning-tint px-3 py-2 text-sm font-semibold text-warning">
-              Customer email isn&rsquo;t set up on the API, so nothing can be sent yet.
-            </p>
-          )}
-          {preview ? (
-            <div className="mt-3 rounded-md bg-element-2 px-3 py-3 text-sm">
-              <p className="font-semibold">
-                {preview.customers} customer{preview.customers === 1 ? "" : "s"} will get the apology.
-              </p>
-              <div className="mt-2 flex gap-2">
-                <button
-                  type="button"
-                  onClick={() => go(false)}
-                  disabled={busy !== null || blocked || preview.owing > 0 || !mailConfigured}
-                  className="pressable flex h-9 items-center gap-1.5 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
-                >
-                  <Mail className="size-4" aria-hidden />
-                  {busy === "send" ? "Sending…" : `Send ${preview.customers} email${preview.customers === 1 ? "" : "s"}`}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setPreview(null)}
-                  className="h-9 rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          ) : (
-            <button
-              type="button"
-              onClick={() => go(true)}
-              disabled={busy !== null}
-              className="mt-3 flex h-9 items-center gap-1.5 rounded-sm border border-border bg-surface px-4 text-sm font-semibold hover:border-border-hover disabled:opacity-40"
-            >
-              <Mail className="size-4" aria-hidden />
-              {busy === "preview" ? "Checking…" : `Apologise to ${waiting} customer${waiting === 1 ? "" : "s"}…`}
-            </button>
-          )}
-        </>
       )}
       {error && <p className="mt-3 text-sm font-semibold text-no">{error}</p>}
     </section>
