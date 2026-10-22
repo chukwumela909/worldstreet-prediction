@@ -1,8 +1,9 @@
 import { randomBytes } from "node:crypto";
-import type { FastifyPluginAsync } from "fastify";
+import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { requireAdmin } from "../admin-auth.js";
+import { sendAlert } from "../alerts.js";
 import { authenticate } from "../auth.js";
 import { isCustomerMailConfigured, sendCustomerEmails } from "../customer-mail.js";
 import { ApiError } from "../errors.js";
@@ -21,6 +22,11 @@ import { NairaAccount, Position } from "../trading/models.js";
  * thread there; the desk reads every request under Admin → Support,
  * replies — each reply is emailed to the customer as well — and closes it.
  * A customer writing again reopens a closed request.
+ *
+ * The admins are emailed (the alert list, ALERT_EMAIL_TO) for every new
+ * request, and when a customer writes again on one that had been answered
+ * or closed — the request coming back to us. More messages on a request
+ * that's already waiting don't email again: the inbox shows it waiting.
  *
  * Text only, stored as written and rendered as text on both sides. A
  * customer may have a handful of requests waiting at once, so a stuck
@@ -92,9 +98,38 @@ function forDesk(t: TicketDoc) {
 
 const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
+const CATEGORY_LABEL: Record<(typeof SUPPORT_CATEGORIES)[number], string> = {
+  money: "Deposits & withdrawals",
+  bets: "A bet or market",
+  account: "My account",
+  other: "Something else",
+};
+
+/** Tell the admins a request needs them. Best-effort: a failed alert never fails the customer's send. */
+function alertDesk(
+  log: FastifyBaseLogger,
+  subject: string,
+  t: { ref: string; username: string; email: string; category: (typeof SUPPORT_CATEGORIES)[number] },
+  message: string,
+): Promise<unknown> {
+  return sendAlert(
+    log,
+    subject,
+    {
+      request: t.ref,
+      from: `@${t.username}${t.email ? ` (${t.email})` : ""}`,
+      about: CATEGORY_LABEL[t.category],
+      message: message.length > 1500 ? `${message.slice(0, 1500)}…` : message,
+    },
+    undefined,
+    "Reply in the admin desk: Admin → Support.",
+  ).catch((err: unknown) => log.error({ err }, "support alert failed"));
+}
+
 /*
  * The customer's side as plain functions — what the routes run after
  * sign-in, exported so the smoke tests can drive them without Clerk.
+ * Given a logger, they also alert the desk.
  */
 
 export async function listMyTickets(authUserId: string) {
@@ -108,6 +143,7 @@ export async function listMyTickets(authUserId: string) {
 export async function openTicket(
   customer: { authUserId: string; email: string; username: string },
   body: z.infer<typeof createBody>,
+  log?: FastifyBaseLogger,
 ) {
   const waiting = await SupportTicket.countDocuments({
     authUserId: customer.authUserId,
@@ -133,6 +169,14 @@ export async function openTicket(
   for (let attempt = 0; ; attempt++) {
     try {
       const ticket = await SupportTicket.create({ ...fields, ref: newRef() });
+      if (log) {
+        await alertDesk(
+          log,
+          `New support request ${ticket.ref}: ${body.subject}`,
+          { ...customer, ref: ticket.ref, category: body.category },
+          body.message,
+        );
+      }
       return forCustomer(ticket.toObject());
     } catch (err) {
       const dup = err && typeof err === "object" && "code" in err && err.code === 11000;
@@ -141,7 +185,9 @@ export async function openTicket(
   }
 }
 
-export async function writeAgain(authUserId: string, ref: string, message: string) {
+export async function writeAgain(authUserId: string, ref: string, message: string, log?: FastifyBaseLogger) {
+  // whether it was already waiting on us decides if the desk hears about it
+  const before = await SupportTicket.findOne({ ref, authUserId }, { status: 1 }).lean();
   const at = new Date();
   const ticket = await SupportTicket.findOneAndUpdate(
     { ref, authUserId, [`messages.${MAX_MESSAGES - 1}`]: { $exists: false } },
@@ -156,6 +202,14 @@ export async function writeAgain(authUserId: string, ref: string, message: strin
       throw new ApiError(404, "No such request", "TICKET_NOT_FOUND");
     }
     throw new ApiError(409, "This request is full — open a new one", "TICKET_FULL");
+  }
+  if (log && before && before.status !== "open") {
+    await alertDesk(
+      log,
+      `Customer wrote again on ${ticket.ref}: ${ticket.subject}`,
+      { ref: ticket.ref, username: ticket.username ?? "", email: ticket.email ?? "", category: ticket.category },
+      message,
+    );
   }
   return forCustomer(ticket);
 }
@@ -179,6 +233,7 @@ export const supportRoutes: FastifyPluginAsync = async (rawApp) => {
       const ticket = await openTicket(
         { authUserId: user.authUserId, email: user.email, username: user.dbUser.username },
         request.body,
+        request.log,
       );
       request.log.info({ ref: ticket.ref }, "support request opened");
       return { success: true, data: { ticket } };
@@ -196,7 +251,7 @@ export const supportRoutes: FastifyPluginAsync = async (rawApp) => {
       const { authUserId } = await authenticate(request);
       return {
         success: true,
-        data: { ticket: await writeAgain(authUserId, request.params.ref, request.body.message) },
+        data: { ticket: await writeAgain(authUserId, request.params.ref, request.body.message, request.log) },
       };
     },
   );

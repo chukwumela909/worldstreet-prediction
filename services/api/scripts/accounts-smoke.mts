@@ -17,6 +17,7 @@ process.env.SETTLEMENT_POLL_SECONDS = "0";
 process.env.ADMIN_ACCESS_KEYS = `josh:${KEY}`;
 process.env.RESEND_API_KEY = "re_test";
 process.env.ALERT_EMAIL_FROM = "WorldStreet <alerts@worldstreetgold.test>";
+process.env.ALERT_EMAIL_TO = "desk@worldstreetgold.test";
 
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
@@ -263,6 +264,35 @@ const found = ((await admin("GET", `/v1/admin/support?status=all&search=${encode
 }).data.tickets;
 check("search finds a request by its subject", found.length === 1 && found[0]!.ref === first.ref);
 check("a closed request frees a slot for a new one", (await codeOf(() => openTicket(ada, { category: "account", subject: "Name change", message: "Can I change my display name?" }))) === "ok");
+
+/* ---------------- the desk is emailed ---------------- */
+console.log("support alerts");
+const deskMail = () => sent.filter((m) => m.to.includes("desk@worldstreetgold.test"));
+const beforeAlerts = deskMail().length;
+const fresh = await openTicket(
+  ada,
+  { category: "money", subject: "Withdrawal keeps failing", message: "I can't convert my credit to dollars since morning." },
+  log,
+);
+const newAlert = deskMail()[beforeAlerts];
+check(
+  "a new request emails the admins, with who, what and the message",
+  deskMail().length === beforeAlerts + 1 &&
+    newAlert!.subject === `[Worldstreet Local] New support request ${fresh.ref}: Withdrawal keeps failing` &&
+    newAlert!.text.includes("@ada (ada@example.test)") && newAlert!.text.includes("Deposits & withdrawals") &&
+    newAlert!.text.includes("since morning") && newAlert!.text.includes("Admin → Support"),
+);
+await writeAgain("u-ada", fresh.ref, "Still failing, please help.", log);
+check("more messages while it's still waiting don't email again", deskMail().length === beforeAlerts + 1);
+await admin("POST", `/v1/admin/support/${fresh.ref}/reply`, { message: "We're on it.", close: false });
+await writeAgain("u-ada", fresh.ref, "Thanks — any update?", log);
+const backAlert = deskMail()[beforeAlerts + 1];
+check(
+  "a reply on an answered request emails them again",
+  deskMail().length === beforeAlerts + 2 && backAlert!.subject.includes(`Customer wrote again on ${fresh.ref}`) &&
+    backAlert!.text.includes("any update?"),
+);
+check("customers never get these", !deskMail().some((m) => m.to.includes("ada@example.test")));
 
 const anon = await app.inject({ method: "GET", url: "/v1/support/tickets" });
 const anonPost = await app.inject({

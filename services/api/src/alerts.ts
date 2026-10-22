@@ -46,6 +46,8 @@ export async function sendAlert(
    * `overdue:<eventId>`. Omit to deliver unconditionally.
    */
   throttleKey?: string,
+  /** The email's last line: where on the desk to deal with it. */
+  footer = "Open the settlement queue to clear it: /admin",
 ): Promise<AlertDelivery> {
   log.warn({ alert: subject, ...detail }, "settlement alert");
 
@@ -65,7 +67,7 @@ export async function sendAlert(
       : detail;
 
   const [email, webhook] = await Promise.all([
-    emailAlert(log, subject, body),
+    emailAlert(log, subject, body, footer),
     webhookAlert(log, subject, body),
   ]);
   return { throttled: false, ...email, webhook };
@@ -126,6 +128,7 @@ async function emailAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
+  footer: string,
 ): Promise<{ email: AlertDelivery["email"]; emailError?: string }> {
   if (!isEmailConfigured()) return { email: "not_configured" };
   try {
@@ -139,7 +142,7 @@ async function emailAlert(
         from: config.ALERT_EMAIL_FROM,
         to: config.alertEmailTo,
         subject: `[Worldstreet Local] ${subject}`,
-        text: emailBody(subject, detail),
+        text: emailBody(subject, detail, footer),
       }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
@@ -171,17 +174,11 @@ function resendMessage(status: number, body: string): string {
 }
 
 /** Plain text — these are read on a phone at an awkward hour. */
-function emailBody(subject: string, detail: Record<string, unknown>): string {
+function emailBody(subject: string, detail: Record<string, unknown>, footer: string): string {
   const lines = Object.entries(detail).map(
     ([key, value]) => `${key}: ${format(value)}`,
   );
-  return [
-    subject,
-    "",
-    ...lines,
-    "",
-    "Open the settlement queue to clear it: /admin",
-  ].join("\n");
+  return [subject, "", ...lines, "", footer].join("\n");
 }
 
 function format(value: unknown): string {

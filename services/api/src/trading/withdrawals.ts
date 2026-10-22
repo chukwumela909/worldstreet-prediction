@@ -114,6 +114,7 @@ export async function holdWithdrawal(p: {
       wallet: `${p.code}: ${p.message}`,
     },
     "withdrawal-unconfirmed",
+    "Settle it in Admin → Abuse watch → Withdrawals to confirm.",
   ).catch((err: unknown) => p.log.error({ err }, "unconfirmed-withdrawal alert failed"));
 }
 
