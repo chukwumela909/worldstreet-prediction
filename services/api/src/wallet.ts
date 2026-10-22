@@ -8,9 +8,16 @@ import { config } from "./config.js";
  * as xtreme-livestream and worldshop-server.
  */
 
+/**
+ * A failure is `definite` when the wallet answered and said no (a 4xx):
+ * nothing happened on its side. Anything else — no answer in time, a
+ * network error, a 5xx or a body that isn't the wallet's — leaves it
+ * unknown whether the request went through, and money must not be put
+ * back on a guess (trading/withdrawals.ts).
+ */
 export type WalletResult<T> =
   | { ok: true; data: T }
-  | { ok: false; code: string; message: string };
+  | { ok: false; code: string; message: string; definite: boolean; status?: number };
 
 export type WalletCharge = {
   id: string;
@@ -45,7 +52,7 @@ async function walletCall<T>(
   opts: { body?: unknown; idempotencyKey?: string } = {},
 ): Promise<WalletResult<T>> {
   if (!isWalletConfigured()) {
-    return { ok: false, code: "NOT_CONFIGURED", message: "Wallet is not configured" };
+    return { ok: false, code: "NOT_CONFIGURED", message: "Wallet is not configured", definite: true };
   }
 
   const headers: Record<string, string> = {
@@ -55,6 +62,7 @@ async function walletCall<T>(
   if (opts.idempotencyKey) headers["Idempotency-Key"] = opts.idempotencyKey;
 
   let json: (Record<string, unknown> & { ok?: boolean; code?: string; error?: string }) | null;
+  let status: number;
   try {
     const init: RequestInit = {
       method,
@@ -63,9 +71,10 @@ async function walletCall<T>(
     };
     if (opts.body != null) init.body = JSON.stringify(opts.body);
     const res = await fetch(`${config.WALLET_API_URL.replace(/\/+$/, "")}${path}`, init);
+    status = res.status;
     json = (await res.json().catch(() => null)) as typeof json;
   } catch (err) {
-    return { ok: false, code: "UNREACHABLE", message: (err as Error).message };
+    return { ok: false, code: "UNREACHABLE", message: (err as Error).message, definite: false };
   }
 
   if (!json || json.ok !== true) {
@@ -73,6 +82,9 @@ async function walletCall<T>(
       ok: false,
       code: json?.code || "UNKNOWN",
       message: json?.error || "Wallet service request failed",
+      // only the wallet's own refusal says nothing happened
+      definite: Boolean(json) && status >= 400 && status < 500,
+      status,
     };
   }
   return { ok: true, data: json as unknown as T };

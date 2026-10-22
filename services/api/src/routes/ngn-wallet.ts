@@ -4,12 +4,8 @@ import { z } from "zod";
 import { assertNotSuspended } from "../accounts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
-import {
-  chargeWallet,
-  creditWallet,
-  isWalletConfigured,
-  refundWalletCharge,
-} from "../wallet.js";
+import { holdWithdrawal, returnWithdrawal, sendWithdrawal } from "../trading/withdrawals.js";
+import { chargeWallet, isWalletConfigured, refundWalletCharge } from "../wallet.js";
 import {
   creditNaira,
   debitNaira,
@@ -205,26 +201,17 @@ export async function convertNaira(authUserId: string, body: ConvertBody, log: F
     metadata: { amountUsdMinor },
   });
 
-  const credit = await creditWallet({
-    clerkUserId: authUserId,
-    amountUsdMinor,
-    description: `Naira wallet withdrawal (₦${(amountMinor / 100).toFixed(2)})`,
-    idempotencyKey: refKey,
-    metadata: { kind: "ngn_withdrawal", rate: fx.ngnToUsd },
-  });
-  if (!credit.ok) {
+  // the wallet adds the dollars; a lost answer is asked again under the
+  // same reference, and never refunded on a guess (trading/withdrawals.ts)
+  const withdrawal = { authUserId, refKey, amountKobo: amountMinor, amountUsdMinor, rate: fx.ngnToUsd };
+  const sent = await sendWithdrawal({ ...withdrawal, log });
+  if (sent.outcome === "refused") {
     log.error(
-      { code: credit.code, message: credit.message, refKey },
-      "central wallet credit failed during NGN withdrawal",
+      { code: sent.code, message: sent.message, refKey },
+      "central wallet refused the credit during NGN withdrawal",
     );
-    // central side failed — give the naira back
-    await creditNaira({
-      authUserId,
-      amountKobo: amountMinor,
-      type: "refund",
-      refKey: `${refKey}:reversal`,
-      description: "Withdrawal failed — naira returned",
-    }).catch((repairErr) =>
+    // the wallet said no, so nothing moved there — give the naira back
+    await returnWithdrawal(withdrawal).catch((repairErr) =>
       log.error(
         { err: repairErr, refKey },
         "withdrawal compensation failed — manual repair needed",
@@ -234,6 +221,15 @@ export async function convertNaira(authUserId: string, body: ConvertBody, log: F
       503,
       "Couldn't add the dollars to your WorldStreet wallet — your credit was returned",
       "WALLET_UNAVAILABLE",
+    );
+  }
+  if (sent.outcome === "unknown") {
+    // the dollars may have arrived: hold the credit for the desk to settle
+    await holdWithdrawal({ ...withdrawal, code: sent.code, message: sent.message, log });
+    throw new ApiError(
+      502,
+      "We couldn't confirm your withdrawal with your WorldStreet wallet. Check your dollar balance shortly — if the dollars haven't arrived, contact support and we'll return your credit.",
+      "WITHDRAWAL_UNCONFIRMED",
     );
   }
 

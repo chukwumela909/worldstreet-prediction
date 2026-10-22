@@ -304,6 +304,43 @@ export const ReversedConversion: Model<IReversedConversion> =
   (mongoose.models.ReversedConversion as Model<IReversedConversion>) ??
   mongoose.model<IReversedConversion>("ReversedConversion", reversedConversionSchema);
 
+/**
+ * A credit → dollars withdrawal the wallet never confirmed: it didn't
+ * answer, or answered with something that isn't its own refusal, so the
+ * dollars may or may not have arrived. The credit stays taken until the
+ * desk settles it (trading/withdrawals.ts) — asking the wallet again under
+ * the same reference, or marking it paid or returned by hand — because
+ * putting it back on a guess pays twice when the dollars did arrive.
+ */
+export const WITHDRAWAL_CHECK_STATUSES = ["unconfirmed", "checking", "paid", "returned"] as const;
+
+const withdrawalCheckSchema = new Schema(
+  {
+    /** The withdrawal's ledger refKey — also its reference at the wallet. */
+    refKey: { type: String, required: true, unique: true },
+    authUserId: { type: String, required: true, index: true },
+    amountKobo: { type: Number, required: true },
+    amountUsdMinor: { type: Number, required: true },
+    /** The ₦/$ rate it was priced at. */
+    rate: { type: Number, required: true },
+    status: { type: String, enum: WITHDRAWAL_CHECK_STATUSES, default: "unconfirmed", index: true },
+    /** What the wallet last said, for the desk. */
+    lastCode: { type: String, default: "" },
+    lastMessage: { type: String, default: "" },
+    resolvedBy: { type: String, default: "" },
+    resolvedAt: { type: Date },
+  },
+  { timestamps: true },
+);
+
+export type IWithdrawalCheck = InferSchemaType<typeof withdrawalCheckSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const WithdrawalCheck: Model<IWithdrawalCheck> =
+  (mongoose.models.WithdrawalCheck as Model<IWithdrawalCheck>) ??
+  mongoose.model<IWithdrawalCheck>("WithdrawalCheck", withdrawalCheckSchema);
+
 export const SETTLEMENT_SOURCES = [
   "bayse-auto",
   "worldstreet-auto",
@@ -484,6 +521,7 @@ export async function ensureTradingIndexes(): Promise<void> {
     BookSettingsDoc.init(),
     MarketLock.init(),
     ReversedConversion.init(),
+    WithdrawalCheck.init(),
     Settlement.init(),
     WorldstreetEvent.init(),
     WorldstreetMarket.init(),
