@@ -1403,3 +1403,50 @@ export async function fetchAbuseWatch(days: number): Promise<AbuseWatch> {
 /** Settle a withdrawal the wallet never confirmed. */
 export const resolveWithdrawal = (refKey: string, action: "retry" | "paid" | "return") =>
   adminPost<{ status: string; message: string }>("/v1/admin/withdrawal-checks/resolve", { refKey, action });
+
+/* ------------------------------------------------------------------ */
+/* Alerts                                                              */
+/* ------------------------------------------------------------------ */
+
+export type AlertKind = "risk" | "settlement" | "withdrawal" | "test" | "other";
+
+/** One condition the API has alerted on, with every time it fired. */
+export interface AlertItem {
+  id: string;
+  kind: AlertKind;
+  subject: string;
+  /** The latest firing's details, as emailed. */
+  detail: Record<string, unknown>;
+  /** The market it's about, when there's one — what the fix acts on. */
+  eventId: string;
+  marketId: string;
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  status: "open" | "resolved";
+  /** Fired again in the last few minutes — still happening. */
+  active: boolean;
+  resolvedBy: string;
+  resolvedAt: string | null;
+  note: string;
+}
+
+export interface AlertsView {
+  alerts: AlertItem[];
+  counts: { open: number; resolved: number };
+  /** Waiting on the desk elsewhere. */
+  waiting: { support: number; withdrawals: number };
+}
+
+export async function fetchAlerts(status: "open" | "resolved" | "all"): Promise<AlertsView> {
+  try {
+    const res = await apiFetch<{ data: AlertsView }>(`/v1/admin/alerts?status=${status}`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/** Mark an alert settled; it opens again if the condition fires again. */
+export const settleAlert = (id: string, note: string) =>
+  adminPost<{ id: string }>("/v1/admin/alerts/resolve", { id, note });

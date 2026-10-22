@@ -57,6 +57,7 @@ export interface MarketRisk {
 /** A market close to its loss limit — the desk's early warning. */
 export interface LimitFlag {
   marketId: string;
+  eventId: string;
   marketTitle: string;
   eventTitle: string;
   eventSlug: string;
@@ -81,6 +82,7 @@ export interface BookRisk {
   /** The single market carrying the most downside, if any is negative. */
   worstMarket: {
     marketId: string;
+    eventId: string;
     marketTitle: string;
     eventTitle: string;
     eventSlug: string;
@@ -196,6 +198,7 @@ export async function getBookRisk(): Promise<BookRisk> {
     .sort((a, b) => b.share - a.share)
     .map(({ m, share }) => ({
       marketId: m.marketId,
+      eventId: m.eventId,
       marketTitle: m.marketTitle,
       eventTitle: m.eventTitle,
       eventSlug: m.eventSlug,
@@ -216,6 +219,7 @@ export async function getBookRisk(): Promise<BookRisk> {
       worst && worst.worstCaseKobo < 0
         ? {
             marketId: worst.marketId,
+            eventId: worst.eventId,
             marketTitle: worst.marketTitle,
             eventTitle: worst.eventTitle,
             eventSlug: worst.eventSlug,

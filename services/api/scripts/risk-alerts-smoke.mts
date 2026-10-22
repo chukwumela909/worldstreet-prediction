@@ -19,7 +19,8 @@ const mongod = await MongoMemoryServer.create();
 await mongoose.connect(mongod.getUri(), { dbName: "test" });
 
 const { Position, ensureTradingIndexes } = await import("../src/trading/models.js");
-const { AlertState } = await import("../src/models.js");
+const { AlertRecord, AlertState } = await import("../src/models.js");
+const { listAlerts, resolveAlert, sendAlert } = await import("../src/alerts.js");
 const settings = await import("../src/trading/settings.js");
 const { getProfitAndLoss } = await import("../src/trading/pnl.js");
 const { checkRiskAlerts } = await import("../src/trading/risk-alerts.js");
@@ -146,6 +147,47 @@ const again = await AlertState.find().lean();
 check(
   "a repeat check is throttled, not re-sent",
   again.length === 3 && again.every((a) => a.suppressedCount === 1),
+);
+
+/* ---------------- the desk's record ---------------- */
+console.log("alert records");
+const records = await AlertRecord.find().lean();
+const critical = records.find((r) => r.key === "risk:limit:critical:m-critical");
+const book = records.find((r) => r.key === "risk:book-worst");
+check(
+  "every firing is kept on its condition's row, emailed or not (3 rows, seen twice each)",
+  records.length === 3 && records.every((r) => r.count === 2 && r.kind === "risk" && r.status === "open"),
+);
+check(
+  "a market alert knows its market, so the desk can act on it",
+  critical?.marketId === "m-critical" && critical.eventId === LOCAL,
+);
+check("the whole-book alert points at the market carrying the most downside", book?.marketId === "m-critical");
+
+const listed = await listAlerts("open");
+check(
+  "the list shows them open and still happening",
+  listed.counts.open === 3 && listed.alerts.every((a) => a.active),
+);
+await resolveAlert(String(critical!._id), "key:josh", "Repriced it");
+const afterResolve = await listAlerts("open");
+check("settling one takes it off the open list", afterResolve.counts.open === 2 && afterResolve.counts.resolved === 1);
+const twice = await resolveAlert(String(critical!._id), "key:josh", "").catch((err: { code?: string }) => err.code);
+check("…and it can't be settled twice (ALREADY_SETTLED)", twice === "ALREADY_SETTLED");
+await checkRiskAlerts(log);
+const back = await AlertRecord.findOne({ key: "risk:limit:critical:m-critical" }).lean();
+check(
+  "if the condition fires again it opens back up, keeping who settled it",
+  back?.status === "open" && back.count === 3 && back.resolvedBy === "key:josh" && back.note === "Repriced it",
+);
+
+await sendAlert(log, "New support request WS-TEST01: hi", {}, { kind: "support" });
+await sendAlert(log, "Test alert", {}, { kind: "test" });
+await sendAlert(log, "Test alert", {}, { kind: "test" });
+const kinds = (await AlertRecord.find().lean()).map((r) => r.kind);
+check(
+  "support requests aren't kept here (the inbox is their record); one-off alerts get a row each",
+  !kinds.includes("support" as never) && kinds.filter((k) => k === "test").length === 2,
 );
 
 await AlertState.deleteMany({});

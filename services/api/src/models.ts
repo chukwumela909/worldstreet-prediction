@@ -72,6 +72,46 @@ export const AlertState: Model<IAlertState> =
   (mongoose.models.AlertState as Model<IAlertState>) ??
   mongoose.model<IAlertState>("AlertState", alertStateSchema);
 
+/**
+ * Every alert the API raises, kept for the desk's Alerts tab (alerts.ts):
+ * one row per condition — the throttle key, e.g. one per market at its
+ * loss limit — counting each time it fires, whether or not that time was
+ * emailed. "Settled" by an admin once dealt with; a condition that fires
+ * again opens it back up, so a settled alert can't hide a live problem.
+ */
+export const ALERT_KINDS = ["risk", "settlement", "withdrawal", "test", "other"] as const;
+export type AlertKind = (typeof ALERT_KINDS)[number];
+
+const alertRecordSchema = new Schema(
+  {
+    key: { type: String, required: true, unique: true },
+    kind: { type: String, enum: ALERT_KINDS, required: true, index: true },
+    subject: { type: String, required: true },
+    /** The latest firing's details, as emailed. */
+    detail: { type: Schema.Types.Mixed, default: {} },
+    /** The market it's about, when there's one — what the desk's fix acts on. */
+    eventId: { type: String, default: "" },
+    marketId: { type: String, default: "" },
+    count: { type: Number, default: 0 },
+    firstAt: { type: Date, required: true },
+    lastAt: { type: Date, required: true, index: true },
+    status: { type: String, enum: ["open", "resolved"], default: "open", index: true },
+    /** The last time it was settled — kept when it comes back, so the desk sees it returned. */
+    resolvedBy: { type: String, default: "" },
+    resolvedAt: { type: Date },
+    note: { type: String, default: "" },
+  },
+  { timestamps: true },
+);
+
+export type IAlertRecord = InferSchemaType<typeof alertRecordSchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const AlertRecord: Model<IAlertRecord> =
+  (mongoose.models.AlertRecord as Model<IAlertRecord>) ??
+  mongoose.model<IAlertRecord>("AlertRecord", alertRecordSchema);
+
 /* ------------------------------------------------------------------ */
 /* Support requests                                                    */
 /* ------------------------------------------------------------------ */

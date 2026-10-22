@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { config } from "./config.js";
-import { AlertState } from "./models.js";
+import { ApiError } from "./errors.js";
+import { AlertRecord, AlertState, type AlertKind } from "./models.js";
 
 /**
  * Operational alerts for things the automated paths couldn't finish —
@@ -18,6 +20,11 @@ import { AlertState } from "./models.js";
  * market on every pass — once a minute by default — and mailing that
  * would bury the one alert that matters and get the sending domain
  * marked as spam. The log still records every occurrence.
+ *
+ * Every alert is also kept (AlertRecord) for the desk's Alerts tab, one
+ * row per condition counting each firing — emailed or not — so the desk
+ * can see what's still happening and mark it settled. Support requests
+ * aren't kept here: the Support inbox is their record.
  */
 
 const DELIVERY_TIMEOUT_MS = 5_000;
@@ -37,19 +44,30 @@ export interface AlertDelivery {
   webhook: "sent" | "failed" | "not_configured";
 }
 
-export async function sendAlert(
-  log: FastifyBaseLogger,
-  subject: string,
-  detail: Record<string, unknown>,
+export interface AlertOptions {
   /**
    * Identifies the ongoing condition, not this occurrence — e.g.
    * `overdue:<eventId>`. Omit to deliver unconditionally.
    */
-  throttleKey?: string,
+  throttleKey?: string;
   /** The email's last line: where on the desk to deal with it. */
-  footer = "Open the settlement queue to clear it: /admin",
+  footer?: string;
+  /** What it's about, for the Alerts tab; "support" isn't kept there. */
+  kind?: AlertKind | "support";
+  /** The market it's about, when there's one — what the desk's fix acts on. */
+  eventId?: string;
+  marketId?: string;
+}
+
+export async function sendAlert(
+  log: FastifyBaseLogger,
+  subject: string,
+  detail: Record<string, unknown>,
+  opts: AlertOptions = {},
 ): Promise<AlertDelivery> {
+  const { throttleKey, footer = "Open the settlement queue to clear it: /admin" } = opts;
   log.warn({ alert: subject, ...detail }, "settlement alert");
+  await recordAlert(log, subject, detail, opts);
 
   const decision = throttleKey
     ? await claimAlert(log, throttleKey, subject)
@@ -209,5 +227,120 @@ async function webhookAlert(
   } catch (err) {
     log.error({ err }, "alert webhook failed");
     return "failed";
+  }
+}
+
+/* ---------------- the desk's record ---------------- */
+
+/** Keep this firing on its condition's row, reopening it if it had been settled. */
+async function recordAlert(
+  log: FastifyBaseLogger,
+  subject: string,
+  detail: Record<string, unknown>,
+  opts: AlertOptions,
+): Promise<void> {
+  if (opts.kind === "support") return;
+  const kind = opts.kind ?? "other";
+  const now = new Date();
+  try {
+    await AlertRecord.updateOne(
+      // an unkeyed alert is a one-off: a row of its own
+      { key: opts.throttleKey ?? `${kind}:${randomUUID()}` },
+      {
+        $set: {
+          kind,
+          subject,
+          detail,
+          lastAt: now,
+          status: "open",
+          ...(opts.eventId ? { eventId: opts.eventId } : {}),
+          ...(opts.marketId ? { marketId: opts.marketId } : {}),
+        },
+        $setOnInsert: { firstAt: now },
+        $inc: { count: 1 },
+      },
+      { upsert: true },
+    );
+  } catch (err) {
+    // the record is for the desk; never let it stop the alert itself
+    log.error({ err, subject }, "could not record alert");
+  }
+}
+
+/** A condition that fired within this long is still happening. */
+const ACTIVE_MS = Math.max(5 * 60_000, config.SETTLEMENT_POLL_SECONDS * 3_000);
+
+export interface AlertView {
+  id: string;
+  kind: string;
+  subject: string;
+  detail: Record<string, unknown>;
+  eventId: string;
+  marketId: string;
+  count: number;
+  firstAt: string;
+  lastAt: string;
+  status: "open" | "resolved";
+  /** Fired again within the last few minutes — the condition still holds. */
+  active: boolean;
+  resolvedBy: string;
+  resolvedAt: string | null;
+  note: string;
+}
+
+export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
+  alerts: AlertView[];
+  counts: { open: number; resolved: number };
+}> {
+  const filter = status === "all" ? {} : { status };
+  const [rows, counts] = await Promise.all([
+    AlertRecord.find(filter).sort({ status: 1, lastAt: -1 }).limit(200).lean(),
+    AlertRecord.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
+  ]);
+  const now = Date.now();
+  // live money problems first: open, still happening, risk before the rest
+  const rank: Record<string, number> = { risk: 0, settlement: 1, withdrawal: 2, other: 3, test: 4 };
+  const alerts: AlertView[] = rows.map((r) => ({
+      id: String(r._id),
+      kind: r.kind,
+      subject: r.subject,
+      detail: (r.detail ?? {}) as Record<string, unknown>,
+      eventId: r.eventId ?? "",
+      marketId: r.marketId ?? "",
+      count: r.count ?? 0,
+      firstAt: r.firstAt.toISOString(),
+      lastAt: r.lastAt.toISOString(),
+      status: r.status as "open" | "resolved",
+      // only conditions the poller re-checks can be "still happening"
+      active: (r.kind === "risk" || r.kind === "settlement") && now - r.lastAt.getTime() < ACTIVE_MS,
+      resolvedBy: r.resolvedBy ?? "",
+      resolvedAt: r.resolvedAt?.toISOString() ?? null,
+      note: r.note ?? "",
+    }));
+  alerts.sort(
+    (a, b) =>
+      Number(a.status === "resolved") - Number(b.status === "resolved") ||
+      Number(b.active) - Number(a.active) ||
+      (rank[a.kind] ?? 3) - (rank[b.kind] ?? 3) ||
+      b.lastAt.localeCompare(a.lastAt),
+  );
+  return {
+    alerts,
+    counts: {
+      open: counts.find((c) => c._id === "open")?.n ?? 0,
+      resolved: counts.find((c) => c._id === "resolved")?.n ?? 0,
+    },
+  };
+}
+
+/** Mark an alert settled; it opens again on its own if the condition fires again. */
+export async function resolveAlert(id: string, actor: string, note: string): Promise<void> {
+  const res = await AlertRecord.updateOne(
+    { _id: id, status: "open" },
+    { $set: { status: "resolved", resolvedBy: actor, resolvedAt: new Date(), note } },
+  );
+  if (res.matchedCount === 0) {
+    if (!(await AlertRecord.exists({ _id: id }))) throw new ApiError(404, "No such alert", "NOT_FOUND");
+    throw new ApiError(409, "This alert is already settled", "ALREADY_SETTLED");
   }
 }

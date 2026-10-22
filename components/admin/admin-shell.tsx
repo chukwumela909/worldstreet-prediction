@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeftIcon as ArrowLeft,
   ArrowUturnLeftIcon as Recovery,
+  BellAlertIcon as Bell,
   BanknotesIcon as Coins,
   ChatBubbleLeftRightIcon as Support,
   ClipboardDocumentCheckIcon as Settled,
@@ -21,6 +22,7 @@ import { CurrencySwitch } from "./currency-switch";
 
 const NAV = [
   { href: "/admin", label: "Local book", icon: Coins },
+  { href: "/admin/alerts", label: "Alerts", icon: Bell },
   { href: "/admin/markets", label: "Markets", icon: PenSquare },
   { href: "/admin/traders", label: "Traders", icon: Users },
   { href: "/admin/settled", label: "Settled bets", icon: Settled },

@@ -4,7 +4,7 @@ import { z } from "zod";
 import { reinstateAccount, suspendAccount } from "../accounts.js";
 import { requireAdmin } from "../admin-auth.js";
 import { ApiError } from "../errors.js";
-import { User } from "../models.js";
+import { SupportTicket, User } from "../models.js";
 import { getFxQuote } from "../trading/fx.js";
 import { FxRate, LedgerEntry, Position, Settlement } from "../trading/models.js";
 import {
@@ -39,7 +39,8 @@ import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds } from "../trading/pause-refunds.js";
 import { getAbuseWatch } from "../trading/abuse.js";
 import { resolveWithdrawalCheck } from "../trading/withdrawals.js";
-import { sendAlert } from "../alerts.js";
+import { listAlerts, resolveAlert, sendAlert } from "../alerts.js";
+import { WithdrawalCheck } from "../trading/models.js";
 import { config } from "../config.js";
 
 /**
@@ -80,6 +81,14 @@ const tradersQuery = z.object({
     .enum(["true", "false", "1", "0"])
     .transform((v) => v === "true" || v === "1")
     .optional(),
+});
+
+const alertsQuery = z.object({
+  status: z.enum(["open", "resolved", "all"]).default("open"),
+});
+const resolveAlertBody = z.object({
+  id: z.string().regex(/^[0-9a-f]{24}$/, "Not an alert id"),
+  note: z.string().trim().max(500).default(""),
 });
 
 const abuseQuery = z.object({
@@ -273,6 +282,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           note: "Triggered from the admin desk to check alert delivery.",
           triggeredBy: user.label,
         },
+        { kind: "test" },
       );
       return {
         success: true,
@@ -693,6 +703,28 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       };
     },
   );
+
+  /**
+   * Alerts: every condition the API has alerted on (alerts.ts), open ones
+   * first, with what else is waiting on the desk — support requests and
+   * withdrawals the wallet never confirmed.
+   */
+  app.get("/admin/alerts", { schema: { querystring: alertsQuery } }, async (request) => {
+    await requireAdmin(request);
+    const [list, support, withdrawals] = await Promise.all([
+      listAlerts(request.query.status),
+      SupportTicket.countDocuments({ status: "open" }),
+      WithdrawalCheck.countDocuments({ status: "unconfirmed" }),
+    ]);
+    return { success: true, data: { ...list, waiting: { support, withdrawals } } };
+  });
+
+  /** Mark an alert settled, with an optional note; it reopens if it fires again. */
+  app.post("/admin/alerts/resolve", { schema: { body: resolveAlertBody } }, async (request) => {
+    const actor = await requireAdmin(request);
+    await resolveAlert(request.body.id, actor.label, request.body.note);
+    return { success: true, data: { id: request.body.id } };
+  });
 
   /**
    * Abuse watch: accounts beating the odds, buying near-certain sides,

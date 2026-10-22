@@ -121,8 +121,7 @@ function alertDesk(
       about: CATEGORY_LABEL[t.category],
       message: message.length > 1500 ? `${message.slice(0, 1500)}…` : message,
     },
-    undefined,
-    "Reply in the admin desk: Admin → Support.",
+    { kind: "support", footer: "Reply in the admin desk: Admin → Support." },
   ).catch((err: unknown) => log.error({ err }, "support alert failed"));
 }
 

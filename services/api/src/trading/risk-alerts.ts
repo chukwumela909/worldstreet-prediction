@@ -32,13 +32,12 @@ export async function checkRiskAlerts(log: FastifyBaseLogger): Promise<number> {
       critical ? "Market at its loss limit" : "Market nearing its loss limit",
       {
         market: `${flag.eventTitle} — ${flag.marketTitle}`,
-        marketId: flag.marketId,
         used: `${naira(flag.usedKobo)} of ${naira(flag.limitKobo)} (${Math.round(flag.share * 100)}%)`,
         whatToDo: critical
           ? "New bets that push it past the limit are already being refused. Reprice the market (our own markets) or raise Maximum loss per market in admin Settings."
           : "Reprice the market toward the side with less money on it (our own markets), or raise Maximum loss per market in admin Settings.",
       },
-      `risk:limit:${flag.level}:${flag.marketId}`,
+      { throttleKey: `risk:limit:${flag.level}:${flag.marketId}`, kind: "risk", eventId: flag.eventId, marketId: flag.marketId, footer: "Deal with it in the admin desk: Admin → Alerts." },
     );
     raised += 1;
   }
@@ -60,7 +59,13 @@ export async function checkRiskAlerts(log: FastifyBaseLogger): Promise<number> {
         whatToDo:
           "Check the risk desk in admin. Reprice our own markets where the money is one-sided, or lower stake limits in Settings.",
       },
-      "risk:book-worst",
+      {
+        throttleKey: "risk:book-worst",
+        kind: "risk",
+        // the fix starts with the market carrying the most downside
+        ...(risk.worstMarket ? { eventId: risk.worstMarket.eventId, marketId: risk.worstMarket.marketId } : {}),
+        footer: "Deal with it in the admin desk: Admin → Alerts.",
+      },
     );
     raised += 1;
   }

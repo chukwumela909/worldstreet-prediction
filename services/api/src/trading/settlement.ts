@@ -340,7 +340,7 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
               resolvedOutcome: market.resolvedOutcomeLabel,
               eventTitle: event.title,
             },
-            `unmatched:${market.id}`,
+            { throttleKey: `unmatched:${market.id}`, kind: "settlement", eventId, marketId: market.id },
           );
           continue;
         }
@@ -378,7 +378,7 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
             eventTitle: event.title,
             resolutionDate: event.resolutionDate,
           },
-          `overdue:${eventId}`,
+          { throttleKey: `overdue:${eventId}`, kind: "settlement", eventId },
         );
       }
     } catch (err) {
