@@ -6,12 +6,9 @@ import { usePathname } from "next/navigation";
 import {
   ArrowLeftIcon as ArrowLeft,
   ArrowUturnLeftIcon as Recovery,
-  BellAlertIcon as Bell,
   BanknotesIcon as Coins,
   ChatBubbleLeftRightIcon as Support,
-  ClipboardDocumentCheckIcon as Settled,
   Cog6ToothIcon as Settings,
-  PencilSquareIcon as PenSquare,
   ShieldExclamationIcon as Shield,
   UsersIcon as Users,
 } from "@heroicons/react/24/outline";
@@ -20,17 +17,43 @@ import { setAdminKey, useAdminKey } from "@/lib/admin-key";
 import { AdminUnlock } from "./admin-unlock";
 import { CurrencySwitch } from "./currency-switch";
 
+/**
+ * The sidebar's sections. A section with more than one page shows them
+ * as tabs along the top of the page — the pages and their addresses are
+ * unchanged, only the sidebar is shorter.
+ */
 const NAV = [
-  { href: "/admin", label: "Local book", icon: Coins },
-  { href: "/admin/alerts", label: "Alerts", icon: Bell },
-  { href: "/admin/markets", label: "Markets", icon: PenSquare },
-  { href: "/admin/traders", label: "Traders", icon: Users },
-  { href: "/admin/settled", label: "Settled bets", icon: Settled },
-  { href: "/admin/recovery", label: "Recovery", icon: Recovery },
-  { href: "/admin/support", label: "Support", icon: Support },
-  { href: "/admin/abuse", label: "Abuse watch", icon: Shield },
-  { href: "/admin/settings", label: "Settings", icon: Settings },
+  {
+    label: "Book",
+    icon: Coins,
+    pages: [
+      { href: "/admin", label: "Local book" },
+      { href: "/admin/markets", label: "Our markets" },
+    ],
+  },
+  { label: "Traders", icon: Users, pages: [{ href: "/admin/traders", label: "Traders" }] },
+  {
+    label: "Watch",
+    icon: Shield,
+    pages: [
+      { href: "/admin/alerts", label: "Alerts" },
+      { href: "/admin/abuse", label: "Abuse watch" },
+    ],
+  },
+  {
+    label: "Incidents",
+    icon: Recovery,
+    pages: [
+      { href: "/admin/settled", label: "Settled bets" },
+      { href: "/admin/recovery", label: "Recovery" },
+    ],
+  },
+  { label: "Support", icon: Support, pages: [{ href: "/admin/support", label: "Support" }] },
+  { label: "Settings", icon: Settings, pages: [{ href: "/admin/settings", label: "Settings" }] },
 ] as const;
+
+const isOn = (href: string, pathname: string) =>
+  href === "/admin" ? pathname === href : pathname.startsWith(href);
 
 /**
  * Admin chrome: sidebar on desktop, horizontal tab row on mobile. Both
@@ -92,11 +115,14 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     </span>
   );
 
-  const nav = NAV.map(({ href, label, icon: Icon }) => {
-    const active = href === "/admin" ? pathname === href : pathname.startsWith(href);
+  const section = NAV.find((g) => g.pages.some((p) => isOn(p.href, pathname)));
+
+  const nav = NAV.map(({ label, icon: Icon, pages }) => {
+    const href = pages[0].href;
+    const active = section?.label === label;
     return (
       <Link
-        key={href}
+        key={label}
         href={href}
         className={`flex shrink-0 items-center gap-2.5 rounded-md px-3 py-2 text-sm font-semibold transition-colors ${
           active
@@ -158,7 +184,31 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         <nav className="-mx-1 flex gap-1 overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">{nav}</nav>
       </div>
 
-      <main className="min-w-0 flex-1 px-4 pb-16 pt-6 lg:px-8">{children}</main>
+      <main className="min-w-0 flex-1 px-4 pb-16 pt-6 lg:px-8">
+        {section && section.pages.length > 1 && (
+          <nav
+            aria-label={`${section.label} pages`}
+            className="mb-5 inline-flex max-w-full overflow-x-auto rounded-md bg-element-2 p-1"
+          >
+            {section.pages.map((p) => {
+              const on = isOn(p.href, pathname);
+              return (
+                <Link
+                  key={p.href}
+                  href={p.href}
+                  aria-current={on ? "page" : undefined}
+                  className={`h-9 shrink-0 whitespace-nowrap rounded-sm px-4 text-sm font-semibold leading-9 transition-colors ${
+                    on ? "bg-surface text-primary shadow-card" : "text-secondary hover:text-primary"
+                  }`}
+                >
+                  {p.label}
+                </Link>
+              );
+            })}
+          </nav>
+        )}
+        {children}
+      </main>
     </div>
   );
 }
