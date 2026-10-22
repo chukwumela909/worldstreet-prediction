@@ -144,7 +144,11 @@ function topTitles(titles: string[], n = 3): string[] {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, n).map(([t]) => t);
 }
 
-export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
+export async function getAbuseWatch(
+  days: number | null,
+  /** wallets: false skips asking the dollar wallet for the below-zero list (the hourly scan). */
+  opts: { wallets?: boolean } = {},
+): Promise<AbuseWatch> {
   const since = days ? new Date(Date.now() - days * 86_400_000) : null;
   const bets = await Position.find(
     { reversedFrom: { $exists: false }, ...(since ? { createdAt: { $gte: since } } : {}) },
@@ -317,6 +321,7 @@ export async function getAbuseWatch(days: number | null): Promise<AbuseWatch> {
     // what each holds in their dollar wallet — asked, never charged
     Promise.all(
       belowIds.map(async (id) => {
+        if (opts.wallets === false) return [id, null] as const;
         const r = await getWalletUsdBalance(id);
         return [id, r.ok ? r.data.balances.USD.availableMinor : null] as const;
       }),

@@ -201,6 +201,19 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
         "MARKET_CLOSING",
       );
     }
+    // a market whose result shows itself as the day goes on — a count of
+    // posts or likes anyone can watch — closes early, before it's known
+    if (
+      settings.earlyCloseHours > 0 &&
+      isPausedMarket(settings.earlyCloseTopics, event.title, event.slug, market.title) &&
+      Date.now() >= closingMs - settings.earlyCloseHours * 3_600_000
+    ) {
+      throw new ApiError(
+        409,
+        `Betting on this market has closed — it stops ${settings.earlyCloseHours} hour${settings.earlyCloseHours === 1 ? "" : "s"} before the end`,
+        "MARKET_CLOSING",
+      );
+    }
   }
 
   const outcome = market.outcomes.find((o) => o.id === body.outcomeId);
@@ -246,6 +259,27 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
     // the same order may have filled while this one waited for the lock
     const filled = await alreadyPlaced();
     if (filled) return filled;
+
+    // the most one customer may stake on one market, all their bets on it
+    // together — checked under the lock, so quick repeats can't slip past
+    if (settings.maxStakePerMarketKobo > 0) {
+      const [mine] = await Position.aggregate<{ staked: number }>([
+        { $match: { authUserId, marketId: market.id, status: { $ne: "voided" } } },
+        { $group: { _id: null, staked: { $sum: "$stakeKobo" } } },
+      ]);
+      const stakedKobo = mine?.staked ?? 0;
+      if (stakedKobo + body.stakeKobo > settings.maxStakePerMarketKobo) {
+        const left = Math.max(settings.maxStakePerMarketKobo - stakedKobo, 0);
+        throw new ApiError(
+          409,
+          left >= settings.minStakeKobo
+            ? `You can stake up to ${naira(settings.maxStakePerMarketKobo)} on one market — ${naira(left)} more on this one`
+            : `You've reached the most you can stake on this market (${naira(settings.maxStakePerMarketKobo)})`,
+          "MARKET_STAKE_LIMIT",
+          { stakedKobo, maxKobo: settings.maxStakePerMarketKobo },
+        );
+      }
+    }
 
     // house-exposure cap per market: what settlement could owe across
     // all open positions, beyond the stakes already collected

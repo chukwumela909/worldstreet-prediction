@@ -227,6 +227,10 @@ const bookSettingsSchema = new Schema(
     lossAlertKobo: { type: Number },
     // no default: an unset field falls back to settings.ts's own
     pausedTopics: { type: [String], default: undefined },
+    maxStakePerMarketKobo: { type: Number },
+    earlyCloseHours: { type: Number },
+    earlyCloseTopics: { type: [String], default: undefined },
+    withdrawalReviewKobo: { type: Number },
     /** Email of the admin behind the last change. */
     updatedBy: { type: String },
   },
@@ -312,7 +316,7 @@ export const ReversedConversion: Model<IReversedConversion> =
  * the same reference, or marking it paid or returned by hand — because
  * putting it back on a guess pays twice when the dollars did arrive.
  */
-export const WITHDRAWAL_CHECK_STATUSES = ["unconfirmed", "checking", "paid", "returned"] as const;
+export const WITHDRAWAL_CHECK_STATUSES = ["unconfirmed", "review", "checking", "paid", "returned"] as const;
 
 const withdrawalCheckSchema = new Schema(
   {
@@ -324,6 +328,12 @@ const withdrawalCheckSchema = new Schema(
     /** The ₦/$ rate it was priced at. */
     rate: { type: Number, required: true },
     status: { type: String, enum: WITHDRAWAL_CHECK_STATUSES, default: "unconfirmed", index: true },
+    /**
+     * Why it waits for an admin's approval before going to the wallet (a
+     * big day of withdrawals, or a flagged account); empty for one held
+     * only because the wallet never confirmed it.
+     */
+    reason: { type: String, default: "" },
     /** What the wallet last said, for the desk. */
     lastCode: { type: String, default: "" },
     lastMessage: { type: String, default: "" },

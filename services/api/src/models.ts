@@ -79,7 +79,7 @@ export const AlertState: Model<IAlertState> =
  * emailed. "Settled" by an admin once dealt with; a condition that fires
  * again opens it back up, so a settled alert can't hide a live problem.
  */
-export const ALERT_KINDS = ["risk", "settlement", "withdrawal", "test", "other"] as const;
+export const ALERT_KINDS = ["risk", "abuse", "settlement", "withdrawal", "test", "other"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 const alertRecordSchema = new Schema(
@@ -92,6 +92,8 @@ const alertRecordSchema = new Schema(
     /** The market it's about, when there's one — what the desk's fix acts on. */
     eventId: { type: String, default: "" },
     marketId: { type: String, default: "" },
+    /** The accounts it's about (Abuse watch) — while open, their withdrawals wait for approval. */
+    authUserIds: { type: [String], default: [], index: true },
     count: { type: Number, default: 0 },
     firstAt: { type: Date, required: true },
     lastAt: { type: Date, required: true, index: true },

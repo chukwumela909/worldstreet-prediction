@@ -69,10 +69,35 @@ export interface BookSettings {
    * (trading/paused.ts). Lowercase, deduplicated; empty = nothing paused.
    */
   pausedTopics: string[];
+  /**
+   * The most one customer can stake on one market, all their bets on it
+   * together; 0 = no cap. Stops stacking bet after bet on one result —
+   * 41 bets of ₦50,000 on one count market was how that money went.
+   */
+  maxStakePerMarketKobo: number;
+  /**
+   * Markets whose result shows itself before they close — a count of
+   * posts or likes anyone can watch — stop taking bets this many hours
+   * before their closing time; 0 = off. Which markets: earlyCloseTopics,
+   * matched like paused topics.
+   */
+  earlyCloseHours: number;
+  earlyCloseTopics: string[];
+  /**
+   * A customer's withdrawals to dollars over the last 24 hours reaching
+   * this much wait for an admin's approval (trading/withdrawals.ts);
+   * 0 = off. So does any withdrawal by an account Abuse watch has
+   * flagged, whatever its size.
+   */
+  withdrawalReviewKobo: number;
 }
 
 export type SettingKey = keyof BookSettings;
-type NumericKey = Exclude<SettingKey, "internationalTrading" | "pausedTopics">;
+/** The settings that are lists of topics, edited on their own cards. */
+type TopicKey = "pausedTopics" | "earlyCloseTopics";
+const isTopicKey = (key: SettingKey): key is TopicKey =>
+  key === "pausedTopics" || key === "earlyCloseTopics";
+type NumericKey = Exclude<SettingKey, "internationalTrading" | TopicKey>;
 
 /** At most this many paused topics, each 2–40 characters. */
 const MAX_PAUSED_TOPICS = 20;
@@ -99,6 +124,9 @@ export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = 
   priceToleranceKobo: { min: 0, max: 2_000 }, // ₦0 – ₦20
   countdownCutoffSeconds: { min: 0, max: 3_600 },
   lossAlertKobo: { min: 0, max: 100_000_000_000 }, // ₦0 (off) – ₦1B
+  maxStakePerMarketKobo: { min: 0, max: 10_000_000_000 }, // ₦0 (off) – ₦100M
+  earlyCloseHours: { min: 0, max: 72 },
+  withdrawalReviewKobo: { min: 0, max: 10_000_000_000 }, // ₦0 (off) – ₦100M
 };
 
 export const SETTING_KEYS: readonly SettingKey[] = [
@@ -115,6 +143,10 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "countdownCutoffSeconds",
   "lossAlertKobo",
   "pausedTopics",
+  "maxStakePerMarketKobo",
+  "earlyCloseHours",
+  "earlyCloseTopics",
+  "withdrawalReviewKobo",
 ];
 
 /**
@@ -144,6 +176,11 @@ export function defaultSettings(): BookSettings {
     // the October 2026 Bitcoin pause, in force from the first deploy;
     // the desk lifts it by clearing the topics in Settings
     pausedTopics: ["bitcoin", "btc"],
+    maxStakePerMarketKobo: 20_000_000, // ₦200,000: four full bets on one market
+    earlyCloseHours: 3,
+    // "Pop Base's Number of X Posts by 1PM Today?", "How many likes for…"
+    earlyCloseTopics: ["x posts", "likes"],
+    withdrawalReviewKobo: 10_000_000, // ₦100,000 a day
   };
 }
 
@@ -158,9 +195,9 @@ function merge(row: Partial<Record<SettingKey, unknown>> | null): BookSettings {
     const v = row[key];
     if (key === "internationalTrading") {
       if (typeof v === "boolean") out.internationalTrading = v;
-    } else if (key === "pausedTopics") {
+    } else if (key === "pausedTopics" || key === "earlyCloseTopics") {
       if (Array.isArray(v) && v.every((t) => typeof t === "string")) {
-        out.pausedTopics = normalizeTopics(v);
+        out[key] = normalizeTopics(v);
       }
     } else if (typeof v === "number" && Number.isFinite(v)) {
       out[key] = v;
@@ -252,17 +289,17 @@ export async function updateBookSettings(
       next.internationalTrading = v;
       continue;
     }
-    if (key === "pausedTopics") {
+    if (isTopicKey(key)) {
       if (!Array.isArray(v) || !v.every((t) => typeof t === "string")) {
-        invalid("Paused topics must be a list of words");
+        invalid("Topics must be a list of words");
       }
       const topics = normalizeTopics(v);
-      if (topics.length > MAX_PAUSED_TOPICS) invalid(`At most ${MAX_PAUSED_TOPICS} paused topics`);
+      if (topics.length > MAX_PAUSED_TOPICS) invalid(`At most ${MAX_PAUSED_TOPICS} topics`);
       const bad = topics.find((t) => !TOPIC.test(t));
       if (bad !== undefined) {
         invalid(`"${bad}" isn't a usable topic — 2 to 40 letters, numbers, spaces, dots or dashes`);
       }
-      next.pausedTopics = topics;
+      next[key] = topics;
       continue;
     }
     const { min, max } = SETTING_LIMITS[key];
@@ -280,6 +317,9 @@ export async function updateBookSettings(
   }
   if (next.autoSpreadStepKobo > 0 && next.autoSpreadStepKobo < MIN_AUTO_SPREAD_STEP_KOBO) {
     invalid("The auto-adjust amount must be 0 (off) or at least ₦1,000");
+  }
+  if (next.maxStakePerMarketKobo > 0 && next.maxStakePerMarketKobo < next.minStakeKobo) {
+    invalid("The most per customer per market must be 0 (no cap) or at least the minimum stake");
   }
 
   const changed = SETTING_KEYS.filter(

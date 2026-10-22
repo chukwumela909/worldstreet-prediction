@@ -4,7 +4,14 @@ import { z } from "zod";
 import { assertNotSuspended } from "../accounts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
-import { holdWithdrawal, returnWithdrawal, sendWithdrawal } from "../trading/withdrawals.js";
+import { getBookSettings } from "../trading/settings.js";
+import {
+  holdForReview,
+  holdWithdrawal,
+  returnWithdrawal,
+  reviewReason,
+  sendWithdrawal,
+} from "../trading/withdrawals.js";
 import { chargeWallet, isWalletConfigured, refundWalletCharge } from "../wallet.js";
 import {
   creditNaira,
@@ -204,6 +211,18 @@ export async function convertNaira(authUserId: string, body: ConvertBody, log: F
   // the wallet adds the dollars; a lost answer is asked again under the
   // same reference, and never refunded on a guess (trading/withdrawals.ts)
   const withdrawal = { authUserId, refKey, amountKobo: amountMinor, amountUsdMinor, rate: fx.ngnToUsd };
+
+  // a big day of withdrawals, or a flagged account, waits for an admin
+  const reason = await reviewReason(authUserId, await getBookSettings());
+  if (reason) {
+    await holdForReview({ ...withdrawal, reason, log });
+    throw new ApiError(
+      409,
+      `Your withdrawal of $${(amountUsdMinor / 100).toFixed(2)} is being checked and will reach your WorldStreet wallet once it's approved — usually within a day. The credit is set aside for it, and we'll email you when it's sent.`,
+      "WITHDRAWAL_IN_REVIEW",
+    );
+  }
+
   const sent = await sendWithdrawal({ ...withdrawal, log });
   if (sent.outcome === "refused") {
     log.error(

@@ -22,7 +22,10 @@ await mongoose.connect(mongod.getUri(), { dbName: "test" });
 const { buildApp } = await import("../src/app.js");
 const { adjustNaira, creditNaira, debitNaira, getNairaBalanceKobo, writeOffDebt } = await import("../src/trading/ledger.js");
 const { NairaAccount, Position, WithdrawalCheck, ensureTradingIndexes } = await import("../src/trading/models.js");
-const { User } = await import("../src/models.js");
+const { AlertRecord, User } = await import("../src/models.js");
+const { checkAbuseAlerts } = await import("../src/trading/abuse-alerts.js");
+const { isFlagged } = await import("../src/trading/withdrawals.js");
+const log = { info() {}, warn() {}, error() {}, debug() {} } as unknown as import("fastify").FastifyBaseLogger;
 await ensureTradingIndexes();
 const app = await buildApp();
 
@@ -164,6 +167,30 @@ check("…and with no wallet to ask, their dollar balance reads unknown — noth
 
 const recent = (await admin("GET", "/v1/admin/abuse?days=1")).json() as { data: Watch };
 check("a 1-day window leaves out the twins from days ago", recent.data.twins.length === 0);
+
+/* ---------------- the hourly scan ---------------- */
+console.log("hourly scan");
+const raised = await checkAbuseAlerts(log, { force: true });
+const keys = (await AlertRecord.find({ kind: "abuse" }).lean()).map((r) => r.key).sort();
+check(
+  `the scan alerts on each flagged person once (${raised})`,
+  JSON.stringify(keys) ===
+    JSON.stringify(["abuse:ledger:u-gap", "abuse:near:u-near", "abuse:odds:u-lucky", "abuse:twins:u-twin1|u-twin2"]),
+);
+check("…and an hour hasn't passed, so it doesn't run again yet", (await checkAbuseAlerts(log)) === 0);
+check(
+  "a flagged person's withdrawals now wait for approval — both twins included",
+  (await isFlagged("u-near")) && (await isFlagged("u-twin2")) && !(await isFlagged("u-fair")),
+);
+await AlertRecord.updateOne({ key: "abuse:near:u-near" }, { $set: { status: "resolved" } });
+check("settling the alert lifts it", !(await isFlagged("u-near")));
+await User.updateOne({ authUserId: "u-lucky" }, { $set: { suspendedAt: new Date() } });
+await AlertRecord.deleteMany({ kind: "abuse" });
+await checkAbuseAlerts(log, { force: true });
+check(
+  "someone already suspended isn't alerted on",
+  !(await AlertRecord.exists({ key: "abuse:odds:u-lucky" })) && Boolean(await AlertRecord.exists({ key: "abuse:near:u-near" })),
+);
 
 /* ---------------- settling a held withdrawal ---------------- */
 console.log("withdrawals");

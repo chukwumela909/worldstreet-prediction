@@ -36,6 +36,7 @@ type View = "open" | "resolved" | "all";
 
 const KIND: Record<AlertKind, { label: string; chip: string }> = {
   risk: { label: "Risk", chip: FLAG_TONE.danger.chip },
+  abuse: { label: "Abuse", chip: FLAG_TONE.danger.chip },
   settlement: { label: "Settlement", chip: FLAG_TONE.caution.chip },
   withdrawal: { label: "Withdrawal", chip: FLAG_TONE.caution.chip },
   test: { label: "Test", chip: "bg-element-2 text-secondary" },
@@ -364,6 +365,7 @@ function Fixes({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => voi
       {a.kind === "risk" && link("/admin/settings", "Loss limits in Settings")}
       {a.kind === "settlement" && link("/admin", "Settle it on the Local book")}
       {a.kind === "withdrawal" && link("/admin/abuse", "Withdrawals to confirm")}
+      {a.kind === "abuse" && link("/admin/abuse", "Review on Abuse watch")}
       <button
         type="button"
         onClick={() => setStep("settle")}

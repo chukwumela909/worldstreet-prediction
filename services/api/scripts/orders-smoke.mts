@@ -277,6 +277,59 @@ check(
   (await outcomeOf(() => settings.updateBookSettings({ maxQuoteKobo: 4_000 }, "smoke"))) === "INVALID_SETTINGS",
 );
 
+/* ---------------- the most one customer may stake on one market ---------------- */
+console.log("cap per customer per market");
+await settings.updateBookSettings({ maxStakePerMarketKobo: 30_000, maxMarketExposureKobo: 100_000_000 }, "smoke");
+const capped = await ownMarket("Will Lagos host the 2027 games?");
+await fund("u-cap", 1_000_000);
+const capBet = (key: string, stakeKobo: number) =>
+  outcomeOf(() =>
+    placeOrder(
+      "u-cap",
+      { eventId: capped.eventId, marketId: capped.marketId, outcomeId: capped.yes, stakeKobo, expectedPriceKobo: 5_500, idempotencyKey: key },
+      log,
+    ),
+  );
+check("bets add up to the cap (₦100 + ₦200 of ₦300)", (await capBet("cap-key-0001", 10_000)) === "ok" && (await capBet("cap-key-0002", 20_000)) === "ok");
+check("one more is refused (MARKET_STAKE_LIMIT)", (await capBet("cap-key-0003", 10_000)) === "MARKET_STAKE_LIMIT");
+check("…charging nothing for it", (await getNairaBalanceKobo("u-cap")) === 1_000_000 - 30_000);
+await fund("u-cap2", 1_000_000);
+check(
+  "another customer still bets on the same market",
+  (await outcomeOf(() =>
+    placeOrder(
+      "u-cap2",
+      { eventId: capped.eventId, marketId: capped.marketId, outcomeId: capped.yes, stakeKobo: 10_000, expectedPriceKobo: 5_500, idempotencyKey: "cap-key-0004" },
+      log,
+    ),
+  )) === "ok",
+);
+await settings.updateBookSettings({ maxStakePerMarketKobo: 0 }, "smoke");
+check("with the cap off (0), the same customer bets again", (await capBet("cap-key-0005", 10_000)) === "ok");
+
+/* ---------------- count markets close early ---------------- */
+console.log("count markets close early");
+const { WorldstreetEvent: Ev } = await import("../src/trading/models.js");
+const counted = await ownMarket("Pop Base's number of X posts by 1PM today?");
+const plain = await ownMarket("Will it be sunny in Abuja by 1PM today?");
+// both close in two hours; the early close is three hours for "x posts"
+const closesAt = new Date(Date.now() + 2 * 3_600_000);
+await Ev.updateMany({ eventId: { $in: [counted.eventId, plain.eventId] } }, { $set: { closesAt } });
+await fund("u-early", 1_000_000);
+const earlyBet = (m: Awaited<ReturnType<typeof ownMarket>>, key: string) =>
+  outcomeOf(() =>
+    placeOrder(
+      "u-early",
+      { eventId: m.eventId, marketId: m.marketId, outcomeId: m.yes, stakeKobo: 10_000, expectedPriceKobo: 5_500, idempotencyKey: key },
+      log,
+    ),
+  );
+check("a count market within 3 hours of its close takes no bets (MARKET_CLOSING)", (await earlyBet(counted, "early-key-0001")) === "MARKET_CLOSING");
+check("…an ordinary market closing as soon still does", (await earlyBet(plain, "early-key-0002")) === "ok");
+await settings.updateBookSettings({ earlyCloseHours: 1 }, "smoke");
+check("…and with the early close at 1 hour, the count market opens again", (await earlyBet(counted, "early-key-0003")) === "ok");
+await settings.updateBookSettings({ earlyCloseHours: 3 }, "smoke");
+
 /* ---------------- a voided market takes no new bets ---------------- */
 console.log("after the desk voids a market");
 const { Settlement } = await import("../src/trading/models.js");

@@ -57,6 +57,8 @@ export interface AlertOptions {
   /** The market it's about, when there's one — what the desk's fix acts on. */
   eventId?: string;
   marketId?: string;
+  /** The accounts it's about (Abuse watch). */
+  authUserIds?: string[];
 }
 
 export async function sendAlert(
@@ -255,6 +257,7 @@ async function recordAlert(
           status: "open",
           ...(opts.eventId ? { eventId: opts.eventId } : {}),
           ...(opts.marketId ? { marketId: opts.marketId } : {}),
+          ...(opts.authUserIds ? { authUserIds: opts.authUserIds } : {}),
         },
         $setOnInsert: { firstAt: now },
         $inc: { count: 1 },
@@ -299,7 +302,7 @@ export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
   ]);
   const now = Date.now();
   // live money problems first: open, still happening, risk before the rest
-  const rank: Record<string, number> = { risk: 0, settlement: 1, withdrawal: 2, other: 3, test: 4 };
+  const rank: Record<string, number> = { risk: 0, abuse: 1, settlement: 2, withdrawal: 3, other: 4, test: 5 };
   const alerts: AlertView[] = rows.map((r) => ({
       id: String(r._id),
       kind: r.kind,

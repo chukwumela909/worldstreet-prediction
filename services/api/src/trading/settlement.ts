@@ -6,6 +6,7 @@ import { creditNaira } from "./ledger.js";
 import { Position, Settlement, type SettlementSource } from "./models.js";
 import { markWorldstreetSettled } from "./worldstreet.js";
 import { checkRiskAlerts } from "./risk-alerts.js";
+import { checkAbuseAlerts } from "./abuse-alerts.js";
 import { pausedPattern } from "./paused.js";
 import { getBookSettings } from "./settings.js";
 import { emailRefunds } from "./pause-refunds.js";
@@ -393,6 +394,12 @@ export async function runSettlementPass(log: FastifyBaseLogger): Promise<void> {
     await checkRiskAlerts(log);
   } catch (err) {
     log.error({ err }, "risk alert check failed");
+  }
+  // and, once an hour, run Abuse watch's scans (trading/abuse-alerts.ts)
+  try {
+    await checkAbuseAlerts(log);
+  } catch (err) {
+    log.error({ err }, "abuse scan failed");
   }
 }
 

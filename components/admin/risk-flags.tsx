@@ -94,6 +94,9 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
     countdownCutoffSeconds: cutoff,
     lossAlertKobo: lossAlert,
     maxQuoteKobo: ceiling,
+    maxStakePerMarketKobo: perMarket,
+    earlyCloseHours: earlyClose,
+    withdrawalReviewKobo: withdrawalReview,
   } = values;
   const risks: SettingRisk[] = [];
 
@@ -198,6 +201,27 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
       field: "maxQuoteKobo",
       level: "risky",
       reason: "Near-certain sides are still on sale.",
+    });
+  }
+  if (perMarket === 0) {
+    risks.push({
+      field: "maxStakePerMarketKobo",
+      level: "caution",
+      reason: "No cap — one customer can stack bet after bet on one market.",
+    });
+  }
+  if (earlyClose === 0) {
+    risks.push({
+      field: "earlyCloseHours",
+      level: "caution",
+      reason: "Count markets take bets right up to the close, when the answer is often plain.",
+    });
+  }
+  if (withdrawalReview === 0) {
+    risks.push({
+      field: "withdrawalReviewKobo",
+      level: "caution",
+      reason: "Withdrawals go straight out however large (flagged accounts still wait).",
     });
   }
   if (lossAlert === 0) {

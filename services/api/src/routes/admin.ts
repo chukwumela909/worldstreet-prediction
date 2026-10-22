@@ -127,6 +127,10 @@ const settingsBody = z
     countdownCutoffSeconds: z.number().int(),
     lossAlertKobo: z.number().int(),
     pausedTopics: z.array(z.string().max(80)).max(50),
+    maxStakePerMarketKobo: z.number().int(),
+    earlyCloseHours: z.number().int(),
+    earlyCloseTopics: z.array(z.string().max(80)).max(50),
+    withdrawalReviewKobo: z.number().int(),
   })
   .partial()
   .strict();
@@ -714,7 +718,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const [list, support, withdrawals] = await Promise.all([
       listAlerts(request.query.status),
       SupportTicket.countDocuments({ status: "open" }),
-      WithdrawalCheck.countDocuments({ status: "unconfirmed" }),
+      WithdrawalCheck.countDocuments({ status: { $in: ["unconfirmed", "review"] } }),
     ]);
     return { success: true, data: { ...list, waiting: { support, withdrawals } } };
   });

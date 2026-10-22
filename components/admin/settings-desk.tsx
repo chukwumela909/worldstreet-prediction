@@ -15,6 +15,7 @@ import { isApiConfigured } from "@/lib/api-client";
 import { showToast } from "@/lib/toast-store";
 import { PausedMarketsCard } from "@/components/admin/paused-markets";
 import { PausedRefundsReport } from "@/components/admin/paused-refunds";
+import { EarlyCloseCard } from "@/components/admin/early-close-card";
 import {
   fetchBookSettings,
   updateBookSettings,
@@ -53,7 +54,7 @@ import {
 
 /* ---------- what each setting is, in friendly units ---------- */
 
-type Unit = "points" | "percent" | "credit" | "seconds";
+type Unit = "points" | "percent" | "credit" | "seconds" | "hours";
 
 /** API units per unit on screen, and the decimals that leaves room for. */
 const UNIT: Record<Unit, { scale: number; decimals: number }> = {
@@ -61,6 +62,7 @@ const UNIT: Record<Unit, { scale: number; decimals: number }> = {
   percent: { scale: 100, decimals: 2 },
   credit: { scale: 100, decimals: 2 },
   seconds: { scale: 1, decimals: 0 },
+  hours: { scale: 1, decimals: 0 },
 };
 
 interface NumberField {
@@ -147,6 +149,27 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     step: 5,
     info: "For short countdown markets (like 15-minute crypto), betting stops this many seconds before the close, so nobody can bet when the result is almost certain.",
   },
+  maxStakePerMarketKobo: {
+    key: "maxStakePerMarketKobo",
+    label: "Most one customer can stake per market",
+    unit: "credit",
+    step: 50_000,
+    info: "All of one customer's bets on one market together can't go above this. It stops someone stacking bet after bet on a result they already know — like 41 bets of ₦50,000 on one post-count market. Honest players rarely come close. Set to 0 for no cap.",
+  },
+  earlyCloseHours: {
+    key: "earlyCloseHours",
+    label: "Close count markets early",
+    unit: "hours",
+    step: 1,
+    info: "Markets whose answer shows itself during the day — a count of posts or likes anyone can watch — stop taking bets this many hours before they close, before the answer is plain. Which markets: the topics on the Markets that close early card. Set to 0 to switch it off.",
+  },
+  withdrawalReviewKobo: {
+    key: "withdrawalReviewKobo",
+    label: "Approve withdrawals over (per day)",
+    unit: "credit",
+    step: 10_000,
+    info: "When a customer's withdrawals to dollars in the last 24 hours reach this much, the withdrawal waits in Abuse watch for an admin to approve it before any money leaves — splitting it into smaller ones doesn't get round it. Any withdrawal by an account Abuse watch has flagged waits too, whatever its size. Set to 0 to let withdrawals go straight out (flagged accounts still wait).",
+  },
   lossAlertKobo: {
     key: "lossAlertKobo",
     label: "Book loss alert",
@@ -157,8 +180,8 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
 };
 
 /** Page order — the groups below, flattened. */
-/** The settings this form edits — all but the paused topics, which have their own card. */
-type FormKey = Exclude<BookSettingKey, "pausedTopics">;
+/** The settings this form edits — all but the topic lists, which have their own cards. */
+type FormKey = Exclude<BookSettingKey, "pausedTopics" | "earlyCloseTopics">;
 
 const ORDER: FormKey[] = [
   "internationalTrading",
@@ -169,9 +192,12 @@ const ORDER: FormKey[] = [
   "minStakeKobo",
   "maxStakeKobo",
   "maxMarketExposureKobo",
+  "maxStakePerMarketKobo",
   "maxQuoteKobo",
   "priceToleranceKobo",
   "countdownCutoffSeconds",
+  "earlyCloseHours",
+  "withdrawalReviewKobo",
   "lossAlertKobo",
 ];
 
@@ -195,13 +221,18 @@ const GROUPS: { title: string; note: string; rows: FormKey[] }[] = [
   },
   {
     title: "Limits",
-    note: "How much one bet, and one market, can put at stake.",
-    rows: ["minStakeKobo", "maxStakeKobo", "maxMarketExposureKobo"],
+    note: "How much one bet, one customer and one market can put at stake.",
+    rows: ["minStakeKobo", "maxStakeKobo", "maxStakePerMarketKobo", "maxMarketExposureKobo"],
   },
   {
     title: "Safety",
     note: "Guards against stale prices, late bets and buying what's already decided.",
-    rows: ["maxQuoteKobo", "priceToleranceKobo", "countdownCutoffSeconds"],
+    rows: ["maxQuoteKobo", "priceToleranceKobo", "countdownCutoffSeconds", "earlyCloseHours"],
+  },
+  {
+    title: "Withdrawals",
+    note: "When money leaving the platform waits for an admin first.",
+    rows: ["withdrawalReviewKobo"],
   },
   {
     title: "Alerts",
@@ -217,6 +248,7 @@ function isNumericKey(key: string): key is NumericBookSettingKey {
 function labelOf(key: string): string {
   if (key === "internationalTrading") return INTL_LABEL;
   if (key === "pausedTopics") return "Paused topics";
+  if (key === "earlyCloseTopics") return "Markets that close early";
   return isNumericKey(key) ? FIELDS[key].label : key;
 }
 
@@ -248,6 +280,7 @@ function unitWord(key: NumericBookSettingKey, value: number): string {
   const one = value / UNIT[unit].scale === 1;
   if (unit === "points") return one ? "point" : "points";
   if (unit === "seconds") return one ? "second" : "seconds";
+  if (unit === "hours") return one ? "hour" : "hours";
   return "";
 }
 
@@ -317,7 +350,7 @@ function parseField(
       ok: false,
       message:
         decimals === 0
-          ? "Use a whole number of seconds."
+          ? `Use a whole number of ${FIELDS[key].unit}.`
           : `Use at most ${decimals} decimal places.`,
     };
   }
@@ -511,6 +544,12 @@ export function SettingsDesk() {
               />
               <PausedRefundsReport />
             </>
+          )}
+          {Array.isArray(state.settings.earlyCloseTopics) && (
+            <EarlyCloseCard
+              state={state}
+              onSaved={(next) => setSaved({ state: next, over: resource.data })}
+            />
           )}
           <SettingsForm
             state={state}

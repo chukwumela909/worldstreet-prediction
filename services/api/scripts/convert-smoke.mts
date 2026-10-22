@@ -14,6 +14,8 @@ process.env.CLERK_PUBLISHABLE_KEY = "pk_test_ZmFrZS5jbGVyay5hY2NvdW50cy5kZXYk";
 process.env.CLERK_SECRET_KEY = "sk_test_fake";
 process.env.SETTLEMENT_POLL_SECONDS = "0";
 process.env.WALLET_API_URL = "https://wallet.test";
+process.env.RESEND_API_KEY = "re_test";
+process.env.ALERT_EMAIL_FROM = "WorldStreet <alerts@worldstreetgold.test>";
 process.env.WALLET_SERVICE_TOKEN = "test-token";
 
 import { MongoMemoryServer } from "mongodb-memory-server";
@@ -27,7 +29,11 @@ const { convertNaira } = await import("../src/routes/ngn-wallet.js");
 const { creditNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { FxRate, LedgerEntry, WithdrawalCheck, ensureTradingIndexes } = await import("../src/trading/models.js");
 const { resolveWithdrawalCheck } = await import("../src/trading/withdrawals.js");
+const settings = await import("../src/trading/settings.js");
+const { AlertRecord, User } = await import("../src/models.js");
 await ensureTradingIndexes();
+// the approval limit has its own section below; until then, withdrawals go straight out
+await settings.updateBookSettings({ withdrawalReviewKobo: 0 }, "smoke");
 
 let passed = 0;
 let failed = 0;
@@ -73,10 +79,15 @@ let creditsFail = true;
 let creditMode: "refuse" | "ok" | "lose-answer" | "down" | "duplicate" = "refuse";
 const paidRefs = new Map<string, number>();
 const calls = { credits: 0, charges: 0, refunds: 0 };
+const mails: { to: string[]; subject: string; text: string }[] = [];
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
   const json = (body: unknown, status = 200) =>
     new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+  if (url.hostname === "api.resend.com") {
+    mails.push(JSON.parse(String(init?.body)));
+    return json({ id: "email" });
+  }
   if (url.pathname.endsWith("/credits")) {
     calls.credits += 1;
     const { reference, amountMinor } = JSON.parse(String(init?.body ?? "{}")) as { reference: string; amountMinor: number };
@@ -216,6 +227,62 @@ creditMode = "down";
 await withdraw("withdraw-key-7");
 const markedPaid = await resolveWithdrawalCheck({ refKey: "convert:u-cust:withdraw-key-7", action: "paid", actor: "key:josh", log });
 check("…or mark one paid after seeing the dollars arrived", markedPaid.status === "paid");
+
+/* ---------------- big or flagged withdrawals wait for approval ---------------- */
+console.log("withdrawals waiting for approval");
+await settings.updateBookSettings({ withdrawalReviewKobo: 10_000_000 }, "smoke"); // ₦100,000 a day
+creditMode = "ok";
+await User.create({ authUserId: "u-rev", email: "rev@example.test", username: "rev", displayName: "rev" });
+await creditNaira({ authUserId: "u-rev", amountKobo: 50_000_000, type: "conversion_in", refKey: "fund:u-rev", description: "funds" });
+const revBal = () => getNairaBalanceKobo("u-rev");
+const rev = (key: string, kobo: number) =>
+  outcomeOf(() => convertNaira("u-rev", { direction: "ngn_to_usd", amountMinor: kobo, idempotencyKey: key }, log));
+check("a withdrawal under the day's limit goes straight out", (await rev("rev-key-0001", 6_000_000)) === "ok");
+const paidBefore = paidRefs.size;
+check(
+  "the one taking the day to ₦100,000 waits for approval (WITHDRAWAL_IN_REVIEW), nothing sent",
+  (await rev("rev-key-0002", 4_000_000)) === "WITHDRAWAL_IN_REVIEW" && paidRefs.size === paidBefore,
+);
+const waitingOne = await WithdrawalCheck.findOne({ refKey: "convert:u-rev:rev-key-0002" }).lean();
+check(
+  "…its credit set aside, with the reason",
+  waitingOne?.status === "review" && waitingOne.reason.includes("24 hours") && (await revBal()) === 50_000_000 - 10_000_000,
+);
+check("…and the admins have it on the Alerts tab", Boolean(await AlertRecord.exists({ key: "withdrawal-review:convert:u-rev:rev-key-0002" })));
+const approved = await resolveWithdrawalCheck({ refKey: "convert:u-rev:rev-key-0002", action: "retry", actor: "key:josh", log });
+check(
+  "approving sends it, once, and emails the customer",
+  approved.status === "paid" && paidRefs.has("convert:u-rev:rev-key-0002") && paidRefs.size === paidBefore + 1 &&
+    mails.some((m) => m.to[0] === "rev@example.test" && m.subject === "Your withdrawal has been sent"),
+);
+check("splitting doesn't get round it: a small one the same day waits too", (await rev("rev-key-0003", 1_000_000)) === "WITHDRAWAL_IN_REVIEW");
+const rejected = await resolveWithdrawalCheck({ refKey: "convert:u-rev:rev-key-0003", action: "return", actor: "key:josh", log });
+check(
+  "rejecting returns the credit and tells them",
+  rejected.status === "returned" && (await revBal()) === 50_000_000 - 10_000_000 &&
+    mails.some((m) => m.to[0] === "rev@example.test" && m.subject === "Your withdrawal wasn't approved"),
+);
+
+await User.create({ authUserId: "u-flag", email: "flag@example.test", username: "flag", displayName: "flag" });
+await creditNaira({ authUserId: "u-flag", amountKobo: 1_000_000, type: "conversion_in", refKey: "fund:u-flag", description: "funds" });
+const flagAlert = await AlertRecord.create({
+  key: "abuse:near:u-flag",
+  kind: "abuse",
+  subject: "Buying near-certain sides: @flag",
+  firstAt: new Date(),
+  lastAt: new Date(),
+  authUserIds: ["u-flag"],
+});
+const flagged = (key: string) =>
+  outcomeOf(() => convertNaira("u-flag", { direction: "ngn_to_usd", amountMinor: 100_000, idempotencyKey: key }, log));
+check("a flagged account's ₦1,000 withdrawal waits for approval", (await flagged("flag-key-0001")) === "WITHDRAWAL_IN_REVIEW");
+check(
+  "…saying why",
+  (await WithdrawalCheck.findOne({ refKey: "convert:u-flag:flag-key-0001" }).lean())?.reason === "Flagged on Abuse watch",
+);
+await AlertRecord.updateOne({ _id: flagAlert._id }, { $set: { status: "resolved" } });
+check("once the alert is settled, their withdrawals go straight out again", (await flagged("flag-key-0002")) === "ok");
+await settings.updateBookSettings({ withdrawalReviewKobo: 0 }, "smoke");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 

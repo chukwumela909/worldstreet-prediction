@@ -941,6 +941,14 @@ export interface BookSettings {
    * leave the site; [] = nothing paused. Edited on the Paused markets card.
    */
   pausedTopics: string[];
+  /** The most one customer may stake on one market, all bets together, kobo; 0 = no cap. */
+  maxStakePerMarketKobo: number;
+  /** Markets matching earlyCloseTopics stop taking bets this many hours before their close; 0 = off. */
+  earlyCloseHours: number;
+  /** Which markets close early — counts anyone can watch. Edited on its own card. */
+  earlyCloseTopics: string[];
+  /** A customer's withdrawals in 24 hours reaching this wait for approval, kobo; 0 = off. */
+  withdrawalReviewKobo: number;
 }
 
 export type BookSettingKey = keyof BookSettings;
@@ -1365,12 +1373,14 @@ export interface LedgerGapRow extends AbusePerson {
 
 export interface WithdrawalCheckRow {
   refKey: string;
+  /** Why it waits for approval; empty when the wallet just never confirmed it. */
+  reason?: string;
   authUserId: string;
   username: string;
   email: string;
   amountKobo: number;
   amountUsdMinor: number;
-  status: "unconfirmed" | "checking" | "paid" | "returned";
+  status: "unconfirmed" | "review" | "checking" | "paid" | "returned";
   lastCode: string;
   lastMessage: string;
   createdAt: string | null;
@@ -1408,7 +1418,7 @@ export const resolveWithdrawal = (refKey: string, action: "retry" | "paid" | "re
 /* Alerts                                                              */
 /* ------------------------------------------------------------------ */
 
-export type AlertKind = "risk" | "settlement" | "withdrawal" | "test" | "other";
+export type AlertKind = "risk" | "abuse" | "settlement" | "withdrawal" | "test" | "other";
 
 /** One condition the API has alerted on, with every time it fired. */
 export interface AlertItem {

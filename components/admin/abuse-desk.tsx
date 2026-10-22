@@ -80,7 +80,7 @@ export function AbuseDesk() {
   const watch = fresh?.data ?? loaded?.data ?? null;
   const loading = fresh === null;
   const reload = () => setReloads((n) => n + 1);
-  const waiting = watch?.withdrawals.filter((w) => w.status === "unconfirmed").length ?? 0;
+  const waiting = watch?.withdrawals.filter((w) => w.status === "unconfirmed" || w.status === "review").length ?? 0;
   const belowZero = watch?.belowZero ?? [];
 
   return (
@@ -144,7 +144,7 @@ export function AbuseDesk() {
           {watch.withdrawals.length > 0 && (
             <Card
               title="Withdrawals to confirm"
-              blurb="The wallet never confirmed these, so the customer's credit is held — not returned on a guess, since the dollars may have arrived. Ask the wallet again first; only return the credit once you're sure the dollars didn't arrive."
+              blurb="Waiting for approval: a big day of withdrawals, or an account Abuse watch flagged — approve to send the dollars, reject to return the credit (the customer is emailed either way). Unconfirmed: the wallet never answered, so the credit is held, not returned on a guess — ask the wallet again first; only return the credit once you're sure the dollars didn't arrive."
             >
               <ul className="flex flex-col gap-2">
                 {watch.withdrawals.map((w) => (
@@ -366,7 +366,8 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
       setConfirmReturn(false);
     }
   };
-  const waiting = w.status === "unconfirmed";
+  const review = w.status === "review";
+  const waiting = w.status === "unconfirmed" || review;
   return (
     <li className="rounded-md border border-border bg-page p-3 text-sm">
       <div className="flex flex-wrap items-start justify-between gap-2">
@@ -385,9 +386,18 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
             waiting ? FLAG_TONE.caution.chip : "bg-element-2 text-tertiary"
           }`}
         >
-          {waiting ? "Waiting" : w.status === "paid" ? "Paid" : w.status === "returned" ? "Credit returned" : "Checking"}
+          {review
+            ? "Waiting for approval"
+            : waiting
+              ? "Unconfirmed"
+              : w.status === "paid"
+                ? "Paid"
+                : w.status === "returned"
+                  ? "Credit returned"
+                  : "Checking"}
         </span>
       </div>
+      {w.reason && <p className="mt-1 text-xs font-semibold text-secondary">Why: {w.reason}</p>}
       {waiting && (
         <div className="mt-2 flex flex-wrap gap-2">
           <button
@@ -396,16 +406,18 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
             disabled={busy !== null}
             className="pressable h-8 rounded-sm bg-accent px-3 text-xs font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
           >
-            {busy === "retry" ? "Asking…" : "Ask the wallet again"}
+            {busy === "retry" ? (review ? "Sending…" : "Asking…") : review ? "Approve and send" : "Ask the wallet again"}
           </button>
-          <button
-            type="button"
-            onClick={() => act("paid")}
-            disabled={busy !== null}
-            className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-40"
-          >
-            The dollars arrived
-          </button>
+          {!review && (
+            <button
+              type="button"
+              onClick={() => act("paid")}
+              disabled={busy !== null}
+              className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-40"
+            >
+              The dollars arrived
+            </button>
+          )}
           {confirmReturn ? (
             <>
               <button
@@ -414,7 +426,7 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
                 disabled={busy !== null}
                 className="pressable h-8 rounded-sm bg-no-solid px-3 text-xs font-semibold text-white disabled:opacity-40"
               >
-                {busy === "return" ? "Returning…" : `Yes, return ${money.format(w.amountKobo)}`}
+                {busy === "return" ? "Returning…" : `Yes, ${review ? "reject and " : ""}return ${money.format(w.amountKobo)}`}
               </button>
               <button
                 type="button"
@@ -431,7 +443,7 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
               disabled={busy !== null}
               className="h-8 rounded-sm border border-no/40 px-3 text-xs font-semibold text-no hover:bg-no-tint disabled:opacity-40"
             >
-              Return the credit…
+              {review ? "Reject…" : "Return the credit…"}
             </button>
           )}
         </div>
