@@ -222,11 +222,18 @@ check(
   returned.status === "returned" && (await bal()) === beforeReturn,
 );
 check("…and that key can't be replayed into a payout", (await withdraw("withdraw-key-6")) === "CONVERSION_REVERSED");
+const unconfirmedAlert = async () => (await AlertRecord.findOne({ key: "withdrawal-unconfirmed" }).lean())?.status;
+check("with nothing else waiting on the wallet, the unconfirmed alert closes", (await unconfirmedAlert()) === "resolved");
 
 creditMode = "down";
 await withdraw("withdraw-key-7");
+await withdraw("withdraw-key-8");
+check("…and opens again when another is held", (await unconfirmedAlert()) === "open");
 const markedPaid = await resolveWithdrawalCheck({ refKey: "convert:u-cust:withdraw-key-7", action: "paid", actor: "key:josh", log });
 check("…or mark one paid after seeing the dollars arrived", markedPaid.status === "paid");
+check("…the alert stays open while another still waits", (await unconfirmedAlert()) === "open");
+await resolveWithdrawalCheck({ refKey: "convert:u-cust:withdraw-key-8", action: "return", actor: "key:josh", log });
+check("…and closes once the last is settled", (await unconfirmedAlert()) === "resolved");
 
 /* ---------------- big or flagged withdrawals wait for approval ---------------- */
 console.log("withdrawals waiting for approval");
@@ -255,6 +262,12 @@ check(
   approved.status === "paid" && paidRefs.has("convert:u-rev:rev-key-0002") && paidRefs.size === paidBefore + 1 &&
     mails.some((m) => m.to[0] === "rev@example.test" && m.subject === "Your withdrawal has been sent"),
 );
+const reviewAlert = (key: string) => AlertRecord.findOne({ key: `withdrawal-review:convert:u-rev:${key}` }).lean();
+const approvedAlert = await reviewAlert("rev-key-0002");
+check(
+  "…and its alert closes by itself, saying who approved it",
+  approvedAlert?.status === "resolved" && approvedAlert.resolvedBy === "key:josh" && approvedAlert.note === "Approved — paid",
+);
 check("splitting doesn't get round it: a small one the same day waits too", (await rev("rev-key-0003", 1_000_000)) === "WITHDRAWAL_IN_REVIEW");
 const rejected = await resolveWithdrawalCheck({ refKey: "convert:u-rev:rev-key-0003", action: "return", actor: "key:josh", log });
 check(
@@ -262,6 +275,23 @@ check(
   rejected.status === "returned" && (await revBal()) === 50_000_000 - 10_000_000 &&
     mails.some((m) => m.to[0] === "rev@example.test" && m.subject === "Your withdrawal wasn't approved"),
 );
+check("…and closes its alert too", (await reviewAlert("rev-key-0003"))?.status === "resolved");
+
+await rev("rev-key-0004", 1_000_000);
+creditMode = "refuse";
+const mailsBefore = mails.length;
+const refused = await resolveWithdrawalCheck({ refKey: "convert:u-rev:rev-key-0004", action: "retry", actor: "key:josh", log });
+const newMails = mails.slice(mailsBefore).filter((m) => m.to[0] === "rev@example.test").map((m) => m.subject);
+check(
+  "approved but the wallet says no: the credit comes back",
+  refused.status === "returned" && (await revBal()) === 50_000_000 - 10_000_000,
+);
+check(
+  "…and the email says the wallet couldn't take it, not that we didn't approve it",
+  JSON.stringify(newMails) === JSON.stringify(["Your withdrawal couldn't be sent yet"]),
+);
+check("…its alert closes", (await reviewAlert("rev-key-0004"))?.status === "resolved");
+creditMode = "ok";
 
 await User.create({ authUserId: "u-flag", email: "flag@example.test", username: "flag", displayName: "flag" });
 await creditNaira({ authUserId: "u-flag", amountKobo: 1_000_000, type: "conversion_in", refKey: "fund:u-flag", description: "funds" });

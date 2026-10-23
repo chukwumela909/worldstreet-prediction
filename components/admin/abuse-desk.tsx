@@ -418,7 +418,9 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
     setBusy(action);
     try {
       const res = await resolveWithdrawal(w.refKey, action);
-      showToast(res.message, res.status === "unconfirmed" ? "error" : "success");
+      // asked to send, but it didn't go: still held, or the wallet said no
+      const failed = res.status === "unconfirmed" || (action === "retry" && res.status === "returned");
+      showToast(res.message, failed ? "error" : "success");
       onDone();
     } catch (err) {
       showToast(err instanceof Error && err.message ? err.message : "Request failed. Try again.", "error");

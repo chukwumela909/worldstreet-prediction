@@ -261,6 +261,19 @@ export async function listWithdrawalChecks(limit = 100): Promise<WithdrawalCheck
 }
 
 /**
+ * A held withdrawal is settled: close its alert, so the Alerts tab doesn't
+ * keep asking about it. The one alert all unconfirmed withdrawals share
+ * closes once none is left waiting on the wallet.
+ */
+async function closeWithdrawalAlerts(refKey: string, actor: string, note: string): Promise<void> {
+  const done = { status: "resolved", resolvedBy: actor, resolvedAt: new Date(), note };
+  await AlertRecord.updateOne({ key: `withdrawal-review:${refKey}`, status: "open" }, { $set: done });
+  if (!(await WithdrawalCheck.exists({ status: { $in: ["unconfirmed", "checking"] } }))) {
+    await AlertRecord.updateOne({ key: "withdrawal-unconfirmed", status: "open" }, { $set: done });
+  }
+}
+
+/**
  * Settle a held withdrawal. "retry" asks the wallet again under the same
  * reference (paid → done; refused → the credit goes back; still no
  * answer → stays held). "paid" and "return" are the desk's own call,
@@ -297,57 +310,73 @@ export async function resolveWithdrawalCheck(p: {
         },
       },
     );
-  // a customer told it was waiting for approval hears how it went
-  const tell = async (outcome: "paid" | "returned") => {
+  const review = check.status === "review";
+  // a customer told it was waiting for approval hears how it went —
+  // "refused" is the wallet saying no after we approved, which must not
+  // read as our decision
+  const tell = async (outcome: "paid" | "rejected" | "refused") => {
     if (!check.reason) return;
     const user = await User.findOne({ authUserId: check.authUserId }, { email: 1, username: 1 }).lean();
     if (!user?.email) return;
     const usd = `$${(check.amountUsdMinor / 100).toFixed(2)}`;
     const ngn = `₦${(check.amountKobo / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const mail = (subject: string, ...body: string[]) => ({
+      to: user.email,
+      subject,
+      text: [`Hi ${user.username},`, "", ...body, "", "The WorldStreet team"].join("\n"),
+    });
+    const support = "If you have a question about it, contact us from the Support page on WorldStreet Predict.";
     await sendCustomerEmails(p.log, [
       outcome === "paid"
-        ? {
-            to: user.email,
-            subject: "Your withdrawal has been sent",
-            text: [`Hi ${user.username},`, "", `Your withdrawal of ${usd} has been approved and sent to your WorldStreet wallet.`, "", "The WorldStreet team"].join("\n"),
-          }
-        : {
-            to: user.email,
-            subject: "Your withdrawal wasn't approved",
-            text: [
-              `Hi ${user.username},`,
-              "",
+        ? mail("Your withdrawal has been sent", `Your withdrawal of ${usd} has been approved and sent to your WorldStreet wallet.`)
+        : outcome === "rejected"
+          ? mail(
+              "Your withdrawal wasn't approved",
               `We couldn't approve your withdrawal of ${usd}, so the ${ngn} credit set aside for it is back in your WorldStreet Predict balance.`,
               "",
-              "If you have a question about it, contact us from the Support page on WorldStreet Predict.",
+              support,
+            )
+          : mail(
+              "Your withdrawal couldn't be sent yet",
+              `We approved your withdrawal of ${usd}, but the WorldStreet wallet couldn't take it right now, so the ${ngn} credit is back in your WorldStreet Predict balance. Nothing is lost — you can try again later.`,
               "",
-              "The WorldStreet team",
-            ].join("\n"),
-          },
+              support,
+            ),
     ]);
+  };
+  // once it's settled: tell the customer and close its alerts. Neither may
+  // undo the settlement, so a failure here is only logged.
+  const wrapUp = async (outcome: "paid" | "rejected" | "refused" | null, note: string) => {
+    try {
+      if (outcome) await tell(outcome);
+      await closeWithdrawalAlerts(p.refKey, p.actor, note);
+    } catch (err) {
+      p.log.error({ err, refKey: p.refKey }, "withdrawal settled, but telling the customer or closing its alert failed");
+    }
   };
 
   try {
     if (p.action === "paid") {
       await settle("paid");
+      await wrapUp(null, "Marked as paid");
       return { status: "paid", message: "Marked as paid — the credit stays withdrawn." };
     }
     if (p.action === "return") {
       await returnWithdrawal(check);
       await settle("returned");
-      await tell("returned");
+      await wrapUp("rejected", review ? "Rejected — credit returned" : "Credit returned");
       return { status: "returned", message: "The credit was returned to the customer." };
     }
     const sent = await sendWithdrawal({ ...check, log: p.log });
     if (sent.outcome === "paid") {
       await settle("paid", { lastCode: "", lastMessage: "" });
-      await tell("paid");
+      await wrapUp("paid", review ? "Approved — paid" : "The wallet confirmed it — paid");
       return { status: "paid", message: "The wallet confirmed the dollars — it's paid." };
     }
     if (sent.outcome === "refused") {
       await returnWithdrawal(check);
       await settle("returned", { lastCode: sent.code, lastMessage: sent.message });
-      await tell("returned");
+      await wrapUp("refused", "The wallet refused it — credit returned");
       return { status: "returned", message: `The wallet refused it (${sent.message}), so the credit was returned.` };
     }
     // sent, but the wallet never answered: from here it's an unconfirmed one
