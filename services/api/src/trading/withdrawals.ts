@@ -134,7 +134,9 @@ export async function holdWithdrawal(p: {
 
 /** Whether an open Abuse watch alert names this account (trading/abuse-alerts.ts). */
 export async function isFlagged(authUserId: string): Promise<boolean> {
-  return Boolean(await AlertRecord.exists({ kind: "abuse", status: "open", authUserIds: authUserId }));
+  return Boolean(
+    await AlertRecord.exists({ kind: { $in: ["abuse", "fault"] }, status: "open", authUserIds: authUserId }),
+  );
 }
 
 /** Why this withdrawal should wait for an admin, or null to send it straight away. */

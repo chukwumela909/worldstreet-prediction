@@ -87,7 +87,7 @@ export async function sendAlert(
       : detail;
 
   const [email, webhook] = await Promise.all([
-    emailAlert(log, subject, body, footer),
+    emailAlert(log, subject, body, footer, opts.kind ?? "other"),
     webhookAlert(log, subject, body),
   ]);
   return { throttled: false, ...email, webhook };
@@ -149,6 +149,7 @@ async function emailAlert(
   subject: string,
   detail: Record<string, unknown>,
   footer: string,
+  kind: AlertKind | "support",
 ): Promise<{ email: AlertDelivery["email"]; emailError?: string }> {
   if (!isEmailConfigured()) return { email: "not_configured" };
   try {
@@ -162,7 +163,7 @@ async function emailAlert(
         from: config.ALERT_EMAIL_FROM,
         to: config.alertEmailTo,
         subject: `[Worldstreet Local] ${subject}`,
-        text: emailBody(subject, detail, footer),
+        text: emailBody(subject, detail, footer, kind),
       }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
@@ -193,12 +194,33 @@ function resendMessage(status: number, body: string): string {
   return `${status}: ${body.slice(0, 200) || "no detail"}`;
 }
 
+/**
+ * What kind of problem an alert is, in plain words — above all, whether
+ * a customer did something wrong. Same names as the Alerts tab
+ * (components/admin/alerts-desk.tsx).
+ */
+const KIND_NOTE: Record<AlertKind | "support", string> = {
+  risk: "Money at risk. Not about a customer doing wrong: WorldStreet could lose a lot if these bets win.",
+  abuse: "Suspicious customer. Their betting looks like it breaks our Terms; their withdrawals wait for approval.",
+  fault: "System fault. Not the customer's doing: money moved outside our records.",
+  settlement: "Market to settle. A market ended but couldn't pay out on its own.",
+  withdrawal: "Withdrawal waiting. A customer's money is held until an admin acts.",
+  test: "Test. Nothing to fix.",
+  other: "Other.",
+  support: "Support request. A customer is waiting for a reply.",
+};
+
 /** Plain text — these are read on a phone at an awkward hour. */
-function emailBody(subject: string, detail: Record<string, unknown>, footer: string): string {
+function emailBody(
+  subject: string,
+  detail: Record<string, unknown>,
+  footer: string,
+  kind: AlertKind | "support",
+): string {
   const lines = Object.entries(detail).map(
     ([key, value]) => `${key}: ${format(value)}`,
   );
-  return [subject, "", ...lines, "", footer].join("\n");
+  return [subject, `Type: ${KIND_NOTE[kind]}`, "", ...lines, "", footer].join("\n");
 }
 
 function format(value: unknown): string {
@@ -302,7 +324,7 @@ export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
   ]);
   const now = Date.now();
   // live money problems first: open, still happening, risk before the rest
-  const rank: Record<string, number> = { risk: 0, abuse: 1, settlement: 2, withdrawal: 3, other: 4, test: 5 };
+  const rank: Record<string, number> = { risk: 0, abuse: 1, fault: 2, settlement: 3, withdrawal: 4, other: 5, test: 6 };
   const alerts: AlertView[] = rows.map((r) => ({
       id: String(r._id),
       kind: r.kind,

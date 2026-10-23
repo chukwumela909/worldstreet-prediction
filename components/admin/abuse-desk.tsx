@@ -35,6 +35,35 @@ const PERIODS = [
   { days: 0, label: "All time" },
 ] as const;
 
+/**
+ * What each card is, so nobody has to guess whether a list means someone
+ * broke the rules: likely abuse, suspicious, or not abuse at all.
+ */
+const NEUTRAL = "bg-element-2 text-secondary";
+const VERDICT = {
+  abuse: {
+    label: "Likely abuse",
+    key: "against our Terms — check, then suspend",
+    chip: FLAG_TONE.danger.chip,
+    count: FLAG_TONE.danger.text,
+  },
+  suspicious: {
+    label: "Suspicious",
+    key: "could go either way — check first",
+    chip: FLAG_TONE.caution.chip,
+    count: FLAG_TONE.caution.text,
+  },
+  needsYou: {
+    label: "Needs you",
+    key: "money waiting on your decision",
+    chip: FLAG_TONE.caution.chip,
+    count: FLAG_TONE.caution.text,
+  },
+  notAbuse: { label: "Not abuse", key: "for information", chip: NEUTRAL, count: "text-primary" },
+  fault: { label: "System fault", key: "our bug, not the customer", chip: NEUTRAL, count: "text-primary" },
+} as const;
+type Verdict = keyof typeof VERDICT;
+
 export function AbuseDesk() {
   const money = useAdminMoney();
   const [days, setDays] = useState<number>(30);
@@ -89,9 +118,17 @@ export function AbuseDesk() {
         <div className="min-w-0">
           <h1 className="text-2xl font-semibold tracking-tight">Abuse watch</h1>
           <p className="mt-1 text-sm text-secondary">
-            Patterns that point to someone taking money they shouldn&rsquo;t. Open a person to
-            suspend them.
+            Customers whose betting may break our rules, and money waiting on you. Each card says
+            which it is. Open a person to suspend them.
           </p>
+          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-secondary">
+            {(Object.keys(VERDICT) as Verdict[]).map((v) => (
+              <li key={v} className="flex items-center gap-1.5">
+                <VerdictChip verdict={v} />
+                {VERDICT[v].key}
+              </li>
+            ))}
+          </ul>
         </div>
         <button
           type="button"
@@ -132,18 +169,20 @@ export function AbuseDesk() {
       ) : (
         <>
           <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            <Count label="Withdrawals to confirm" n={waiting} />
-            <Count label="Below zero" n={belowZero.length} />
-            <Count label="Beating the odds" n={watch.beatingOdds.length} />
-            <Count label="Near-certain buyers" n={watch.nearCertain.length} />
-            <Count label="Accounts in pairs" n={watch.twins.length} />
-            <Count label="Took out more than in" n={watch.cashOut.length} />
-            <Count label="Balance off ledger" n={watch.ledgerGaps.length} />
+            <Count label="Withdrawals to confirm" n={waiting} verdict="needsYou" />
+            <Count label="Below zero" n={belowZero.length} verdict="notAbuse" />
+            <Count label="Beating the odds" n={watch.beatingOdds.length} verdict="abuse" />
+            <Count label="Near-certain buyers" n={watch.nearCertain.length} verdict="abuse" />
+            <Count label="Accounts in pairs" n={watch.twins.length} verdict="suspicious" />
+            <Count label="Took out more than in" n={watch.cashOut.length} verdict="notAbuse" />
+            <Count label="Balance off ledger" n={watch.ledgerGaps.length} verdict="fault" />
           </dl>
 
           {watch.withdrawals.length > 0 && (
             <Card
               title="Withdrawals to confirm"
+              verdict="needsYou"
+              means="Customers' money waiting on your decision. Not abuse in itself."
               blurb="Waiting for approval: a big day of withdrawals, or an account Abuse watch flagged — approve to send the dollars, reject to return the credit (the customer is emailed either way). Unconfirmed: the wallet never answered, so the credit is held, not returned on a guess — ask the wallet again first; only return the credit once you're sure the dollars didn't arrive."
             >
               <ul className="flex flex-col gap-2">
@@ -157,6 +196,8 @@ export function AbuseDesk() {
           {watch.belowZero && (
             <Card
               title="Below zero"
+              verdict="notAbuse"
+              means="A reversal left them owing us. For information only."
               blurb={`Customers who owe money: a reversal took back more than their balance held. Shown next to what's in their WorldStreet dollar wallet — nothing here charges it. Owed in all: ${money.format(
                 belowZero.reduce((s, r) => s + r.owedKobo, 0),
               )}.`}
@@ -181,6 +222,8 @@ export function AbuseDesk() {
 
           <Card
             title="Winning more than the odds allow"
+            verdict="abuse"
+            means="Against our Terms: betting on results already known. Check their bets, then suspend."
             blurb="Won far more often than the prices they paid say is possible by luck — about 1 in 1,000 or rarer. The signature of betting on results already known: a live game, a count anyone can see, a stale price."
             empty={watch.beatingOdds.length === 0}
           >
@@ -198,6 +241,8 @@ export function AbuseDesk() {
 
           <Card
             title="Buying near-certain sides"
+            verdict="abuse"
+            means="Against our Terms: buying results that were already decided. Check their bets, then suspend."
             blurb="Ten or more bets at ₦90 or more a share, and in profit on them — buying results that were all but decided. The ₦90 ceiling stops new ones; this shows who did it."
             empty={watch.nearCertain.length === 0}
           >
@@ -214,6 +259,8 @@ export function AbuseDesk() {
 
           <Card
             title="Accounts moving in pairs"
+            verdict="suspicious"
+            means="Could be one person on two accounts (against our Terms), or friends betting together. Check before acting."
             blurb="Two accounts backing the same side of the same market within two minutes of each other, on five markets or more — often one person using two accounts to get round stake and loss limits."
             empty={watch.twins.length === 0}
           >
@@ -238,6 +285,8 @@ export function AbuseDesk() {
 
           <Card
             title="Took out more than they put in"
+            verdict="notAbuse"
+            means="Honest winners land here too. It only matters if they're also on a Likely abuse card."
             blurb="Withdrew more than they ever added (failed withdrawals that came back are netted off) — where money won on the platform left it. Fine for an honest winner; worth a look next to the scans above."
             empty={watch.cashOut.length === 0}
           >
@@ -253,7 +302,9 @@ export function AbuseDesk() {
 
           <Card
             title="Balance doesn't match the ledger"
-            blurb="The balance isn't the sum of the account's money movements — money moved outside the ledger. This should never happen: tell the developers."
+            verdict="fault"
+            means="Not the customer's doing: a bug on our side. Tell the developers; don't suspend for this."
+            blurb="The balance isn't the sum of the account's money movements — money moved outside the ledger. This should never happen. Their withdrawals wait for approval until the alert is settled."
             empty={watch.ledgerGaps.length === 0}
           >
             {watch.ledgerGaps.map((r) => (
@@ -273,18 +324,28 @@ export function AbuseDesk() {
 
 function Card({
   title,
+  verdict,
+  means,
   blurb,
   empty,
   children,
 }: {
   title: string;
+  verdict: Verdict;
+  /** What the card means, in one line: is it abuse, and what to do. */
+  means: string;
+  /** How the scan finds them. */
   blurb: string;
   empty?: boolean;
   children: React.ReactNode;
 }) {
   return (
     <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
-      <h2 className="text-lg font-semibold">{title}</h2>
+      <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
+        {title}
+        <VerdictChip verdict={verdict} />
+      </h2>
+      <p className="mt-1 text-sm font-semibold text-primary">{means}</p>
       <p className="mt-0.5 text-sm text-secondary">{blurb}</p>
       {empty ? (
         <p className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-yes">
@@ -458,11 +519,23 @@ function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: Ad
   );
 }
 
-function Count({ label, n }: { label: string; n: number }) {
+function VerdictChip({ verdict }: { verdict: Verdict }) {
+  const v = VERDICT[verdict];
+  return (
+    <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${v.chip}`}>
+      {v.label}
+    </span>
+  );
+}
+
+function Count({ label, n, verdict }: { label: string; n: number; verdict: Verdict }) {
   return (
     <div className="rounded-md border border-border bg-surface px-3 py-2 shadow-card">
       <dt className="text-xs font-medium text-secondary">{label}</dt>
-      <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${n > 0 ? "text-warning" : ""}`}>{n}</dd>
+      <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${n > 0 ? VERDICT[verdict].count : ""}`}>{n}</dd>
+      <dd className="mt-1">
+        <VerdictChip verdict={verdict} />
+      </dd>
     </div>
   );
 }

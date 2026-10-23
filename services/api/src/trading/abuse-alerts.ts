@@ -31,10 +31,16 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
 
   const watch = await getAbuseWatch(SCAN_DAYS, { wallets: false });
   let raised = 0;
-  const alert = async (key: string, ids: string[], subject: string, detail: Record<string, unknown>) => {
+  const alert = async (
+    key: string,
+    ids: string[],
+    subject: string,
+    detail: Record<string, unknown>,
+    kind: "abuse" | "fault" = "abuse",
+  ) => {
     await sendAlert(log, subject, detail, {
       throttleKey: key,
-      kind: "abuse",
+      kind,
       authUserIds: ids,
       footer: FOOTER,
     });
@@ -75,12 +81,20 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
       },
     );
   }
+  // our fault, not the customer's — filed apart from abuse, but it still
+  // holds their withdrawals until someone has looked
   for (const g of watch.ledgerGaps) {
-    await alert(`abuse:ledger:${g.authUserId}`, [g.authUserId], `Balance doesn't match the ledger: @${g.username}`, {
-      customer: `@${g.username}${g.email ? ` (${g.email})` : ""}`,
-      gap: `${naira(g.gapKobo)} more on the balance than its ledger explains`,
-      whatToDo: "Money moved outside the ledger — this should never happen. Their withdrawals wait for approval; tell the developers.",
-    });
+    await alert(
+      `abuse:ledger:${g.authUserId}`,
+      [g.authUserId],
+      `Balance doesn't match the ledger: @${g.username}`,
+      {
+        customer: `@${g.username}${g.email ? ` (${g.email})` : ""}`,
+        gap: `${naira(g.gapKobo)} more on the balance than its ledger explains`,
+        whatToDo: "Money moved outside the ledger — this should never happen, and it isn't the customer's doing. Their withdrawals wait for approval; tell the developers.",
+      },
+      "fault",
+    );
   }
   return raised;
 }

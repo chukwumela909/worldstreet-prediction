@@ -79,7 +79,7 @@ export const AlertState: Model<IAlertState> =
  * emailed. "Settled" by an admin once dealt with; a condition that fires
  * again opens it back up, so a settled alert can't hide a live problem.
  */
-export const ALERT_KINDS = ["risk", "abuse", "settlement", "withdrawal", "test", "other"] as const;
+export const ALERT_KINDS = ["risk", "abuse", "fault", "settlement", "withdrawal", "test", "other"] as const;
 export type AlertKind = (typeof ALERT_KINDS)[number];
 
 const alertRecordSchema = new Schema(

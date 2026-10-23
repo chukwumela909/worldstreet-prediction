@@ -23,8 +23,9 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
 /**
  * Alerts: everything the API has warned the admins about by email — a
  * market at or near its loss limit, the book's possible loss past its
- * line, a market settlement couldn't finish, a withdrawal the wallet
- * never confirmed — one card per condition, with how often it fired and
+ * line, a customer Abuse watch flagged, a market settlement couldn't
+ * finish, a withdrawal waiting on an admin — one card per condition,
+ * labelled by what kind of problem it is (KIND), with how often it fired and
  * whether it's still happening, and the fix next to it: void a market
  * that's too one-sided (refunding its bets), or the page where the fix
  * lives. "Mark settled" closes it; a condition that fires again opens it
@@ -34,13 +35,41 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 type View = "open" | "resolved" | "all";
 
-const KIND: Record<AlertKind, { label: string; chip: string }> = {
-  risk: { label: "Risk", chip: FLAG_TONE.danger.chip },
-  abuse: { label: "Abuse", chip: FLAG_TONE.danger.chip },
-  settlement: { label: "Settlement", chip: FLAG_TONE.caution.chip },
-  withdrawal: { label: "Withdrawal", chip: FLAG_TONE.caution.chip },
-  test: { label: "Test", chip: "bg-element-2 text-secondary" },
-  other: { label: "Other", chip: "bg-element-2 text-secondary" },
+/**
+ * What kind of problem each alert is, in plain words — above all,
+ * whether a customer did something wrong. The emails carry the same
+ * names (KIND_NOTE, services/api/src/alerts.ts).
+ */
+const KIND: Record<AlertKind, { label: string; chip: string; means: string }> = {
+  risk: {
+    label: "Money at risk",
+    chip: FLAG_TONE.danger.chip,
+    means: "Not about a customer doing wrong: WorldStreet could lose a lot if these bets win. The fix is on the market.",
+  },
+  abuse: {
+    label: "Suspicious customer",
+    chip: FLAG_TONE.danger.chip,
+    means:
+      "Their betting looks like it breaks our Terms: results already known, or one person on two accounts. Their withdrawals wait for approval until this is settled.",
+  },
+  fault: {
+    label: "System fault",
+    chip: FLAG_TONE.caution.chip,
+    means:
+      "Not the customer's doing: money moved outside our records. Tell the developers. Their withdrawals wait for approval until this is settled.",
+  },
+  settlement: {
+    label: "Market to settle",
+    chip: FLAG_TONE.caution.chip,
+    means: "A market ended but couldn't pay out on its own, so its bets are still waiting.",
+  },
+  withdrawal: {
+    label: "Withdrawal waiting",
+    chip: FLAG_TONE.caution.chip,
+    means: "A customer's money is held until an admin approves the withdrawal or confirms it was paid.",
+  },
+  test: { label: "Test", chip: "bg-element-2 text-secondary", means: "A test sent from Settings. Nothing to fix." },
+  other: { label: "Other", chip: "bg-element-2 text-secondary", means: "Something else the system warned about." },
 };
 
 /** Details the card shows on its own, or ids nobody reads, not in the list of fields. */
@@ -213,7 +242,8 @@ function AlertCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: () =>
             )}
           </p>
           <h2 className="mt-1.5 text-base font-semibold">{a.subject}</h2>
-          <p className="mt-0.5 text-xs text-tertiary">
+          <p className="mt-0.5 text-[13px] text-secondary">{kind.means}</p>
+          <p className="mt-1 text-xs text-tertiary">
             Seen {a.count.toLocaleString("en-US")} time{a.count === 1 ? "" : "s"} · first {when(a.firstAt)} · last{" "}
             {when(a.lastAt)}
           </p>
@@ -365,7 +395,7 @@ function Fixes({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => voi
       {a.kind === "risk" && link("/admin/settings", "Loss limits in Settings")}
       {a.kind === "settlement" && link("/admin", "Settle it on the Local book")}
       {a.kind === "withdrawal" && link("/admin/abuse", "Withdrawals to confirm")}
-      {a.kind === "abuse" && link("/admin/abuse", "Review on Abuse watch")}
+      {(a.kind === "abuse" || a.kind === "fault") && link("/admin/abuse", "Review on Abuse watch")}
       <button
         type="button"
         onClick={() => setStep("settle")}

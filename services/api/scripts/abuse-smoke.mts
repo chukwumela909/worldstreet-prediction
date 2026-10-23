@@ -174,8 +174,12 @@ const raised = await checkAbuseAlerts(log, { force: true });
 const keys = (await AlertRecord.find({ kind: "abuse" }).lean()).map((r) => r.key).sort();
 check(
   `the scan alerts on each flagged person once (${raised})`,
-  JSON.stringify(keys) ===
-    JSON.stringify(["abuse:ledger:u-gap", "abuse:near:u-near", "abuse:odds:u-lucky", "abuse:twins:u-twin1|u-twin2"]),
+  raised === 4 &&
+    JSON.stringify(keys) === JSON.stringify(["abuse:near:u-near", "abuse:odds:u-lucky", "abuse:twins:u-twin1|u-twin2"]),
+);
+check(
+  "a balance off its ledger is filed as a system fault, not abuse — and still holds their withdrawals",
+  (await AlertRecord.exists({ key: "abuse:ledger:u-gap", kind: "fault" })) !== null && (await isFlagged("u-gap")),
 );
 check("…and an hour hasn't passed, so it doesn't run again yet", (await checkAbuseAlerts(log)) === 0);
 check(
@@ -185,7 +189,7 @@ check(
 await AlertRecord.updateOne({ key: "abuse:near:u-near" }, { $set: { status: "resolved" } });
 check("settling the alert lifts it", !(await isFlagged("u-near")));
 await User.updateOne({ authUserId: "u-lucky" }, { $set: { suspendedAt: new Date() } });
-await AlertRecord.deleteMany({ kind: "abuse" });
+await AlertRecord.deleteMany({ kind: { $in: ["abuse", "fault"] } });
 await checkAbuseAlerts(log, { force: true });
 check(
   "someone already suspended isn't alerted on",

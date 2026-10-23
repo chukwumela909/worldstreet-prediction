@@ -1405,7 +1405,7 @@ export const resolveWithdrawal = (refKey: string, action: "retry" | "paid" | "re
 /* Alerts                                                              */
 /* ------------------------------------------------------------------ */
 
-export type AlertKind = "risk" | "abuse" | "settlement" | "withdrawal" | "test" | "other";
+export type AlertKind = "risk" | "abuse" | "fault" | "settlement" | "withdrawal" | "test" | "other";
 
 /** One condition the API has alerted on, with every time it fired. */
 export interface AlertItem {
