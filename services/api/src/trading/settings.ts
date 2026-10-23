@@ -84,6 +84,13 @@ export interface BookSettings {
   earlyCloseHours: number;
   earlyCloseTopics: string[];
   /**
+   * The most the house may stand to lose if every open market went
+   * against it at once — the risk desk's worst case. A bet that would push
+   * it past this is refused; one that doesn't add to it (the other side)
+   * always goes through (trading/book-limit.ts). 0 = no limit.
+   */
+  maxBookLossKobo: number;
+  /**
    * A customer's withdrawals to dollars over the last 24 hours reaching
    * this much wait for an admin's approval (trading/withdrawals.ts);
    * 0 = off. So does any withdrawal by an account Abuse watch has
@@ -127,6 +134,7 @@ export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = 
   maxStakePerMarketKobo: { min: 0, max: 10_000_000_000 }, // ₦0 (off) – ₦100M
   earlyCloseHours: { min: 0, max: 72 },
   withdrawalReviewKobo: { min: 0, max: 10_000_000_000 }, // ₦0 (off) – ₦100M
+  maxBookLossKobo: { min: 0, max: 100_000_000_000 }, // ₦0 (off) – ₦1B
 };
 
 export const SETTING_KEYS: readonly SettingKey[] = [
@@ -147,6 +155,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "earlyCloseHours",
   "earlyCloseTopics",
   "withdrawalReviewKobo",
+  "maxBookLossKobo",
 ];
 
 /**
@@ -181,6 +190,7 @@ export function defaultSettings(): BookSettings {
     // "Pop Base's Number of X Posts by 1PM Today?", "How many likes for…"
     earlyCloseTopics: ["x posts", "likes"],
     withdrawalReviewKobo: 10_000_000, // ₦100,000 a day
+    maxBookLossKobo: 200_000_000, // ₦2,000,000 — twice the loss alert line
   };
 }
 
@@ -317,6 +327,9 @@ export async function updateBookSettings(
   }
   if (next.autoSpreadStepKobo > 0 && next.autoSpreadStepKobo < MIN_AUTO_SPREAD_STEP_KOBO) {
     invalid("The auto-adjust amount must be 0 (off) or at least ₦1,000");
+  }
+  if (next.maxBookLossKobo > 0 && next.maxBookLossKobo < 1_000_000) {
+    invalid("The maximum total loss must be 0 (no limit) or at least ₦10,000");
   }
   if (next.maxStakePerMarketKobo > 0 && next.maxStakePerMarketKobo < next.minStakeKobo) {
     invalid("The most per customer per market must be 0 (no cap) or at least the minimum stake");

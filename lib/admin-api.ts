@@ -934,6 +934,8 @@ export interface BookSettings {
   earlyCloseTopics: string[];
   /** A customer's withdrawals in 24 hours reaching this wait for approval, kobo; 0 = off. */
   withdrawalReviewKobo: number;
+  /** The most the whole book may stand to lose at once, kobo; bets adding past it are refused; 0 = off. */
+  maxBookLossKobo: number;
 }
 
 export type BookSettingKey = keyof BookSettings;

@@ -85,7 +85,12 @@ async function ownMarket(title: string) {
       { label: "No", priceKobo: 5_000 },
     ],
   });
-  return { eventId: event.eventId, marketId: market.marketId, yes: market.outcomes[0]!.outcomeId };
+  return {
+    eventId: event.eventId,
+    marketId: market.marketId,
+    yes: market.outcomes[0]!.outcomeId,
+    no: market.outcomes[1]!.outcomeId,
+  };
 }
 
 async function fund(authUserId: string, kobo: number) {
@@ -329,6 +334,94 @@ check("…an ordinary market closing as soon still does", (await earlyBet(plain,
 await settings.updateBookSettings({ earlyCloseHours: 1 }, "smoke");
 check("…and with the early close at 1 hour, the count market opens again", (await earlyBet(counted, "early-key-0003")) === "ok");
 await settings.updateBookSettings({ earlyCloseHours: 3 }, "smoke");
+
+/* ---------------- the whole book's loss limit ---------------- */
+console.log("the whole book's loss limit");
+const { getBookRisk } = await import("../src/trading/risk.js");
+await settings.updateBookSettings({ maxStakePerMarketKobo: 0, maxMarketExposureKobo: 100_000_000 }, "smoke");
+const booked = await ownMarket("Will the governor sign the budget?");
+await fund("u-book", 10_000_000);
+await fund("u-book2", 10_000_000);
+const bookBet = (user: string, side: "yes" | "no", key: string, stakeKobo: number) =>
+  outcomeOf(() =>
+    placeOrder(
+      user,
+      {
+        eventId: booked.eventId,
+        marketId: booked.marketId,
+        outcomeId: side === "yes" ? booked.yes : booked.no,
+        stakeKobo,
+        expectedPriceKobo: side === "yes" ? 5_500 : 5_000,
+        idempotencyKey: key,
+      },
+      log,
+    ),
+  );
+// the limit sits ₦500 above what the book could already lose
+const startLoss = Math.max(-(await getBookRisk()).worstCaseKobo, 0);
+await settings.updateBookSettings({ maxBookLossKobo: Math.max(startLoss + 50_000, 1_000_000) }, "smoke");
+const cap = (await settings.getBookSettings()).maxBookLossKobo;
+// each ₦1,000 on Yes at ₦55 could cost the book ₦818 more
+let yesOk = 0;
+for (let i = 0; i < 40; i++) {
+  if ((await bookBet("u-book", "yes", `book-key-${100 + i}`, 100_000)) !== "ok") break;
+  yesOk += 1;
+}
+check(`bets on one side go through until the limit (${yesOk} of ₦1,000)`, yesOk > 0 && yesOk < 40);
+const refusedYes = await outcomeOf(() =>
+  placeOrder(
+    "u-book",
+    { eventId: booked.eventId, marketId: booked.marketId, outcomeId: booked.yes, stakeKobo: 500_000, expectedPriceKobo: 5_500, idempotencyKey: "book-key-0500" },
+    log,
+  ),
+);
+check(`then that side is refused (BOOK_LIMIT_REACHED) (got ${refusedYes})`, refusedYes === "BOOK_LIMIT_REACHED");
+let refusalMessage = "";
+try {
+  await placeOrder(
+    "u-book",
+    { eventId: booked.eventId, marketId: booked.marketId, outcomeId: booked.yes, stakeKobo: 500_000, expectedPriceKobo: 5_500, idempotencyKey: "book-key-0501" },
+    log,
+  );
+} catch (err) {
+  refusalMessage = err instanceof Error ? err.message : "";
+}
+check("…telling them the other outcome is open", /another outcome/.test(refusalMessage));
+check(
+  "the book never goes past the limit",
+  -(await getBookRisk()).worstCaseKobo <= cap,
+);
+check("the other side still takes bets — they bring the risk down", (await bookBet("u-book2", "no", "book-key-0600", 200_000)) === "ok");
+const room = await outcomeOf(() =>
+  placeOrder(
+    "u-book",
+    { eventId: booked.eventId, marketId: booked.marketId, outcomeId: booked.yes, stakeKobo: 100_000, expectedPriceKobo: 5_500, idempotencyKey: "book-key-0700" },
+    log,
+  ),
+);
+check(`…and once it has, there's room on the first side again (got ${room})`, room === "ok");
+let tooBig = "";
+let tooBigMax = -1;
+try {
+  await placeOrder(
+    "u-book",
+    { eventId: booked.eventId, marketId: booked.marketId, outcomeId: booked.yes, stakeKobo: 5_000_000, expectedPriceKobo: 5_500, idempotencyKey: "book-key-0750" },
+    log,
+  );
+} catch (err) {
+  tooBig = err instanceof Error ? err.message : "";
+  tooBigMax = Number((err as { details?: { maxStakeKobo?: number } }).details?.maxStakeKobo ?? -1);
+}
+check(
+  `a bet too big for the room left is told how much would fit (up to ${tooBigMax / 100})`,
+  /you can bet up to ₦/.test(tooBig) && tooBigMax >= 10_000 && tooBigMax < 5_000_000,
+);
+check(
+  "…and that amount does go through",
+  (await bookBet("u-book", "yes", "book-key-0751", tooBigMax)) === "ok" && -(await getBookRisk()).worstCaseKobo <= cap,
+);
+await settings.updateBookSettings({ maxBookLossKobo: 0 }, "smoke");
+check("with the limit off (0), the side bets freely again", (await bookBet("u-book", "yes", "book-key-0800", 500_000)) === "ok");
 
 /* ---------------- a voided market takes no new bets ---------------- */
 console.log("after the desk voids a market");

@@ -97,6 +97,7 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
     maxStakePerMarketKobo: perMarket,
     earlyCloseHours: earlyClose,
     withdrawalReviewKobo: withdrawalReview,
+    maxBookLossKobo: bookCap,
   } = values;
   const risks: SettingRisk[] = [];
 
@@ -201,6 +202,19 @@ export function settingRisks(values: Partial<BookSettings>): SettingRisk[] {
       field: "maxQuoteKobo",
       level: "risky",
       reason: "Near-certain sides are still on sale.",
+    });
+  }
+  if (bookCap === 0) {
+    risks.push({
+      field: "maxBookLossKobo",
+      level: "risky",
+      reason: "No limit on the whole book — risk can keep piling up across markets.",
+    });
+  } else if (bookCap !== undefined && lossAlert !== undefined && lossAlert > 0 && bookCap <= lossAlert) {
+    risks.push({
+      field: "maxBookLossKobo",
+      level: "caution",
+      reason: "At or below the Book loss alert — customers would be refused before admins are warned.",
     });
   }
   if (perMarket === 0) {

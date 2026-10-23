@@ -130,6 +130,7 @@ const settingsBody = z
     earlyCloseHours: z.number().int(),
     earlyCloseTopics: z.array(z.string().max(80)).max(50),
     withdrawalReviewKobo: z.number().int(),
+    maxBookLossKobo: z.number().int(),
   })
   .partial()
   .strict();

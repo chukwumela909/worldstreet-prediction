@@ -2,6 +2,7 @@ import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
 import { assertNotSuspended } from "../accounts.js";
+import { sendAlert } from "../alerts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { fetchTradableEvent, requireMarket } from "../trading/events.js";
@@ -18,6 +19,7 @@ import {
 import { eventOrMarketId, outcomeId } from "../trading/ids.js";
 import { withMarketLock } from "../trading/market-lock.js";
 import { isPausedMarket } from "../trading/paused.js";
+import { checkBookLimit } from "../trading/book-limit.js";
 import { Position, Settlement, type IPosition } from "../trading/models.js";
 
 /**
@@ -298,6 +300,49 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
         "This market has reached its trading limit for now",
         "MARKET_LIMIT_REACHED",
       );
+    }
+
+    // the whole book's limit: only a bet that adds to the worst case past
+    // it is refused — the other side stays open — and the customer is
+    // told how much would still fit (trading/book-limit.ts)
+    if (settings.maxBookLossKobo > 0) {
+      const limit = await checkBookLimit({
+        marketId: market.id,
+        outcomeId: outcome.id,
+        stakeKobo: body.stakeKobo,
+        priceKobo: freshPriceKobo,
+        capKobo: settings.maxBookLossKobo,
+      });
+      if (!limit.ok) {
+        void sendAlert(
+          log,
+          "Bets refused: the book's total loss limit is reached",
+          {
+            market: `${event.title} — ${market.title}`,
+            refusedSide: outcome.label,
+            worstCaseWithIt: `−${naira(limit.worstLossKobo)}`,
+            limit: naira(settings.maxBookLossKobo),
+            whatToDo:
+              "Customers can't add to this side. Void or reprice the most one-sided market, or raise Maximum total loss in Settings if the book can carry more.",
+          },
+          {
+            throttleKey: "risk:book-cap",
+            kind: "risk",
+            eventId: event.id,
+            marketId: market.id,
+            footer: "Deal with it in the admin desk: Admin → Watch → Alerts.",
+          },
+        ).catch((err: unknown) => log.error({ err }, "book-limit alert failed"));
+        const fits = limit.maxStakeKobo >= settings.minStakeKobo;
+        throw new ApiError(
+          409,
+          fits
+            ? `So much is already riding on ${outcome.label} that you can bet up to ${naira(limit.maxStakeKobo)} on it right now — or back another outcome`
+            : `${outcome.label} isn't taking more bets right now because so much is already riding on it — you can still back another outcome`,
+          "BOOK_LIMIT_REACHED",
+          { maxStakeKobo: fits ? limit.maxStakeKobo : 0 },
+        );
+      }
     }
 
     const debit = await debitNaira({

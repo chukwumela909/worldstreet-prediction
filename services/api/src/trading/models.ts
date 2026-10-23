@@ -225,6 +225,7 @@ const bookSettingsSchema = new Schema(
     earlyCloseHours: { type: Number },
     earlyCloseTopics: { type: [String], default: undefined },
     withdrawalReviewKobo: { type: Number },
+    maxBookLossKobo: { type: Number },
     /** Email of the admin behind the last change. */
     updatedBy: { type: String },
   },

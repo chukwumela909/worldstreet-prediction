@@ -156,6 +156,13 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     step: 50_000,
     info: "All of one customer's bets on one market together can't go above this. It stops someone stacking bet after bet on a result they already know — like 41 bets of ₦50,000 on one post-count market. Honest players rarely come close. Set to 0 for no cap.",
   },
+  maxBookLossKobo: {
+    key: "maxBookLossKobo",
+    label: "Maximum total loss (all markets)",
+    unit: "credit",
+    step: 100_000,
+    info: "The most WorldStreet may stand to lose if every open market went against us at once. A bet that would push past it is refused, and the customer is told how much they can still bet on that side — the other side always stays open, since bets there bring the risk down. Admins get an alert when it starts refusing bets. Keep it above the Book loss alert, so you're warned before anyone is refused. Set to 0 for no limit.",
+  },
   earlyCloseHours: {
     key: "earlyCloseHours",
     label: "Close count markets early",
@@ -192,6 +199,7 @@ const ORDER: FormKey[] = [
   "minStakeKobo",
   "maxStakeKobo",
   "maxMarketExposureKobo",
+  "maxBookLossKobo",
   "maxStakePerMarketKobo",
   "maxQuoteKobo",
   "priceToleranceKobo",
@@ -221,8 +229,8 @@ const GROUPS: { title: string; note: string; rows: FormKey[] }[] = [
   },
   {
     title: "Limits",
-    note: "How much one bet, one customer and one market can put at stake.",
-    rows: ["minStakeKobo", "maxStakeKobo", "maxStakePerMarketKobo", "maxMarketExposureKobo"],
+    note: "How much one bet, one customer, one market and the whole book can put at stake.",
+    rows: ["minStakeKobo", "maxStakeKobo", "maxStakePerMarketKobo", "maxMarketExposureKobo", "maxBookLossKobo"],
   },
   {
     title: "Safety",
