@@ -196,6 +196,22 @@ check(
   !(await AlertRecord.exists({ key: "abuse:odds:u-lucky" })) && Boolean(await AlertRecord.exists({ key: "abuse:near:u-near" })),
 );
 
+/* ---------------- the Written off tab ---------------- */
+console.log("the Written off tab");
+const off = (await admin("GET", "/v1/admin/written-off")).json() as {
+  data: {
+    customers: number;
+    totalKobo: number;
+    rows: { username: string; email: string; writtenOffKobo: number; times: number; balanceKobo: number; walletUsdMinor: number | null }[];
+  };
+};
+check(
+  "it lists only who was written off, with the exact amount from the records",
+  off.data.customers === 1 && off.data.totalKobo === 300_000 && off.data.rows[0]!.username === "waived" && off.data.rows[0]!.writtenOffKobo === 300_000,
+);
+check("…their email, what they hold now, and the wallet as unknown when it can't be asked", off.data.rows[0]!.email.includes("waived") && off.data.rows[0]!.balanceKobo === -100_000 && off.data.rows[0]!.walletUsdMinor === null);
+check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/written-off" })).statusCode === 401);
+
 /* ---------------- the Withdrawals tab ---------------- */
 console.log("the Withdrawals tab");
 const desk = (await admin("GET", "/v1/admin/withdrawals")).json() as {

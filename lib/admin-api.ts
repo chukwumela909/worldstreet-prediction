@@ -1431,6 +1431,39 @@ export async function fetchWalletChecks(): Promise<WalletCheckRun[]> {
 export const runWalletCheck = (account: string) =>
   adminPost<WalletCheckRun>("/v1/admin/wallet-check", { account, confirm: "RUN" });
 
+/** One customer whose debt was written off, from the money records. */
+export interface WrittenOffRow {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  writtenOffKobo: number;
+  times: number;
+  firstAt: string;
+  lastAt: string;
+  by: string;
+  balanceKobo: number;
+  /** Null when the wallet couldn't say. */
+  walletUsdMinor: number | null;
+  walletLockedMinor: number | null;
+  suspendedAt: string | null;
+}
+
+export interface WrittenOffList {
+  customers: number;
+  totalKobo: number;
+  rows: WrittenOffRow[];
+}
+
+export async function fetchWrittenOff(): Promise<WrittenOffList> {
+  try {
+    const res = await apiFetch<{ data: WrittenOffList }>("/v1/admin/written-off");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
 /** One customer with withdrawals waiting: their requests stacked, their money beside them. */
 export interface WithdrawalPerson {
   authUserId: string;

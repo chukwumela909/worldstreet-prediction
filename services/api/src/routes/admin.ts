@@ -37,6 +37,7 @@ import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds } from "../trading/pause-refunds.js";
 import { getAbuseWatch } from "../trading/abuse.js";
+import { getWrittenOff } from "../trading/written-off.js";
 import { getWithdrawalDesk, resolveWithdrawalCheck } from "../trading/withdrawals.js";
 import { listWalletChecks, readTestAccount, runWalletCheck } from "../trading/wallet-check.js";
 import { listAlerts, resolveAlert, sendAlert } from "../alerts.js";
@@ -736,6 +737,12 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     await requireAdmin(request);
     const days = request.query.days === 0 ? null : request.query.days;
     return { success: true, data: await getAbuseWatch(days) };
+  });
+
+  /** Everyone whose debt was written off, with what they hold now. Read-only. */
+  app.get("/admin/written-off", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getWrittenOff() };
   });
 
   /** Everyone with a withdrawal waiting: their requests stacked, their money beside them. */

@@ -57,6 +57,7 @@ const NAV = [
     pages: [
       { href: "/admin/settled", label: "Settled bets" },
       { href: "/admin/recovery", label: "Recovery" },
+      { href: "/admin/written-off", label: "Written off" },
     ],
   },
   { label: "Support", icon: Support, pages: [{ href: "/admin/support", label: "Support" }] },
