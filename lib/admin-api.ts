@@ -1447,6 +1447,40 @@ export interface WrittenOffRow {
   walletUsdMinor: number | null;
   walletLockedMinor: number | null;
   suspendedAt: string | null;
+  addedKobo: number;
+  addedUsdMinor: number;
+  /** Really sent to the dollar wallet: not failed, not still waiting. */
+  sentKobo: number;
+  sentUsdMinor: number;
+  /** The part of that sent before their first write-off. */
+  sentBeforeKobo: number;
+  sentBeforeUsdMinor: number;
+  waitingKobo: number;
+  /** Dollars sent less dollars brought in. */
+  netUsdMinor: number;
+  /** The most of their wallet that could be Predict's money; null when the wallet couldn't say. */
+  fromPredictAtMostUsdMinor: number | null;
+}
+
+/** One step of a customer's money flow, oldest first. */
+export interface FlowStep {
+  kind: "added" | "betting" | "sent" | "failed" | "waiting" | "reversed" | "written_off" | "other";
+  at: string;
+  until: string;
+  count: number;
+  /** Change to the Predict balance. */
+  amountKobo: number;
+  usdMinor: number | null;
+  balanceAfterKobo: number;
+}
+
+export async function fetchMoneyFlow(authUserId: string): Promise<{ steps: FlowStep[] }> {
+  try {
+    const res = await apiFetch<{ data: { steps: FlowStep[] } }>(`/v1/admin/written-off/${encodeURIComponent(authUserId)}/flow`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
 }
 
 export interface WrittenOffList {

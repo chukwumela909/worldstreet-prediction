@@ -212,6 +212,53 @@ check(
 check("…their email, what they hold now, and the wallet as unknown when it can't be asked", off.data.rows[0]!.email.includes("waived") && off.data.rows[0]!.balanceKobo === -100_000 && off.data.rows[0]!.walletUsdMinor === null);
 check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/written-off" })).statusCode === 401);
 
+console.log("a written-off customer's money flow");
+await User.create({ authUserId: "u-flow", email: "flow@example.test", username: "flow", displayName: "Flow" });
+const flowIn = (kobo: number, usd: number, key: string) =>
+  creditNaira({ authUserId: "u-flow", amountKobo: kobo, type: "conversion_in", refKey: `convert:u-flow:${key}`, description: "in", metadata: { amountUsdMinor: usd } });
+const flowOut = (kobo: number, usd: number, key: string) =>
+  debitNaira({ authUserId: "u-flow", amountKobo: kobo, type: "conversion_out", refKey: `convert:u-flow:${key}`, description: "out", metadata: { amountUsdMinor: usd } });
+await flowIn(300_000, 205, "in-1");
+await debitNaira({ authUserId: "u-flow", amountKobo: 100_000, type: "trade_stake", refKey: "flow-stake-1", description: "bet" });
+await debitNaira({ authUserId: "u-flow", amountKobo: 100_000, type: "trade_stake", refKey: "flow-stake-2", description: "bet" });
+await creditNaira({ authUserId: "u-flow", amountKobo: 800_000, type: "payout", refKey: "flow-payout-1", description: "won" });
+await flowOut(500_000, 341, "out-1");
+// a failed withdrawal that came back moves nothing
+await flowOut(200_000, 136, "out-2");
+await creditNaira({ authUserId: "u-flow", amountKobo: 200_000, type: "refund", refKey: "convert:u-flow:out-2:reversal", description: "back" });
+await adjustNaira({ authUserId: "u-flow", amountKobo: -600_000, type: "reversal", refKey: "reverse:flow-1", description: "reversed", metadata: {} });
+await writeOffDebt({ authUserId: "u-flow", refKey: "writeoff:flow-1", description: "waived", metadata: { actor: "key:josh" } });
+await flowIn(100_000, 69, "in-2");
+await flowOut(50_000, 34, "out-3");
+// still waiting: not sent, so it doesn't count as having reached the wallet
+await flowOut(20_000, 13, "out-4");
+await WithdrawalCheck.create({ refKey: "convert:u-flow:out-4", authUserId: "u-flow", amountKobo: 20_000, amountUsdMinor: 13, rate: 1_464.5, status: "review", reason: "big" });
+const flowList = (await admin("GET", "/v1/admin/written-off")).json() as {
+  data: { customers: number; rows: { username: string; writtenOffKobo: number; by: string; addedUsdMinor: number; sentKobo: number; sentUsdMinor: number; sentBeforeUsdMinor: number; waitingKobo: number; netUsdMinor: number; fromPredictAtMostUsdMinor: number | null }[] };
+};
+const flowRow = flowList.data.rows.find((r) => r.username === "flow")!;
+check("the biggest write-off comes first", flowList.data.customers === 2 && flowList.data.rows[0]!.username === "waived" && flowRow.writtenOffKobo === 200_000);
+check("…who wrote it off", flowRow.by === "key:josh");
+check("dollars in and really out: failed and waiting withdrawals don't count", flowRow.addedUsdMinor === 274 && flowRow.sentKobo === 550_000 && flowRow.sentUsdMinor === 375);
+check("…what left before the write-off, and what's still waiting", flowRow.sentBeforeUsdMinor === 341 && flowRow.waitingKobo === 20_000);
+check("…how much more Predict gave their wallet than it took", flowRow.netUsdMinor === 101);
+check("…and no claim about the wallet when it can't be read", flowRow.fromPredictAtMostUsdMinor === null);
+const flow = (await admin("GET", "/v1/admin/written-off/u-flow/flow")).json() as {
+  data: { steps: { kind: string; count: number; amountKobo: number; usdMinor: number | null; balanceAfterKobo: number }[] };
+};
+check(
+  "the flow reads in order, with bets rolled into one step",
+  JSON.stringify(flow.data.steps.map((s) => s.kind)) ===
+    JSON.stringify(["added", "betting", "sent", "failed", "reversed", "written_off", "added", "sent", "waiting"]),
+);
+const flowStep = (kind: string) => flow.data.steps.find((s) => s.kind === kind)!;
+check("…the betting step adds up", flowStep("betting").count === 2 && flowStep("betting").amountKobo === 600_000);
+check("…a failed withdrawal moves nothing, and ends back where it was", flowStep("failed").amountKobo === 0 && flowStep("failed").balanceAfterKobo === 400_000);
+check("…the sent step shows its dollars", flowStep("sent").usdMinor === 341 && flowStep("sent").amountKobo === -500_000);
+check("…the write-off lands on zero", flowStep("written_off").amountKobo === 200_000 && flowStep("written_off").balanceAfterKobo === 0);
+check("an unknown customer is a 404", (await admin("GET", "/v1/admin/written-off/nobody/flow")).statusCode === 404);
+check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/written-off/u-flow/flow" })).statusCode === 401);
+
 /* ---------------- the Withdrawals tab ---------------- */
 console.log("the Withdrawals tab");
 const desk = (await admin("GET", "/v1/admin/withdrawals")).json() as {

@@ -37,7 +37,7 @@ import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds } from "../trading/pause-refunds.js";
 import { getAbuseWatch } from "../trading/abuse.js";
-import { getWrittenOff } from "../trading/written-off.js";
+import { getMoneyFlow, getWrittenOff } from "../trading/written-off.js";
 import { getWithdrawalDesk, resolveWithdrawalCheck } from "../trading/withdrawals.js";
 import { listWalletChecks, readTestAccount, runWalletCheck } from "../trading/wallet-check.js";
 import { listAlerts, resolveAlert, sendAlert } from "../alerts.js";
@@ -743,6 +743,12 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   app.get("/admin/written-off", async (request) => {
     await requireAdmin(request);
     return { success: true, data: await getWrittenOff() };
+  });
+
+  /** One customer's money flow on Predict, oldest first. Read-only. */
+  app.get<{ Params: { authUserId: string } }>("/admin/written-off/:authUserId/flow", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getMoneyFlow(request.params.authUserId) };
   });
 
   /** Everyone with a withdrawal waiting: their requests stacked, their money beside them. */
