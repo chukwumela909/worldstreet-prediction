@@ -196,6 +196,52 @@ check(
   !(await AlertRecord.exists({ key: "abuse:odds:u-lucky" })) && Boolean(await AlertRecord.exists({ key: "abuse:near:u-near" })),
 );
 
+/* ---------------- the Suspended bets tab ---------------- */
+console.log("the Suspended bets tab");
+await User.create({ authUserId: "u-review", email: "review@example.test", username: "review", displayName: "Review", suspendedAt: new Date() });
+await creditNaira({ authUserId: "u-review", amountKobo: 3_000, type: "conversion_in", refKey: "fund:u-review", description: "funds" });
+const beforeTerms = Date.parse("2026-10-20T12:00:00Z");
+const fromTerms = Date.parse("2026-10-22T12:00:00Z");
+// two wins at ₦95 before the Terms (₦52.63 profit each), one loss at ₦95 after them
+await bet("u-review", { market: "m-review", priceKobo: 9_500, won: true, at: beforeTerms });
+await bet("u-review", { market: "m-review", priceKobo: 9_500, won: true, at: beforeTerms + 60_000 });
+await bet("u-review", { market: "m-review-2", priceKobo: 9_000, won: false, at: fromTerms });
+// not counted: a low price, one still open, one reversed, one refunded
+await bet("u-review", { priceKobo: 5_000, won: true, at: beforeTerms });
+await bet("u-review", { priceKobo: 9_500, won: null, at: beforeTerms });
+await bet("u-review", { priceKobo: 9_500, won: true, at: beforeTerms, reversed: true });
+await bet("u-review", { market: "m-review-void", priceKobo: 9_500, won: null, at: beforeTerms });
+await Position.updateOne({ authUserId: "u-review", marketId: "m-review-void" }, { $set: { status: "voided" } });
+const reviewBody = (await admin("GET", "/v1/admin/bet-review")).json() as {
+  data: {
+    rows: {
+      username: string;
+      allBets: number;
+      balanceKobo: number;
+      balanceCoversKobo: number;
+      highReversed: number;
+      highRefunded: number;
+      high: { bets: number; won: number; lost: number; stakedKobo: number; profitKobo: number };
+      beforeTerms: { bets: number; profitKobo: number };
+      afterTerms: { bets: number; profitKobo: number };
+      markets: { outcome: string; bets: number; profitKobo: number; firstAt: string; lastAt: string }[];
+    }[];
+  };
+};
+const reviewRow = reviewBody.data.rows.find((r) => r.username === "review")!;
+check("it only lists suspended customers", !reviewBody.data.rows.some((r) => r.username === "fair"));
+check(
+  "it counts settled ₦90+ bets only, from all their bets",
+  reviewRow.allBets === 7 && reviewRow.high.bets === 3 && reviewRow.high.won === 2 && reviewRow.high.lost === 1,
+);
+check("…with the amount staked and the profit, losses taken off", reviewRow.high.stakedKobo === 300_000 && reviewRow.high.profitKobo === 2 * 5_263 - 100_000);
+check("…split at the day the Terms went live", reviewRow.beforeTerms.bets === 2 && reviewRow.beforeTerms.profitKobo === 10_526 && reviewRow.afterTerms.bets === 1);
+check("…reversed and refunded ones shown apart", reviewRow.highReversed === 1 && reviewRow.highRefunded === 1);
+check("a loss overall means nothing to cover", reviewRow.balanceCoversKobo === 0 && reviewRow.balanceKobo === 3_000);
+const reviewMarket = reviewRow.markets.find((m) => m.bets === 2)!;
+check("each market shows its exact first and last bet time", reviewMarket.firstAt === new Date(beforeTerms).toISOString() && reviewMarket.lastAt === new Date(beforeTerms + 60_000).toISOString());
+check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/bet-review" })).statusCode === 401);
+
 /* ---------------- the Written off tab ---------------- */
 console.log("the Written off tab");
 const off = (await admin("GET", "/v1/admin/written-off")).json() as {

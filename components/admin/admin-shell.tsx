@@ -40,6 +40,7 @@ const NAV = [
       { href: "/admin/alerts", label: "Alerts" },
       { href: "/admin/withdrawals", label: "Withdrawals" },
       { href: "/admin/abuse", label: "Suspicious customers" },
+      { href: "/admin/bet-review", label: "Suspended bets" },
       { href: "/admin/money-checks", label: "Money checks" },
     ],
   },

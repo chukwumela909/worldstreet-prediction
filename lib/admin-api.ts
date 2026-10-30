@@ -1431,6 +1431,55 @@ export async function fetchWalletChecks(): Promise<WalletCheckRun[]> {
 export const runWalletCheck = (account: string) =>
   adminPost<WalletCheckRun>("/v1/admin/wallet-check", { account, confirm: "RUN" });
 
+/** How many bets and how much money, on a set of a customer's bets. */
+export interface BetTally {
+  bets: number;
+  won: number;
+  lost: number;
+  stakedKobo: number;
+  profitKobo: number;
+}
+
+export interface BetReviewMarket extends BetTally {
+  title: string;
+  outcome: string;
+  avgPriceKobo: number;
+  firstAt: string;
+  lastAt: string;
+}
+
+/** One suspended customer's ₦90+ bets, counted from all their bets. */
+export interface BetReviewRow {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  suspendedAt: string | null;
+  balanceKobo: number;
+  allBets: number;
+  high: BetTally;
+  beforeTerms: BetTally;
+  afterTerms: BetTally;
+  highReversed: number;
+  highRefunded: number;
+  balanceCoversKobo: number;
+  markets: BetReviewMarket[];
+}
+
+export interface BetReview {
+  termsLiveAt: string;
+  rows: BetReviewRow[];
+}
+
+export async function fetchBetReview(): Promise<BetReview> {
+  try {
+    const res = await apiFetch<{ data: BetReview }>("/v1/admin/bet-review");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
 /** One customer whose debt was written off, from the money records. */
 export interface WrittenOffRow {
   authUserId: string;
