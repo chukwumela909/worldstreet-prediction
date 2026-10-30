@@ -38,6 +38,7 @@ const NAV = [
     pages: [
       { href: "/admin/alerts", label: "Alerts" },
       { href: "/admin/abuse", label: "Abuse watch" },
+      { href: "/admin/wallet-check", label: "Wallet check" },
     ],
   },
   {

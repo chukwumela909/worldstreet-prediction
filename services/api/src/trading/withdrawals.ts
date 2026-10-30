@@ -3,7 +3,7 @@ import { sendAlert } from "../alerts.js";
 import { sendCustomerEmails } from "../customer-mail.js";
 import { ApiError } from "../errors.js";
 import { AlertRecord, User } from "../models.js";
-import { creditWallet } from "../wallet.js";
+import { creditWallet, type WalletResult } from "../wallet.js";
 import { creditNaira } from "./ledger.js";
 import { LedgerEntry, WithdrawalCheck } from "./models.js";
 import type { BookSettings } from "./settings.js";
@@ -37,6 +37,11 @@ export type SendOutcome = "paid" | "refused" | "unknown";
 /** A refusal that means "you already did this" — the first attempt went through. */
 const DUPLICATE = /duplicate|already/i;
 
+/** The wallet saying it has already paid this reference, which counts as paid. */
+export function isDuplicateAnswer(result: WalletResult<unknown>): boolean {
+  return !result.ok && result.definite && (result.status === 409 || DUPLICATE.test(`${result.code} ${result.message}`));
+}
+
 function credit(p: { authUserId: string; refKey: string; amountKobo: number; amountUsdMinor: number; rate: number }) {
   return creditWallet({
     clerkUserId: p.authUserId,
@@ -62,8 +67,7 @@ export async function sendWithdrawal(p: {
     // no wallet configured means no call was made: that says nothing
     // about whether an earlier attempt paid, so it's never a refusal
     if (result.definite && result.code !== "NOT_CONFIGURED") {
-      const duplicate = result.status === 409 || DUPLICATE.test(`${result.code} ${result.message}`);
-      return { outcome: duplicate ? "paid" : "refused", code: result.code, message: result.message };
+      return { outcome: isDuplicateAnswer(result) ? "paid" : "refused", code: result.code, message: result.message };
     }
     if (attempt === 0) {
       p.log.warn({ code: result.code, refKey: p.refKey }, "wallet credit unanswered — asking again under the same reference");

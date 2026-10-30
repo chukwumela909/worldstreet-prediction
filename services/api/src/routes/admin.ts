@@ -38,6 +38,7 @@ import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds } from "../trading/pause-refunds.js";
 import { getAbuseWatch } from "../trading/abuse.js";
 import { resolveWithdrawalCheck } from "../trading/withdrawals.js";
+import { listWalletChecks, runWalletCheck } from "../trading/wallet-check.js";
 import { listAlerts, resolveAlert, sendAlert } from "../alerts.js";
 import { WithdrawalCheck } from "../trading/models.js";
 import { config } from "../config.js";
@@ -93,6 +94,12 @@ const resolveAlertBody = z.object({
 const abuseQuery = z.object({
   /** Bets placed in the last N days; 0 = all time. Money in and out is always all time. */
   days: z.coerce.number().int().min(0).max(3650).default(30),
+});
+const walletCheckBody = z.object({
+  /** Whose dollar wallet to test on: a username or email. */
+  account: z.string().trim().min(2).max(200),
+  /** It moves real money, if only a cent, so it's never run by accident. */
+  confirm: z.literal("RUN"),
 });
 const withdrawalResolveBody = z.object({
   refKey: z.string().min(8).max(300),
@@ -727,6 +734,22 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const days = request.query.days === 0 ? null : request.query.days;
     return { success: true, data: await getAbuseWatch(days) };
   });
+
+  /** The latest wallet checks (trading/wallet-check.ts). */
+  app.get("/admin/wallet-check", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: { runs: await listWalletChecks() } };
+  });
+
+  /** Test the live wallet with 1 cent on one account, then take it back. */
+  app.post(
+    "/admin/wallet-check",
+    { schema: { body: walletCheckBody }, config: { rateLimit: { max: 6, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      return { success: true, data: await runWalletCheck({ account: request.body.account, actor: actor.label }) };
+    },
+  );
 
   /**
    * Settle a withdrawal the wallet never confirmed: ask it again under

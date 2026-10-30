@@ -1397,6 +1397,40 @@ export async function fetchAbuseWatch(days: number): Promise<AbuseWatch> {
   }
 }
 
+/** One step of a wallet check: what was asked, and what the wallet did. */
+export interface WalletCheckStep {
+  key: string;
+  label: string;
+  status: "pass" | "fail" | "skip";
+  detail: string;
+}
+
+export interface WalletCheckRun {
+  id: string;
+  account: string;
+  verdict: "working" | "not_working";
+  summary: string;
+  steps: WalletCheckStep[];
+  /** Cents the check left in that dollar wallet. */
+  leftoverMinor: number;
+  ranBy: string;
+  ranAt: string;
+}
+
+/** The latest wallet checks, newest first. */
+export async function fetchWalletChecks(): Promise<WalletCheckRun[]> {
+  try {
+    const res = await apiFetch<{ data: { runs: WalletCheckRun[] } }>("/v1/admin/wallet-check");
+    return res.data.runs;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/** Test the live wallet with 1 cent on one account, then take it back. */
+export const runWalletCheck = (account: string) =>
+  adminPost<WalletCheckRun>("/v1/admin/wallet-check", { account, confirm: "RUN" });
+
 /** Settle a withdrawal the wallet never confirmed. */
 export const resolveWithdrawal = (refKey: string, action: "retry" | "paid" | "return") =>
   adminPost<{ status: string; message: string }>("/v1/admin/withdrawal-checks/resolve", { refKey, action });

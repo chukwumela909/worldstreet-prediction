@@ -346,6 +346,47 @@ export const WithdrawalCheck: Model<IWithdrawalCheck> =
   (mongoose.models.WithdrawalCheck as Model<IWithdrawalCheck>) ??
   mongoose.model<IWithdrawalCheck>("WithdrawalCheck", withdrawalCheckSchema);
 
+/**
+ * One run of the desk's wallet check (trading/wallet-check.ts): who ran it,
+ * on which account, and what the wallet did at each step.
+ */
+const walletCheckRunSchema = new Schema(
+  {
+    authUserId: { type: String, required: true },
+    account: { type: String, required: true },
+    verdict: { type: String, enum: ["working", "not_working"], required: true },
+    summary: { type: String, required: true },
+    steps: {
+      type: [
+        new Schema(
+          {
+            key: { type: String, required: true },
+            label: { type: String, required: true },
+            status: { type: String, enum: ["pass", "fail", "skip"], required: true },
+            detail: { type: String, default: "" },
+          },
+          { _id: false },
+        ),
+      ],
+      default: [],
+    },
+    /** Cents the check left in that dollar wallet. */
+    leftoverMinor: { type: Number, default: 0 },
+    ranBy: { type: String, required: true },
+  },
+  { timestamps: true },
+);
+walletCheckRunSchema.index({ createdAt: -1 });
+
+export type IWalletCheckRun = InferSchemaType<typeof walletCheckRunSchema> & {
+  _id: mongoose.Types.ObjectId;
+  createdAt: Date;
+};
+
+export const WalletCheckRun: Model<IWalletCheckRun> =
+  (mongoose.models.WalletCheckRun as Model<IWalletCheckRun>) ??
+  mongoose.model<IWalletCheckRun>("WalletCheckRun", walletCheckRunSchema);
+
 export const SETTLEMENT_SOURCES = [
   "bayse-auto",
   "worldstreet-auto",
