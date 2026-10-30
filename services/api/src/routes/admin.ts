@@ -37,8 +37,8 @@ import { getProfitAndLoss } from "../trading/pnl.js";
 import { getAdminOverview } from "../trading/overview.js";
 import { getPausedRefunds } from "../trading/pause-refunds.js";
 import { getAbuseWatch } from "../trading/abuse.js";
-import { resolveWithdrawalCheck } from "../trading/withdrawals.js";
-import { listWalletChecks, runWalletCheck } from "../trading/wallet-check.js";
+import { getWithdrawalDesk, resolveWithdrawalCheck } from "../trading/withdrawals.js";
+import { listWalletChecks, readTestAccount, runWalletCheck } from "../trading/wallet-check.js";
 import { listAlerts, resolveAlert, sendAlert } from "../alerts.js";
 import { WithdrawalCheck } from "../trading/models.js";
 import { config } from "../config.js";
@@ -94,6 +94,9 @@ const resolveAlertBody = z.object({
 const abuseQuery = z.object({
   /** Bets placed in the last N days; 0 = all time. Money in and out is always all time. */
   days: z.coerce.number().int().min(0).max(3650).default(30),
+});
+const testAccountQuery = z.object({
+  account: z.string().trim().min(2).max(200),
 });
 const walletCheckBody = z.object({
   /** Whose dollar wallet to test on: a username or email. */
@@ -733,6 +736,18 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     await requireAdmin(request);
     const days = request.query.days === 0 ? null : request.query.days;
     return { success: true, data: await getAbuseWatch(days) };
+  });
+
+  /** Everyone with a withdrawal waiting: their requests stacked, their money beside them. */
+  app.get("/admin/withdrawals", async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await getWithdrawalDesk() };
+  });
+
+  /** One account's balances right now, for the guided deposit and withdrawal test. */
+  app.get("/admin/wallet-check/account", { schema: { querystring: testAccountQuery } }, async (request) => {
+    await requireAdmin(request);
+    return { success: true, data: await readTestAccount(request.query.account) };
   });
 
   /** The latest wallet checks (trading/wallet-check.ts). */

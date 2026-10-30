@@ -175,7 +175,7 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     label: "Approve withdrawals over (per day)",
     unit: "credit",
     step: 10_000,
-    info: "When a customer's withdrawals to dollars in the last 24 hours reach this much, the withdrawal waits in Abuse watch for an admin to approve it before any money leaves — splitting it into smaller ones doesn't get round it. Any withdrawal by an account Abuse watch has flagged waits too, whatever its size. Set to 0 to let withdrawals go straight out (flagged accounts still wait).",
+    info: "When a customer's withdrawals to dollars in the last 24 hours reach this much, the withdrawal waits in Watch → Withdrawals for an admin to approve it before any money leaves — splitting it into smaller ones doesn't get round it. Any withdrawal by a customer flagged as suspicious waits too, whatever its size. Set to 0 to let withdrawals go straight out (flagged accounts still wait).",
   },
   lossAlertKobo: {
     key: "lossAlertKobo",

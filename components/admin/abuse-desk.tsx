@@ -1,31 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import {
-  ArrowPathIcon as RefreshCw,
-  CheckCircleIcon as Check,
-} from "@heroicons/react/24/outline";
-import { ApiError, isApiConfigured } from "@/lib/api-client";
-import {
-  fetchAbuseWatch,
-  resolveWithdrawal,
-  type AbusePerson,
-  type AbuseWatch,
-  type WithdrawalCheckRow,
-} from "@/lib/admin-api";
+import { useState } from "react";
+import { ArrowPathIcon as RefreshCw } from "@heroicons/react/24/outline";
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
-import { showToast } from "@/lib/toast-store";
-import { AccountControl } from "@/components/admin/account-control";
-import { FLAG_TONE } from "@/components/admin/risk-flags";
+import { Card, Count, PersonRow, blockedNotice, useAbuseWatch } from "@/components/admin/watch-parts";
 
 /**
- * Abuse watch: the patterns that point to someone taking money they
- * shouldn't, one card each, every flagged person with a way to suspend
- * them right there. Withdrawals the wallet never confirmed come first,
- * because they hold a customer's money until the desk settles them.
- * Betting scans follow the period picked; money in and out is all time.
- * Read-only apart from those two actions (trading/abuse.ts) — the
- * below-zero list shows each customer's dollar wallet but never charges it.
+ * Suspicious customers: only the people whose betting looks like it breaks
+ * the Terms, one card per pattern, each with a way to suspend them right
+ * there. Withdrawals have their own tab and things that aren't abuse live
+ * in Money checks, so everyone here is someone to look at. Read-only apart
+ * from suspending (trading/abuse.ts).
  */
 
 const PERIODS = [
@@ -35,100 +20,25 @@ const PERIODS = [
   { days: 0, label: "All time" },
 ] as const;
 
-/**
- * What each card is, so nobody has to guess whether a list means someone
- * broke the rules: likely abuse, suspicious, or not abuse at all.
- */
-const NEUTRAL = "bg-element-2 text-secondary";
-const VERDICT = {
-  abuse: {
-    label: "Likely abuse",
-    key: "against our Terms — check, then suspend",
-    chip: FLAG_TONE.danger.chip,
-    count: FLAG_TONE.danger.text,
-  },
-  suspicious: {
-    label: "Suspicious",
-    key: "could go either way — check first",
-    chip: FLAG_TONE.caution.chip,
-    count: FLAG_TONE.caution.text,
-  },
-  needsYou: {
-    label: "Needs you",
-    key: "money waiting on your decision",
-    chip: FLAG_TONE.caution.chip,
-    count: FLAG_TONE.caution.text,
-  },
-  notAbuse: { label: "Not abuse", key: "for information", chip: NEUTRAL, count: "text-primary" },
-  fault: { label: "System fault", key: "our bug, not the customer", chip: NEUTRAL, count: "text-primary" },
-} as const;
-type Verdict = keyof typeof VERDICT;
-
 export function AbuseDesk() {
   const money = useAdminMoney();
   const [days, setDays] = useState<number>(30);
-  const [reloads, setReloads] = useState(0);
-  const [loaded, setLoaded] = useState<{
-    key: string;
-    data: AbuseWatch | null;
-    error: string | null;
-    errorCode: string | null;
-  } | null>(null);
-  const configured = isApiConfigured();
-  const key = `${days}|${reloads}`;
-
-  useEffect(() => {
-    if (!configured) return;
-    let cancelled = false;
-    fetchAbuseWatch(days)
-      .then((data) => {
-        if (!cancelled) setLoaded({ key, data, error: null, errorCode: null });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setLoaded({
-          key,
-          data: null,
-          error: err instanceof Error ? err.message : "Request failed",
-          errorCode: err instanceof ApiError ? err.code : null,
-        });
-      });
-    return () => {
-      cancelled = true;
-    };
-    // key encodes every input to the request above
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configured, key]);
-
-  if (!configured) return <Notice>This desk needs the prediction API (NEXT_PUBLIC_API_URL).</Notice>;
-  const fresh = loaded?.key === key ? loaded : null;
-  if (fresh?.errorCode === "FORBIDDEN") return <Notice>Your account isn&rsquo;t an admin of the Local book.</Notice>;
-  if (fresh?.errorCode === "NOT_FOUND") {
-    return <Notice>The API answering is older than this page — redeploy the API.</Notice>;
-  }
-  const watch = fresh?.data ?? loaded?.data ?? null;
-  const loading = fresh === null;
-  const reload = () => setReloads((n) => n + 1);
-  const waiting = watch?.withdrawals.filter((w) => w.status === "unconfirmed" || w.status === "review").length ?? 0;
-  const belowZero = watch?.belowZero ?? [];
+  const { configured, watch, loading, error, errorCode, reload } = useAbuseWatch(days);
+  const blocked = blockedNotice(configured, errorCode);
+  if (blocked) return blocked;
 
   return (
     <div className="max-w-5xl">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Abuse watch</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Suspicious customers</h1>
           <p className="mt-1 text-sm text-secondary">
-            Customers whose betting may break our rules, and money waiting on you. Each card says
-            which it is. Open a person to suspend them.
+            Customers whose betting looks like it breaks our Terms. Check each one, then suspend them or clear them.
           </p>
-          <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-xs text-secondary">
-            {(Object.keys(VERDICT) as Verdict[]).map((v) => (
-              <li key={v} className="flex items-center gap-1.5">
-                <VerdictChip verdict={v} />
-                {VERDICT[v].key}
-              </li>
-            ))}
-          </ul>
+          <p className="mt-1 text-sm text-secondary">
+            A flagged customer&rsquo;s withdrawals wait for approval. To clear someone, go to Alerts → Suspicious
+            customers and mark their alert settled.
+          </p>
         </div>
         <button
           type="button"
@@ -156,10 +66,10 @@ export function AbuseDesk() {
             </button>
           ))}
         </div>
-        <span className="text-xs text-tertiary">Bets placed in this period · money in and out is all time</span>
+        <span className="text-xs text-tertiary">Bets placed in this period</span>
       </div>
 
-      {fresh?.error && <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {fresh.error}</p>}
+      {error && <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {error}</p>}
       {!watch ? (
         <div className="mt-4 flex flex-col gap-3" aria-busy="true" aria-label="Running the scans">
           {[0, 1, 2].map((i) => (
@@ -168,63 +78,17 @@ export function AbuseDesk() {
         </div>
       ) : (
         <>
-          <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-7">
-            <Count label="Withdrawals to confirm" n={waiting} verdict="needsYou" />
-            <Count label="Below zero" n={belowZero.length} verdict="notAbuse" />
-            <Count label="Beating the odds" n={watch.beatingOdds.length} verdict="abuse" />
-            <Count label="Near-certain buyers" n={watch.nearCertain.length} verdict="abuse" />
-            <Count label="Accounts in pairs" n={watch.twins.length} verdict="suspicious" />
-            <Count label="Took out more than in" n={watch.cashOut.length} verdict="notAbuse" />
-            <Count label="Balance off ledger" n={watch.ledgerGaps.length} verdict="fault" />
+          <dl className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <Count label="Winning more than the odds allow" n={watch.beatingOdds.length} verdict="abuse" />
+            <Count label="Buying near-certain sides" n={watch.nearCertain.length} verdict="abuse" />
+            <Count label="Accounts moving in pairs" n={watch.twins.length} verdict="suspicious" />
           </dl>
-
-          {watch.withdrawals.length > 0 && (
-            <Card
-              title="Withdrawals to confirm"
-              verdict="needsYou"
-              means="Customers' money waiting on your decision. Not abuse in itself."
-              blurb="Waiting for approval: a big day of withdrawals, or an account Abuse watch flagged — approve to send the dollars, reject to return the credit (the customer is emailed either way). Unconfirmed: the wallet never answered, so the credit is held, not returned on a guess — ask the wallet again first; only return the credit once you're sure the dollars didn't arrive."
-            >
-              <ul className="flex flex-col gap-2">
-                {watch.withdrawals.map((w) => (
-                  <WithdrawalItem key={w.refKey} w={w} money={money} onDone={reload} />
-                ))}
-              </ul>
-            </Card>
-          )}
-
-          {watch.belowZero && (
-            <Card
-              title="Below zero"
-              verdict="notAbuse"
-              means="A reversal left them owing us. For information only."
-              blurb={`Customers who owe money: a reversal took back more than their balance held. Shown next to what's in their WorldStreet dollar wallet — nothing here charges it. Owed in all: ${money.format(
-                belowZero.reduce((s, r) => s + r.owedKobo, 0),
-              )}.`}
-              empty={belowZero.length === 0}
-            >
-              {belowZero.map((r) => (
-                <PersonRow key={r.authUserId} person={r} money={money} onChanged={reload}>
-                  <b className="text-no">Owes {money.format(r.owedKobo)}</b> · dollar wallet{" "}
-                  <b className="text-primary">
-                    {r.walletUsdMinor === null ? "unknown" : `$${(r.walletUsdMinor / 100).toFixed(2)}`}
-                  </b>{" "}
-                  · from {r.reversedBets} reversed bet{r.reversedBets === 1 ? "" : "s"}.
-                  {r.waivedKobo > 0 && (
-                    <span className={`mt-1 block rounded-md px-2 py-1 text-xs font-semibold ${FLAG_TONE.caution.chip}`}>
-                      {money.format(r.waivedKobo)} of their debt was waived before — they were told they owe nothing.
-                    </span>
-                  )}
-                </PersonRow>
-              ))}
-            </Card>
-          )}
 
           <Card
             title="Winning more than the odds allow"
             verdict="abuse"
-            means="Against our Terms: betting on results already known. Check their bets, then suspend."
-            blurb="Won far more often than the prices they paid say is possible by luck — about 1 in 1,000 or rarer. The signature of betting on results already known: a live game, a count anyone can see, a stale price."
+            means="Against our Terms if they bet on results already known. Check their bets, then suspend."
+            blurb="They won far more often than the prices they paid say is possible by luck, about 1 in 1,000 or rarer."
             empty={watch.beatingOdds.length === 0}
           >
             {watch.beatingOdds.map((r) => (
@@ -242,8 +106,8 @@ export function AbuseDesk() {
           <Card
             title="Buying near-certain sides"
             verdict="abuse"
-            means="Against our Terms: buying results that were already decided. Check their bets, then suspend."
-            blurb="Ten or more bets at ₦90 or more a share, and in profit on them — buying results that were all but decided. The ₦90 ceiling stops new ones; this shows who did it."
+            means="Against our Terms if the result was already decided. Check when they bet, then suspend or clear them."
+            blurb="Ten or more bets at ₦90 or more a share, and in profit on them. The ₦90 ceiling stops new ones; this shows who did it."
             empty={watch.nearCertain.length === 0}
           >
             {watch.nearCertain.map((r) => (
@@ -261,7 +125,7 @@ export function AbuseDesk() {
             title="Accounts moving in pairs"
             verdict="suspicious"
             means="Could be one person on two accounts (against our Terms), or friends betting together. Check before acting."
-            blurb="Two accounts backing the same side of the same market within two minutes of each other, on five markets or more — often one person using two accounts to get round stake and loss limits."
+            blurb="Two accounts backing the same side of the same market within two minutes of each other, on five markets or more."
             empty={watch.twins.length === 0}
           >
             {watch.twins.map((t) => (
@@ -282,262 +146,8 @@ export function AbuseDesk() {
               </li>
             ))}
           </Card>
-
-          <Card
-            title="Took out more than they put in"
-            verdict="notAbuse"
-            means="Honest winners land here too. It only matters if they're also on a Likely abuse card."
-            blurb="Withdrew more than they ever added (failed withdrawals that came back are netted off) — where money won on the platform left it. Fine for an honest winner; worth a look next to the scans above."
-            empty={watch.cashOut.length === 0}
-          >
-            {watch.cashOut.map((r) => (
-              <PersonRow key={r.authUserId} person={r} money={money} onChanged={reload}>
-                Added {money.format(r.addedKobo)}, withdrew {money.format(r.withdrawnKobo)} —{" "}
-                <b className="text-primary">{money.format(r.extraKobo)} more out than in</b>. Their bets made{" "}
-                <span className={r.betProfitKobo >= 0 ? "text-yes" : "text-no"}>{money.formatSigned(r.betProfitKobo)}</span>
-                {r.reversedKobo > 0 && <> · {money.format(r.reversedKobo)} of winnings reversed</>}.
-              </PersonRow>
-            ))}
-          </Card>
-
-          <Card
-            title="Balance doesn't match the ledger"
-            verdict="fault"
-            means="Not the customer's doing: a bug on our side. Tell the developers; don't suspend for this."
-            blurb="The balance isn't the sum of the account's money movements — money moved outside the ledger. This should never happen. Their withdrawals wait for approval until the alert is settled."
-            empty={watch.ledgerGaps.length === 0}
-          >
-            {watch.ledgerGaps.map((r) => (
-              <PersonRow key={r.authUserId} person={r} money={money} onChanged={reload}>
-                Ledger adds up to {money.format(r.ledgerKobo)}; the balance is{" "}
-                <b className="text-no">{money.formatSigned(r.gapKobo)} off</b>.
-              </PersonRow>
-            ))}
-          </Card>
         </>
       )}
-    </div>
-  );
-}
-
-/* ---------- pieces ---------- */
-
-function Card({
-  title,
-  verdict,
-  means,
-  blurb,
-  empty,
-  children,
-}: {
-  title: string;
-  verdict: Verdict;
-  /** What the card means, in one line: is it abuse, and what to do. */
-  means: string;
-  /** How the scan finds them. */
-  blurb: string;
-  empty?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
-      <h2 className="flex flex-wrap items-center gap-2 text-lg font-semibold">
-        {title}
-        <VerdictChip verdict={verdict} />
-      </h2>
-      <p className="mt-1 text-sm font-semibold text-primary">{means}</p>
-      <p className="mt-0.5 text-sm text-secondary">{blurb}</p>
-      {empty ? (
-        <p className="mt-3 inline-flex items-center gap-1.5 text-sm font-semibold text-yes">
-          <Check className="size-4" aria-hidden />
-          Nothing found.
-        </p>
-      ) : (
-        <ul className="mt-3 flex flex-col gap-2">{children}</ul>
-      )}
-    </section>
-  );
-}
-
-/** One flagged person: who, the evidence, and the suspend control on demand. */
-function PersonRow({
-  person,
-  money,
-  onChanged,
-  compact,
-  children,
-}: {
-  person: AbusePerson;
-  money: AdminMoney;
-  onChanged: () => void;
-  compact?: boolean;
-  children?: React.ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const Wrapper = compact ? "div" : "li";
-  return (
-    <Wrapper className={`rounded-md border border-border ${compact ? "bg-surface" : "bg-page"} p-3`}>
-      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="flex min-w-0 flex-wrap items-center gap-2 text-sm font-semibold">
-            <span className="truncate">{person.displayName || person.username}</span>
-            {person.suspendedAt && (
-              <span className={`rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FLAG_TONE.danger.chip}`}>
-                Suspended
-              </span>
-            )}
-          </p>
-          <p className="truncate text-xs text-tertiary">
-            @{person.username}
-            {person.email ? ` · ${person.email}` : ""} · balance {money.format(person.balanceKobo)}
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          aria-expanded={open}
-          className="h-8 shrink-0 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:border-border-hover hover:text-primary"
-        >
-          {open ? "Close" : person.suspendedAt ? "Suspension…" : "Suspend…"}
-        </button>
-      </div>
-      {children && <p className="mt-1.5 text-sm text-secondary">{children}</p>}
-      {open && (
-        <div className="mt-2">
-          <AccountControl trader={person} actions={undefined} onChanged={onChanged} />
-        </div>
-      )}
-    </Wrapper>
-  );
-}
-
-function WithdrawalItem({ w, money, onDone }: { w: WithdrawalCheckRow; money: AdminMoney; onDone: () => void }) {
-  const [busy, setBusy] = useState<"retry" | "paid" | "return" | null>(null);
-  const [confirmReturn, setConfirmReturn] = useState(false);
-  const act = async (action: "retry" | "paid" | "return") => {
-    setBusy(action);
-    try {
-      const res = await resolveWithdrawal(w.refKey, action);
-      // asked to send, but it didn't go: still held, or the wallet said no
-      const failed = res.status === "unconfirmed" || (action === "retry" && res.status === "returned");
-      showToast(res.message, failed ? "error" : "success");
-      onDone();
-    } catch (err) {
-      showToast(err instanceof Error && err.message ? err.message : "Request failed. Try again.", "error");
-    } finally {
-      setBusy(null);
-      setConfirmReturn(false);
-    }
-  };
-  const review = w.status === "review";
-  const waiting = w.status === "unconfirmed" || review;
-  return (
-    <li className="rounded-md border border-border bg-page p-3 text-sm">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="font-semibold">
-            @{w.username || w.authUserId} · {money.format(w.amountKobo)} → ${(w.amountUsdMinor / 100).toFixed(2)}
-          </p>
-          <p className="text-xs text-tertiary">
-            {w.email}
-            {w.createdAt ? ` · ${when(w.createdAt)}` : ""}
-            {w.lastCode ? ` · wallet said ${w.lastCode}${w.lastMessage ? `: ${w.lastMessage}` : ""}` : ""}
-          </p>
-        </div>
-        <span
-          className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-            waiting ? FLAG_TONE.caution.chip : "bg-element-2 text-tertiary"
-          }`}
-        >
-          {review
-            ? "Waiting for approval"
-            : waiting
-              ? "Unconfirmed"
-              : w.status === "paid"
-                ? "Paid"
-                : w.status === "returned"
-                  ? "Credit returned"
-                  : "Checking"}
-        </span>
-      </div>
-      {w.reason && <p className="mt-1 text-xs font-semibold text-secondary">Why: {w.reason}</p>}
-      {waiting && (
-        <div className="mt-2 flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => act("retry")}
-            disabled={busy !== null}
-            className="pressable h-8 rounded-sm bg-accent px-3 text-xs font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
-          >
-            {busy === "retry" ? (review ? "Sending…" : "Asking…") : review ? "Approve and send" : "Ask the wallet again"}
-          </button>
-          {!review && (
-            <button
-              type="button"
-              onClick={() => act("paid")}
-              disabled={busy !== null}
-              className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-40"
-            >
-              The dollars arrived
-            </button>
-          )}
-          {confirmReturn ? (
-            <>
-              <button
-                type="button"
-                onClick={() => act("return")}
-                disabled={busy !== null}
-                className="pressable h-8 rounded-sm bg-no-solid px-3 text-xs font-semibold text-white disabled:opacity-40"
-              >
-                {busy === "return" ? "Returning…" : `Yes, ${review ? "reject and " : ""}return ${money.format(w.amountKobo)}`}
-              </button>
-              <button
-                type="button"
-                onClick={() => setConfirmReturn(false)}
-                className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary"
-              >
-                Cancel
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setConfirmReturn(true)}
-              disabled={busy !== null}
-              className="h-8 rounded-sm border border-no/40 px-3 text-xs font-semibold text-no hover:bg-no-tint disabled:opacity-40"
-            >
-              {review ? "Reject…" : "Return the credit…"}
-            </button>
-          )}
-        </div>
-      )}
-      {!waiting && w.resolvedBy && (
-        <p className="mt-1 text-xs text-tertiary">
-          Settled by {w.resolvedBy}
-          {w.resolvedAt ? ` · ${when(w.resolvedAt)}` : ""}
-        </p>
-      )}
-    </li>
-  );
-}
-
-function VerdictChip({ verdict }: { verdict: Verdict }) {
-  const v = VERDICT[verdict];
-  return (
-    <span className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${v.chip}`}>
-      {v.label}
-    </span>
-  );
-}
-
-function Count({ label, n, verdict }: { label: string; n: number; verdict: Verdict }) {
-  return (
-    <div className="rounded-md border border-border bg-surface px-3 py-2 shadow-card">
-      <dt className="text-xs font-medium text-secondary">{label}</dt>
-      <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${n > 0 ? VERDICT[verdict].count : ""}`}>{n}</dd>
-      <dd className="mt-1">
-        <VerdictChip verdict={verdict} />
-      </dd>
     </div>
   );
 }
@@ -545,8 +155,7 @@ function Count({ label, n, verdict }: { label: string; n: number; verdict: Verdi
 function Profit({ kobo, money }: { kobo: number; money: AdminMoney }) {
   return (
     <>
-      Their profit:{" "}
-      <b className={kobo > 0 ? "text-no" : "text-yes"}>{money.formatSigned(kobo)}</b>.
+      Their profit: <b className={kobo > 0 ? "text-no" : "text-yes"}>{money.formatSigned(kobo)}</b>.
     </>
   );
 }
@@ -554,14 +163,6 @@ function Profit({ kobo, money }: { kobo: number; money: AdminMoney }) {
 function Markets({ list }: { list: string[] }) {
   if (list.length === 0) return null;
   return <span className="mt-1 block text-xs text-tertiary">Mostly on: {list.join(" · ")}</span>;
-}
-
-function Notice({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="max-w-3xl rounded-xl border border-border bg-surface p-6 text-sm leading-6 text-secondary shadow-card">
-      {children}
-    </div>
-  );
 }
 
 /** ₦95.20 for 9520 kobo — the price of a ₦100 share. */
@@ -572,11 +173,4 @@ function cents(kobo: number): string {
 function day(iso: string): string {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
-function when(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime())
-    ? "—"
-    : d.toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }

@@ -190,6 +190,20 @@ check("…and it says the cent is still there", noCharges.leftoverMinor === 1 &&
 const chargedTwice = await runIn("charges-twice");
 check("a repeat that charges again fails", chargedTwice.verdict === "not_working" && step(chargedTwice, "charge_again").status === "fail");
 
+console.log("the guided test's balances");
+mode = "good";
+balance = 777;
+const read = (await app.inject({ method: "GET", url: "/v1/admin/wallet-check/account?account=testme", headers: { "x-admin-key": KEY } })).json() as {
+  data: { username: string; dollarsMinor: number; lockedMinor: number; balanceKobo: number; flagged: boolean; suspended: boolean };
+};
+check(
+  "it reads the account's dollars, locked money and Predict balance",
+  read.data.username === "TestMe" && read.data.dollarsMinor === 777 && read.data.lockedMinor === 0 && read.data.balanceKobo === 0,
+);
+check("…and says they're free to test with", !read.data.flagged && !read.data.suspended);
+const noBalance = await app.inject({ method: "GET", url: "/v1/admin/wallet-check/account?account=nobody", headers: { "x-admin-key": KEY } });
+check("an unknown account is a 404 there too", noBalance.statusCode === 404);
+
 console.log("guards");
 mode = "good";
 const noKey = (await post({ account: "testme", confirm: "RUN" }, null)).statusCode;

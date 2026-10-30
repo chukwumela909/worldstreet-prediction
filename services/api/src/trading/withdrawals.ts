@@ -5,7 +5,7 @@ import { ApiError } from "../errors.js";
 import { AlertRecord, User } from "../models.js";
 import { creditWallet, type WalletResult } from "../wallet.js";
 import { creditNaira } from "./ledger.js";
-import { LedgerEntry, WithdrawalCheck } from "./models.js";
+import { LedgerEntry, NairaAccount, Position, WithdrawalCheck } from "./models.js";
 import type { BookSettings } from "./settings.js";
 
 /**
@@ -20,14 +20,14 @@ import type { BookSettings } from "./settings.js";
  * NOT put back on a guess: the wallet is asked once more under the same
  * reference — it dedupes on it, so asking again can only confirm a
  * payment, never make a second one — and if that settles nothing either,
- * the withdrawal is held for the desk (Admin → Abuse watch) and the admins
+ * the withdrawal is held for the desk (Admin → Watch → Withdrawals) and the admins
  * are alerted. The desk then asks the wallet again, or marks it paid or
  * returned by hand.
  *
  * Some withdrawals wait for an admin before they go to the wallet at all:
  * a customer's withdrawals over the last 24 hours reaching the desk's
  * review amount (so splitting one into several doesn't get round it), or
- * any withdrawal by an account an open Abuse watch alert names. The credit
+ * any withdrawal by an account an open suspicious-customer alert names. The credit
  * is set aside; approving sends it, rejecting returns it, and the customer
  * is emailed either way.
  */
@@ -121,7 +121,7 @@ export async function holdWithdrawal(p: {
     p.log,
     "Withdrawal not confirmed by the wallet",
     {
-      note: "The credit is held, not returned. Settle it in Admin → Abuse watch → Withdrawals to confirm.",
+      note: "The credit is held, not returned. Settle it in Admin → Watch → Withdrawals.",
       account: p.authUserId,
       amount: `₦${(p.amountKobo / 100).toFixed(2)} → $${(p.amountUsdMinor / 100).toFixed(2)}`,
       wallet: `${p.code}: ${p.message}`,
@@ -129,14 +129,14 @@ export async function holdWithdrawal(p: {
     {
       throttleKey: "withdrawal-unconfirmed",
       kind: "withdrawal",
-      footer: "Settle it in Admin → Abuse watch → Withdrawals to confirm.",
+      footer: "Settle it in Admin → Watch → Withdrawals.",
     },
   ).catch((err: unknown) => p.log.error({ err }, "unconfirmed-withdrawal alert failed"));
 }
 
 /* ---------------- waiting for approval ---------------- */
 
-/** Whether an open Abuse watch alert names this account (trading/abuse-alerts.ts). */
+/** Whether an open suspicious-customer alert names this account (trading/abuse-alerts.ts). */
 export async function isFlagged(authUserId: string): Promise<boolean> {
   return Boolean(
     await AlertRecord.exists({ kind: { $in: ["abuse", "fault"] }, status: "open", authUserIds: authUserId }),
@@ -148,7 +148,7 @@ export async function reviewReason(
   authUserId: string,
   settings: Pick<BookSettings, "withdrawalReviewKobo">,
 ): Promise<string | null> {
-  if (await isFlagged(authUserId)) return "Flagged on Abuse watch";
+  if (await isFlagged(authUserId)) return "Flagged as a suspicious customer";
   if (settings.withdrawalReviewKobo <= 0) return null;
   const since = new Date(Date.now() - 24 * 3_600_000);
   // the day's withdrawals, this one included (its credit is already taken),
@@ -211,7 +211,7 @@ export async function holdForReview(p: {
     {
       throttleKey: `withdrawal-review:${p.refKey}`,
       kind: "withdrawal",
-      footer: "Approve or reject it in the admin desk: Admin → Abuse watch → Withdrawals to confirm.",
+      footer: "Approve or reject it in the admin desk: Admin → Watch → Withdrawals.",
     },
   ).catch((err: unknown) => p.log.error({ err }, "withdrawal-review alert failed"));
 }
@@ -371,6 +371,13 @@ export async function resolveWithdrawalCheck(p: {
       await wrapUp("rejected", review ? "Rejected — credit returned" : "Credit returned");
       return { status: "returned", message: "The credit was returned to the customer." };
     }
+    // a suspended account moves no money, even one approved by mistake
+    if (review) {
+      const user = await User.findOne({ authUserId: check.authUserId }, { suspendedAt: 1 }).lean();
+      if (user?.suspendedAt) {
+        throw new ApiError(409, "This account is suspended. Reject the withdrawal, or lift the suspension first.", "ACCOUNT_SUSPENDED");
+      }
+    }
     const sent = await sendWithdrawal({ ...check, log: p.log });
     if (sent.outcome === "paid") {
       await settle("paid", { lastCode: "", lastMessage: "" });
@@ -391,4 +398,151 @@ export async function resolveWithdrawalCheck(p: {
     await settle(waitingAs);
     throw err;
   }
+}
+
+/* ---------------- the Withdrawals tab ---------------- */
+
+export interface WithdrawalPerson {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  suspendedAt: string | null;
+  suspendedReason: string;
+  /**
+   * What the desk needs to know first. "clear": nothing against them, it's
+   * only waiting because of its size or the wallet. "suspicious" and "fault"
+   * come from their open alerts, and "suspended" outranks both.
+   */
+  verdict: "clear" | "suspicious" | "fault" | "suspended";
+  /** Their open alerts, in the admins' words. */
+  flags: { id: string; kind: string; subject: string }[];
+  /** In their Predict balance now, after what's set aside for these requests. */
+  balanceKobo: number;
+  /** Set aside for the requests below. */
+  heldKobo: number;
+  heldUsdMinor: number;
+  /** All time: added from dollars, and withdrawn for real (not failed, not still waiting). */
+  addedKobo: number;
+  paidOutKobo: number;
+  /** All time: settled, unreversed bets. */
+  betProfitKobo: number;
+  /** All time: winnings taken back by a reversal. */
+  reversedKobo: number;
+  /** Their waiting requests, oldest first. */
+  requests: WithdrawalCheckRow[];
+}
+
+const isHeld = (status: string) => waiting(status) || status === "checking";
+
+/** Every customer with a withdrawal waiting, each with their requests stacked and their money beside them. */
+export async function getWithdrawalDesk(): Promise<{ people: WithdrawalPerson[]; settled: WithdrawalCheckRow[] }> {
+  const [rows, active] = await Promise.all([
+    listWithdrawalChecks(),
+    WithdrawalCheck.find({ status: { $in: ["unconfirmed", "review", "checking"] } }, { authUserId: 1 }).lean(),
+  ]);
+  const ids = [...new Set(active.map((c) => c.authUserId))];
+  const [users, accounts, flags, ledger, bets] = await Promise.all([
+    User.find(
+      { authUserId: { $in: ids } },
+      { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1, suspendedReason: 1 },
+    ).lean(),
+    NairaAccount.find({ authUserId: { $in: ids } }, { authUserId: 1, balanceKobo: 1 }).lean(),
+    AlertRecord.find(
+      { kind: { $in: ["abuse", "fault"] }, status: "open", authUserIds: { $in: ids } },
+      { kind: 1, subject: 1, authUserIds: 1 },
+    ).lean(),
+    LedgerEntry.aggregate<{ _id: string; added: number; out: number; back: number; reversed: number }>([
+      { $match: { authUserId: { $in: ids } } },
+      {
+        $group: {
+          _id: "$authUserId",
+          added: { $sum: { $cond: [{ $eq: ["$type", "conversion_in"] }, "$amountKobo", 0] } },
+          out: { $sum: { $cond: [{ $eq: ["$type", "conversion_out"] }, { $multiply: ["$amountKobo", -1] }, 0] } },
+          // a failed withdrawal's credit coming back
+          back: {
+            $sum: {
+              $cond: [
+                { $and: [{ $eq: ["$type", "refund"] }, { $regexMatch: { input: "$refKey", regex: "^convert:.*:reversal$" } }] },
+                "$amountKobo",
+                0,
+              ],
+            },
+          },
+          reversed: {
+            $sum: {
+              $cond: [{ $and: [{ $eq: ["$type", "reversal"] }, { $lt: ["$amountKobo", 0] }] }, { $multiply: ["$amountKobo", -1] }, 0],
+            },
+          },
+        },
+      },
+    ]),
+    Position.aggregate<{ _id: string; profit: number }>([
+      { $match: { authUserId: { $in: ids }, status: { $in: ["won", "lost"] }, reversedFrom: { $exists: false } } },
+      {
+        $group: {
+          _id: "$authUserId",
+          profit: {
+            $sum: {
+              $cond: [{ $eq: ["$status", "won"] }, { $subtract: ["$potentialPayoutKobo", "$stakeKobo"] }, { $multiply: ["$stakeKobo", -1] }],
+            },
+          },
+        },
+      },
+    ]),
+  ]);
+  const userById = new Map(users.map((u) => [u.authUserId, u]));
+  const balanceById = new Map(accounts.map((a) => [a.authUserId, a.balanceKobo]));
+  const moneyById = new Map(ledger.map((l) => [l._id, l]));
+  const profitById = new Map(bets.map((b) => [b._id, b.profit]));
+
+  const people = ids.map((id): WithdrawalPerson => {
+    const user = userById.get(id);
+    const money = moneyById.get(id);
+    const requests = rows
+      .filter((r) => r.authUserId === id && isHeld(r.status))
+      .sort((a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? ""));
+    const heldKobo = requests.reduce((sum, r) => sum + r.amountKobo, 0);
+    const open = flags
+      .filter((f) => f.authUserIds.includes(id))
+      .map((f) => ({ id: String(f._id), kind: f.kind, subject: f.subject }));
+    return {
+      authUserId: id,
+      username: user?.username ?? "",
+      displayName: user?.displayName ?? "",
+      email: user?.email ?? "",
+      suspendedAt: user?.suspendedAt?.toISOString() ?? null,
+      suspendedReason: user?.suspendedReason ?? "",
+      verdict: user?.suspendedAt
+        ? "suspended"
+        : open.some((f) => f.kind === "abuse")
+          ? "suspicious"
+          : open.length > 0
+            ? "fault"
+            : "clear",
+      flags: open,
+      balanceKobo: balanceById.get(id) ?? 0,
+      heldKobo,
+      heldUsdMinor: requests.reduce((sum, r) => sum + r.amountUsdMinor, 0),
+      addedKobo: money?.added ?? 0,
+      paidOutKobo: Math.max((money?.out ?? 0) - (money?.back ?? 0) - heldKobo, 0),
+      betProfitKobo: profitById.get(id) ?? 0,
+      reversedKobo: money?.reversed ?? 0,
+      requests,
+    };
+  });
+  // the ones to look hardest at first, then whoever has waited longest
+  const rank = { suspended: 0, suspicious: 1, fault: 2, clear: 3 };
+  people.sort(
+    (a, b) =>
+      rank[a.verdict] - rank[b.verdict] ||
+      (a.requests[0]?.createdAt ?? "").localeCompare(b.requests[0]?.createdAt ?? ""),
+  );
+  return {
+    people,
+    settled: rows
+      .filter((r) => !isHeld(r.status))
+      .sort((a, b) => (b.resolvedAt ?? "").localeCompare(a.resolvedAt ?? ""))
+      .slice(0, 20),
+  };
 }

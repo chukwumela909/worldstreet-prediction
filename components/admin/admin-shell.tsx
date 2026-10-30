@@ -7,6 +7,7 @@ import {
   ArrowLeftIcon as ArrowLeft,
   ArrowUturnLeftIcon as Recovery,
   BanknotesIcon as Coins,
+  BeakerIcon as Test,
   ChatBubbleLeftRightIcon as Support,
   Cog6ToothIcon as Settings,
   ShieldExclamationIcon as Shield,
@@ -37,8 +38,17 @@ const NAV = [
     icon: Shield,
     pages: [
       { href: "/admin/alerts", label: "Alerts" },
-      { href: "/admin/abuse", label: "Abuse watch" },
-      { href: "/admin/wallet-check", label: "Wallet check" },
+      { href: "/admin/withdrawals", label: "Withdrawals" },
+      { href: "/admin/abuse", label: "Suspicious customers" },
+      { href: "/admin/money-checks", label: "Money checks" },
+    ],
+  },
+  {
+    label: "Test",
+    icon: Test,
+    pages: [
+      { href: "/admin/wallet-check", label: "1. Quick wallet check" },
+      { href: "/admin/money-test", label: "2. Full money test" },
     ],
   },
   {

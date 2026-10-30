@@ -196,6 +196,14 @@ check(
   !(await AlertRecord.exists({ key: "abuse:odds:u-lucky" })) && Boolean(await AlertRecord.exists({ key: "abuse:near:u-near" })),
 );
 
+/* ---------------- the Withdrawals tab ---------------- */
+console.log("the Withdrawals tab");
+const desk = (await admin("GET", "/v1/admin/withdrawals")).json() as {
+  data: { people: { authUserId: string; betProfitKobo: number; verdict: string; requests: unknown[] }[] };
+};
+const fairRow = desk.data.people.find((x) => x.authUserId === "u-fair");
+check("the route lists who's waiting, with what their bets made", fairRow?.requests.length === 2 && fairRow.verdict === "clear" && fairRow.betProfitKobo === 0);
+
 /* ---------------- settling a held withdrawal ---------------- */
 console.log("withdrawals");
 const fairBefore = await getNairaBalanceKobo("u-fair");

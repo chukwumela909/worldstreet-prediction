@@ -23,14 +23,14 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
 /**
  * Alerts: everything the API has warned the admins about by email — a
  * market at or near its loss limit, the book's possible loss past its
- * line, a customer Abuse watch flagged, a market settlement couldn't
+ * line, a suspicious customer, a market settlement couldn't
  * finish, a withdrawal waiting on an admin — one card per condition,
  * labelled by what kind of problem it is (KIND), with how often it fired and
  * whether it's still happening, and the fix next to it: void a market
  * that's too one-sided (refunding its bets), or the page where the fix
  * lives. "Mark settled" closes it; a condition that fires again opens it
  * back up. The live risk sits on top, and what's waiting in Support and
- * Abuse watch is counted alongside.
+ * Withdrawals is counted alongside.
  */
 
 type View = "open" | "resolved" | "all";
@@ -72,11 +72,24 @@ const KIND: Record<AlertKind, { label: string; chip: string; means: string }> = 
   other: { label: "Other", chip: "bg-element-2 text-secondary", means: "Something else the system warned about." },
 };
 
+/** The filter over the list, most urgent first. */
+const CATEGORIES: AlertKind[] = ["settlement", "withdrawal", "abuse", "risk", "fault", "test", "other"];
+const PLURAL: Record<AlertKind, string> = {
+  risk: "Money at risk",
+  abuse: "Suspicious customers",
+  fault: "System faults",
+  settlement: "Markets to settle",
+  withdrawal: "Withdrawals waiting",
+  test: "Tests",
+  other: "Other",
+};
+
 /** Details the card shows on its own, or ids nobody reads, not in the list of fields. */
 const HIDDEN = new Set(["whatToDo", "alsoSeen", "eventId", "marketId"]);
 
 export function AlertsDesk() {
   const [view, setView] = useState<View>("open");
+  const [category, setCategory] = useState<AlertKind | "all">("all");
   const [reloads, setReloads] = useState(0);
   const [loaded, setLoaded] = useState<{
     key: string;
@@ -119,6 +132,8 @@ export function AlertsDesk() {
   const data = fresh?.data ?? loaded?.data ?? null;
   const loading = fresh === null;
   const reload = () => setReloads((n) => n + 1);
+  // a category that has emptied falls back to everything
+  const shownCategory = category !== "all" && data?.alerts.some((a) => a.kind === category) ? category : "all";
 
   return (
     <div className="max-w-5xl">
@@ -146,7 +161,7 @@ export function AlertsDesk() {
             <Waiting href="/admin/support" n={data.waiting.support} what="support request" where="Support" />
           )}
           {data.waiting.withdrawals > 0 && (
-            <Waiting href="/admin/abuse" n={data.waiting.withdrawals} what="withdrawal to confirm" where="Abuse watch" />
+            <Waiting href="/admin/withdrawals" n={data.waiting.withdrawals} what="withdrawal" where="Withdrawals" />
           )}
         </div>
       )}
@@ -185,6 +200,32 @@ export function AlertsDesk() {
         ))}
       </div>
 
+      {data && data.alerts.length > 0 && (
+        <div role="group" aria-label="Which kind" className="mt-3 flex flex-wrap gap-2">
+          {(["all", ...CATEGORIES] as const)
+            .filter((k) => k === "all" || data.alerts.some((a) => a.kind === k))
+            .map((k) => {
+              const n = k === "all" ? data.alerts.length : data.alerts.filter((a) => a.kind === k).length;
+              const on = shownCategory === k;
+              return (
+                <button
+                  key={k}
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setCategory(k)}
+                  className={`flex h-8 items-center gap-1.5 rounded-full border px-3 text-xs font-semibold ${
+                    on ? "border-border-hover bg-surface text-primary" : "border-border text-secondary hover:text-primary"
+                  }`}
+                >
+                  {k === "all" ? "Everything" : PLURAL[k]}
+                  <span className="tabular-nums text-tertiary">{n}</span>
+                </button>
+              );
+            })}
+        </div>
+      )}
+      {shownCategory !== "all" && <p className="mt-2 text-sm text-secondary">{KIND[shownCategory].means}</p>}
+
       <section className="mt-4">
         {fresh?.error && <p className="mb-3 text-sm font-semibold text-no">Couldn&rsquo;t load: {fresh.error}</p>}
         {!data ? (
@@ -200,7 +241,7 @@ export function AlertsDesk() {
           </p>
         ) : (
           <ul className="flex flex-col gap-3">
-            {data.alerts.map((a) => (
+            {data.alerts.filter((a) => shownCategory === "all" || a.kind === shownCategory).map((a) => (
               <AlertCard key={a.id} alert={a} onChanged={reload} />
             ))}
           </ul>
@@ -233,6 +274,11 @@ function AlertCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: () =>
             {a.status === "open" && a.active && (
               <span className={`rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FLAG_TONE.danger.chip}`}>
                 Happening now
+              </span>
+            )}
+            {a.status === "open" && !a.active && (a.kind === "risk" || a.kind === "settlement") && (
+              <span className="rounded-sm bg-element-2 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-secondary">
+                Stopped: check, then mark settled
               </span>
             )}
             {a.status === "resolved" && (
@@ -294,7 +340,9 @@ function Fixes({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => voi
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const canVoid = a.kind === "risk" && a.eventId !== "" && a.marketId !== "";
+  // an old risk alert names a market that may be fine by now, so its void
+  // button only shows while the problem is still happening
+  const canVoid = a.kind === "risk" && a.active && a.eventId !== "" && a.marketId !== "";
 
   const close = () => {
     setStep("idle");
@@ -394,8 +442,9 @@ function Fixes({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => voi
       {a.kind === "risk" && link("/admin", "Risk on the Local book")}
       {a.kind === "risk" && link("/admin/settings", "Loss limits in Settings")}
       {a.kind === "settlement" && link("/admin", "Settle it on the Local book")}
-      {a.kind === "withdrawal" && link("/admin/abuse", "Withdrawals to confirm")}
-      {(a.kind === "abuse" || a.kind === "fault") && link("/admin/abuse", "Review on Abuse watch")}
+      {a.kind === "withdrawal" && link("/admin/withdrawals", "Approve or reject in Withdrawals")}
+      {a.kind === "abuse" && link("/admin/abuse", "See them in Suspicious customers")}
+      {a.kind === "fault" && link("/admin/money-checks", "See it in Money checks")}
       <button
         type="button"
         onClick={() => setStep("settle")}

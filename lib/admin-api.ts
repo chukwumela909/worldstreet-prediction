@@ -1431,6 +1431,69 @@ export async function fetchWalletChecks(): Promise<WalletCheckRun[]> {
 export const runWalletCheck = (account: string) =>
   adminPost<WalletCheckRun>("/v1/admin/wallet-check", { account, confirm: "RUN" });
 
+/** One customer with withdrawals waiting: their requests stacked, their money beside them. */
+export interface WithdrawalPerson {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  suspendedAt: string | null;
+  suspendedReason: string;
+  verdict: "clear" | "suspicious" | "fault" | "suspended";
+  /** Their open alerts. */
+  flags: { id: string; kind: string; subject: string }[];
+  /** In their Predict balance now, after what's set aside for these requests. */
+  balanceKobo: number;
+  heldKobo: number;
+  heldUsdMinor: number;
+  addedKobo: number;
+  /** Really withdrawn: not failed, not still waiting. */
+  paidOutKobo: number;
+  betProfitKobo: number;
+  reversedKobo: number;
+  /** Oldest first. */
+  requests: WithdrawalCheckRow[];
+}
+
+export interface WithdrawalDesk {
+  people: WithdrawalPerson[];
+  settled: WithdrawalCheckRow[];
+}
+
+export async function fetchWithdrawalDesk(): Promise<WithdrawalDesk> {
+  try {
+    const res = await apiFetch<{ data: WithdrawalDesk }>("/v1/admin/withdrawals");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+/** One account's money right now, for the guided deposit and withdrawal test. */
+export interface TestAccount {
+  username: string;
+  suspended: boolean;
+  flagged: boolean;
+  /** Null when the wallet couldn't say; `walletError` says why. */
+  dollarsMinor: number | null;
+  lockedMinor: number | null;
+  walletError: string;
+  balanceKobo: number;
+  /** Null until an admin sets a rate. */
+  usdToNgn: number | null;
+  ngnToUsd: number | null;
+  reviewKobo: number;
+}
+
+export async function fetchTestAccount(account: string): Promise<TestAccount> {
+  try {
+    const res = await apiFetch<{ data: TestAccount }>(`/v1/admin/wallet-check/account?account=${encodeURIComponent(account)}`);
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
 /** Settle a withdrawal the wallet never confirmed. */
 export const resolveWithdrawal = (refKey: string, action: "retry" | "paid" | "return") =>
   adminPost<{ status: string; message: string }>("/v1/admin/withdrawal-checks/resolve", { refKey, action });

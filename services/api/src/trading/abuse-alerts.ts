@@ -19,7 +19,7 @@ const EVERY_MS = 60 * 60_000;
 const SCAN_DAYS = 7;
 let lastRun = 0;
 
-const FOOTER = "Review them in the admin desk: Admin → Abuse watch.";
+const FOOTER = "Review them in the admin desk: Admin → Watch → Suspicious customers.";
 const naira = (kobo: number) =>
   `${kobo < 0 ? "−" : ""}₦${Math.round(Math.abs(kobo) / 100).toLocaleString("en-US")}`;
 

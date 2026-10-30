@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   CheckCircleIcon as Check,
   MinusCircleIcon as Skipped,
@@ -11,13 +12,13 @@ import { fetchWalletChecks, runWalletCheck, type WalletCheckRun, type WalletChec
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
- * Wallet check: is the live WorldStreet wallet really working for Predict?
- * One button adds 1 cent to the dollar wallet of an account the admin
+ * The quick wallet check: is the live WorldStreet wallet really working for
+ * Predict? One button adds 1 cent to the dollar wallet of an account the admin
  * picks, takes it back, and repeats each request to prove nothing pays
  * twice, reading the balance every time (trading/wallet-check.ts). The
  * answer is a plain working or not working, with the wallet's own words
- * for each step to pass to the wallet team. Transfers out to a bank are the
- * wallet's own and can't be tested from here, so the page says so.
+ * for each step to pass to the wallet team. The full money test is the next
+ * tab (guided-money-test.tsx).
  */
 
 export function WalletCheckDesk() {
@@ -72,10 +73,14 @@ export function WalletCheckDesk() {
 
   return (
     <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Wallet check</h1>
+      <h1 className="text-2xl font-semibold tracking-tight">Quick wallet check</h1>
       <p className="mt-1 text-sm text-secondary">
-        Find out if the live WorldStreet wallet is working for Predict. It tests adding and taking dollars,
-        and that nothing pays or charges twice.
+        One button, a few seconds. It tests adding and taking dollars, and that nothing pays or charges twice. If it
+        says Working, go on to the{" "}
+        <Link href="/admin/money-test" className="font-semibold text-accent-ink hover:underline">
+          full money test
+        </Link>
+        .
       </p>
 
       <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
@@ -138,14 +143,6 @@ export function WalletCheckDesk() {
 
       {loadError && <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {loadError.message}</p>}
       {latest && <Result run={latest} />}
-
-      <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
-        <h2 className="text-base font-semibold">What this doesn&rsquo;t test</h2>
-        <p className="mt-1 text-sm text-secondary">
-          Transfers from the dollar wallet to a bank or OPay, including money showing as &ldquo;locked&rdquo;. Only the
-          wallet can make those, so test one by hand with a small amount.
-        </p>
-      </section>
 
       {earlier.length > 0 && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">

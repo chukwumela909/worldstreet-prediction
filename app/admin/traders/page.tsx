@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { TradersDesk } from "@/components/admin/traders-desk";
 
 /**
@@ -7,5 +8,9 @@ import { TradersDesk } from "@/components/admin/traders-desk";
  * and more. Read-only — money moves on the Local book desk at /admin.
  */
 export default function AdminTradersPage() {
-  return <TradersDesk />;
+  return (
+    <Suspense fallback={null}>
+      <TradersDesk />
+    </Suspense>
+  );
 }

@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { ApiError } from "../errors.js";
 import { User } from "../models.js";
+import { getFxQuote } from "./fx.js";
+import { getBookSettings } from "./settings.js";
 import {
   chargeWallet,
   creditWallet,
@@ -9,7 +11,8 @@ import {
   type WalletResult,
 } from "../wallet.js";
 import { WalletCheckRun } from "./models.js";
-import { isDuplicateAnswer } from "./withdrawals.js";
+import { getNairaBalanceKobo } from "./ledger.js";
+import { isDuplicateAnswer, isFlagged } from "./withdrawals.js";
 
 /**
  * Is the central wallet really working for us? The desk runs this against
@@ -82,15 +85,45 @@ function said(r: WalletResult<unknown>): string {
 
 const pause = () => new Promise((resolve) => setTimeout(resolve, READ_GAP_MS));
 
-export async function runWalletCheck(p: { account: string; actor: string }): Promise<WalletCheckView> {
-  if (!isWalletConfigured()) {
-    throw new ApiError(503, "The wallet isn't set up on the API", "WALLET_UNAVAILABLE");
-  }
-  const name = p.account.trim().replace(/^@/, "");
+async function findAccount(account: string) {
+  const name = account.trim().replace(/^@/, "");
   const user = await User.findOne({ $or: [{ username: name }, { email: name.toLowerCase() }] })
     .collation({ locale: "en", strength: 2 })
     .lean();
   if (!user) throw new ApiError(404, "No account with that username or email", "NOT_FOUND");
+  return user;
+}
+
+/** One account's money right now, and anything that would get in the way of testing with it. */
+export async function readTestAccount(account: string) {
+  const user = await findAccount(account);
+  const id = user.authUserId;
+  const [wallet, balanceKobo, fx, settings, flagged] = await Promise.all([
+    getWalletUsdBalance(id),
+    getNairaBalanceKobo(id),
+    getFxQuote().catch(() => null),
+    getBookSettings(),
+    isFlagged(id),
+  ]);
+  return {
+    username: user.username,
+    suspended: Boolean(user.suspendedAt),
+    flagged,
+    dollarsMinor: wallet.ok ? wallet.data.balances.USD.availableMinor : null,
+    lockedMinor: wallet.ok ? wallet.data.balances.USD.lockedMinor : null,
+    walletError: wallet.ok ? "" : said(wallet),
+    balanceKobo,
+    usdToNgn: fx?.usdToNgn ?? null,
+    ngnToUsd: fx?.ngnToUsd ?? null,
+    reviewKobo: settings.withdrawalReviewKobo,
+  };
+}
+
+export async function runWalletCheck(p: { account: string; actor: string }): Promise<WalletCheckView> {
+  if (!isWalletConfigured()) {
+    throw new ApiError(503, "The wallet isn't set up on the API", "WALLET_UNAVAILABLE");
+  }
+  const user = await findAccount(p.account);
   if (user.suspendedAt) {
     throw new ApiError(409, "That account is suspended, and a suspended account moves no money", "ACCOUNT_SUSPENDED");
   }

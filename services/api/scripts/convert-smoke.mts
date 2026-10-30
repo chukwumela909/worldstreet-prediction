@@ -28,7 +28,7 @@ const { ApiError } = await import("../src/errors.js");
 const { convertNaira } = await import("../src/routes/ngn-wallet.js");
 const { creditNaira, getNairaBalanceKobo } = await import("../src/trading/ledger.js");
 const { FxRate, LedgerEntry, WithdrawalCheck, ensureTradingIndexes } = await import("../src/trading/models.js");
-const { resolveWithdrawalCheck } = await import("../src/trading/withdrawals.js");
+const { getWithdrawalDesk, resolveWithdrawalCheck } = await import("../src/trading/withdrawals.js");
 const settings = await import("../src/trading/settings.js");
 const { AlertRecord, User } = await import("../src/models.js");
 await ensureTradingIndexes();
@@ -308,10 +308,60 @@ const flagged = (key: string) =>
 check("a flagged account's ₦1,000 withdrawal waits for approval", (await flagged("flag-key-0001")) === "WITHDRAWAL_IN_REVIEW");
 check(
   "…saying why",
-  (await WithdrawalCheck.findOne({ refKey: "convert:u-flag:flag-key-0001" }).lean())?.reason === "Flagged on Abuse watch",
+  (await WithdrawalCheck.findOne({ refKey: "convert:u-flag:flag-key-0001" }).lean())?.reason === "Flagged as a suspicious customer",
 );
 await AlertRecord.updateOne({ _id: flagAlert._id }, { $set: { status: "resolved" } });
 check("once the alert is settled, their withdrawals go straight out again", (await flagged("flag-key-0002")) === "ok");
+
+/* ---------------- the Withdrawals tab ---------------- */
+console.log("the Withdrawals tab");
+await User.create({ authUserId: "u-stack", email: "stack@example.test", username: "stack", displayName: "Stack" });
+await creditNaira({ authUserId: "u-stack", amountKobo: 30_000_000, type: "conversion_in", refKey: "fund:u-stack", description: "funds" });
+const stack = (key: string, kobo: number) =>
+  outcomeOf(() => convertNaira("u-stack", { direction: "ngn_to_usd", amountMinor: kobo, idempotencyKey: key }, log));
+await stack("stack-key-0001", 5_000_000); // under the limit: paid straight out
+await stack("stack-key-0002", 12_000_000);
+await stack("stack-key-0003", 8_000_000);
+const stackPerson = async () => (await getWithdrawalDesk()).people.find((x) => x.authUserId === "u-stack")!;
+const stacked = await stackPerson();
+check(
+  "two requests from one person stack under them, oldest first",
+  stacked.requests.length === 2 && stacked.requests[0]!.amountKobo === 12_000_000 && stacked.requests[1]!.amountKobo === 8_000_000,
+);
+check("…with what they asked for and what's left in the balance", stacked.heldKobo === 20_000_000 && stacked.balanceKobo === 5_000_000);
+check("…what they put in, and only what really went out", stacked.addedKobo === 30_000_000 && stacked.paidOutKobo === 5_000_000);
+check("nothing against them reads as clear", stacked.verdict === "clear" && stacked.flags.length === 0);
+const stackAlert = await AlertRecord.create({
+  key: "abuse:near:u-stack",
+  kind: "abuse",
+  subject: "Buying near-certain sides: @stack",
+  firstAt: new Date(),
+  lastAt: new Date(),
+  authUserIds: ["u-stack"],
+});
+const stackFlagged = await stackPerson();
+check("an open alert makes them suspicious, and says why", stackFlagged.verdict === "suspicious" && stackFlagged.flags[0]!.subject.includes("near-certain"));
+check("the suspicious ones come first", (await getWithdrawalDesk()).people[0]!.authUserId === "u-stack");
+await AlertRecord.deleteOne({ _id: stackAlert._id });
+await User.updateOne({ authUserId: "u-stack" }, { $set: { suspendedAt: new Date() } });
+check("a suspended customer reads as suspended", (await stackPerson()).verdict === "suspended");
+const paidBeforeSuspended = paidRefs.size;
+const suspendedApprove = await resolveWithdrawalCheck({ refKey: "convert:u-stack:stack-key-0002", action: "retry", actor: "key:josh", log }).catch(
+  (err: unknown) => (err instanceof ApiError ? err.code : "error"),
+);
+check(
+  "approving a suspended customer's withdrawal is refused, sends nothing, and it stays waiting",
+  suspendedApprove === "ACCOUNT_SUSPENDED" && paidRefs.size === paidBeforeSuspended &&
+    (await WithdrawalCheck.findOne({ refKey: "convert:u-stack:stack-key-0002" }).lean())?.status === "review",
+);
+await User.updateOne({ authUserId: "u-stack" }, { $set: { suspendedAt: null } });
+await resolveWithdrawalCheck({ refKey: "convert:u-stack:stack-key-0002", action: "retry", actor: "key:josh", log });
+const oneLeft = await stackPerson();
+check("approving one leaves the other waiting, and counts the paid one as out", oneLeft.requests.length === 1 && oneLeft.heldKobo === 8_000_000 && oneLeft.paidOutKobo === 17_000_000);
+await resolveWithdrawalCheck({ refKey: "convert:u-stack:stack-key-0003", action: "return", actor: "key:josh", log });
+const cleared = await getWithdrawalDesk();
+check("once nothing waits, they leave the list", !cleared.people.some((x) => x.authUserId === "u-stack"));
+check("…and both show in what's been settled", cleared.settled.filter((r) => r.authUserId === "u-stack").length === 2);
 await settings.updateBookSettings({ withdrawalReviewKobo: 0 }, "smoke");
 
 console.log(`\n${passed} passed, ${failed} failed`);

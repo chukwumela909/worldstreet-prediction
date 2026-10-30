@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowDownIcon as ArrowDown,
@@ -119,8 +120,10 @@ export function TradersDesk() {
   const money = useAdminMoney();
   const view = useLocalPref(viewPref);
   const { tab, sort } = view;
-  const [search, setSearch] = useState("");
-  const [query, setQuery] = useState("");
+  // other desks link here with ?search=username
+  const linked = useSearchParams().get("search") ?? "";
+  const [search, setSearch] = useState(linked);
+  const [query, setQuery] = useState(linked);
   const [offset, setOffset] = useState(0);
   const [reloads, setReloads] = useState(0);
 
