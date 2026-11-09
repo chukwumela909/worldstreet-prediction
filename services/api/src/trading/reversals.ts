@@ -58,8 +58,17 @@ function onMarkets(topics: readonly string[]) {
   return pattern ? [{ eventTitle: pattern }, { eventSlug: pattern }, { marketTitle: pattern }] : null;
 }
 
+/**
+ * Where the bets in scope start: an exact moment (`sinceAt`, e.g. the day
+ * a rule went live) wins over a rolling count of days back from now.
+ */
+function cutoff(sinceDays: number | null, sinceAt?: Date | null): Date | null {
+  if (sinceAt) return sinceAt;
+  return sinceDays !== null ? new Date(Date.now() - sinceDays * 86_400_000) : null;
+}
+
 /** The settled bets in scope; `authUserId` narrows it to one customer. */
-function scope(topics: readonly string[], sinceDays: number | null, authUserId?: string) {
+function scope(topics: readonly string[], since: Date | null, authUserId?: string) {
   const markets = onMarkets(topics);
   if (!markets) return null;
   return {
@@ -67,7 +76,7 @@ function scope(topics: readonly string[], sinceDays: number | null, authUserId?:
     reversedFrom: { $exists: false },
     $or: markets,
     ...(authUserId ? { authUserId } : {}),
-    ...(sinceDays !== null ? { createdAt: { $gte: new Date(Date.now() - sinceDays * 86_400_000) } } : {}),
+    ...(since ? { createdAt: { $gte: since } } : {}),
   };
 }
 
@@ -96,6 +105,8 @@ const change = (b: Pick<Candidate, "status" | "stakeKobo" | "potentialPayoutKobo
 export interface ReversalPreview {
   topics: string[];
   sinceDays: number | null;
+  /** The exact start, when one was given; echoed so the desk knows it was used. */
+  sinceAt: string | null;
   bets: number;
   won: number;
   lost: number;
@@ -127,10 +138,12 @@ export async function previewReversal(
   topics: readonly string[],
   sinceDays: number | null,
   authUserId?: string,
+  sinceAt?: Date | null,
 ): Promise<ReversalPreview> {
   const base: ReversalPreview = {
     topics: [...topics],
     sinceDays,
+    sinceAt: sinceAt?.toISOString() ?? null,
     bets: 0,
     won: 0,
     lost: 0,
@@ -144,7 +157,7 @@ export async function previewReversal(
     events: [],
     customerRows: [],
   };
-  const q = scope(topics, sinceDays, authUserId);
+  const q = scope(topics, cutoff(sinceDays, sinceAt), authUserId);
   if (!q) return base;
   const [bets, openBets] = await Promise.all([
     Position.find(q, { authUserId: 1, eventTitle: 1, status: 1, stakeKobo: 1, potentialPayoutKobo: 1 }).lean<
@@ -225,6 +238,8 @@ export interface ReversalBatch {
 export async function runReversalBatch(params: {
   topics: readonly string[];
   sinceDays: number | null;
+  /** An exact start; wins over sinceDays. */
+  sinceAt?: Date | null;
   /** Only this customer's bets, when set. */
   authUserId?: string;
   shortfall: Shortfall;
@@ -233,7 +248,7 @@ export async function runReversalBatch(params: {
   actor: string;
   log: FastifyBaseLogger;
 }): Promise<ReversalBatch> {
-  const q = scope(params.topics, params.sinceDays, params.authUserId);
+  const q = scope(params.topics, cutoff(params.sinceDays, params.sinceAt), params.authUserId);
   if (!q) return { reversed: 0, remaining: 0, changeKobo: 0, writtenOffKobo: 0 };
   const batch = await Position.find(q, {
     authUserId: 1,

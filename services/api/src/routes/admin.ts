@@ -162,6 +162,8 @@ const recoveryPreviewBody = z.object({
   topics: recoveryTopics,
   /** Bets placed in the last N days; null = all time. */
   sinceDays: z.number().int().min(1).max(3650).nullable(),
+  /** Bets placed from this exact moment (ISO, with offset); wins over sinceDays. */
+  sinceAt: z.iso.datetime({ offset: true }).optional(),
   /** Only this customer's bets (username or email); empty = everyone's. */
   customer: z.string().trim().max(200).optional(),
 });
@@ -454,7 +456,8 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const topics = checkTopics(request.body.topics);
     const { pausedTopics } = await getBookSettings();
     const authUserId = request.body.customer ? await findCustomerId(request.body.customer) : undefined;
-    const preview = await previewReversal(topics, request.body.sinceDays, authUserId);
+    const sinceAt = request.body.sinceAt ? new Date(request.body.sinceAt) : null;
+    const preview = await previewReversal(topics, request.body.sinceDays, authUserId, sinceAt);
     return {
       success: true,
       data: { ...preview, paused: topics.every((t) => pausedTopics.includes(t)) },
@@ -491,6 +494,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
         data: await runReversalBatch({
           topics,
           sinceDays: request.body.sinceDays,
+          sinceAt: request.body.sinceAt ? new Date(request.body.sinceAt) : null,
           ...(authUserId ? { authUserId } : {}),
           shortfall: request.body.shortfall,
           reason: request.body.reason,

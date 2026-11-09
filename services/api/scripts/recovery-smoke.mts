@@ -390,6 +390,56 @@ check(
   (await admin("POST", "/v1/admin/recovery/preview", { topics: ["pop base"], sinceDays: null, customer: "nobody" })).statusCode === 404,
 );
 
+/* ---------------- from an exact moment ---------------- */
+console.log("from an exact moment");
+const RULE_LIVE = "2026-10-21T00:00:00+01:00";
+const ruleMs = Date.parse(RULE_LIVE);
+const early = await ownMarket("Early Bird number of X posts - 10 or more?");
+const late = await ownMarket("Late Owl number of X posts - 10 or more?");
+await bet(early, "u-lose", "up", 1_000_000, 9_000);
+await bet(late, "u-lose", "up", 1_000_000, 9_000);
+await adminSettleMarket({ eventId: early.eventId, marketId: early.marketId, winningOutcomeId: early.up, actor: "auto", log });
+await adminSettleMarket({ eventId: late.eventId, marketId: late.marketId, winningOutcomeId: late.up, actor: "auto", log });
+// one bet a minute before the rule, one a minute after (raw: Mongoose keeps createdAt immutable)
+await Position.collection.updateOne({ authUserId: "u-lose", marketId: early.marketId }, { $set: { createdAt: new Date(ruleMs - 60_000) } });
+await Position.collection.updateOne({ authUserId: "u-lose", marketId: late.marketId }, { $set: { createdAt: new Date(ruleMs + 60_000) } });
+const LOSER = "tunde";
+const atPreview = (await admin("POST", "/v1/admin/recovery/preview", {
+  topics: ["early bird", "late owl"],
+  sinceDays: null,
+  sinceAt: RULE_LIVE,
+  customer: LOSER,
+})).json() as { data: { bets: number; sinceAt: string | null; events: { title: string }[] } };
+check(
+  "a start moment previews only the bets placed from it, and says so",
+  atPreview.data.bets === 1 &&
+    atPreview.data.events[0]!.title.startsWith("Late Owl") &&
+    atPreview.data.sinceAt === new Date(RULE_LIVE).toISOString(),
+);
+check(
+  "…and wins over a count of days",
+  ((await admin("POST", "/v1/admin/recovery/preview", { topics: ["early bird", "late owl"], sinceDays: 3650, sinceAt: RULE_LIVE, customer: LOSER })).json() as { data: { bets: number } }).data.bets === 1,
+);
+const atRun = (await admin("POST", "/v1/admin/recovery/run", {
+  topics: ["early bird", "late owl"],
+  sinceDays: null,
+  sinceAt: RULE_LIVE,
+  customer: LOSER,
+  shortfall: "negative",
+  reason: POP_REASON,
+  confirm: "REVERSE",
+})).json() as { data: { reversed: number } };
+check(
+  "…and reverses only those, leaving the earlier bet as it was",
+  atRun.data.reversed === 1 &&
+    (await Position.countDocuments({ authUserId: "u-lose", marketId: early.marketId, status: "won" })) === 1 &&
+    (await Position.countDocuments({ authUserId: "u-lose", marketId: late.marketId, reversedFrom: { $exists: true } })) === 1,
+);
+check(
+  "a start moment without a time zone is refused",
+  (await admin("POST", "/v1/admin/recovery/preview", { topics: ["late owl"], sinceDays: null, sinceAt: "2026-10-21" })).statusCode === 400,
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 
 await app.close();

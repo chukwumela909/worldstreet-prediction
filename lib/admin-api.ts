@@ -556,6 +556,8 @@ export interface RecoveryReport {
 export interface ReversalPreview {
   topics: string[];
   sinceDays: number | null;
+  /** The exact start used, when one was sent; absent on an API older than it. */
+  sinceAt?: string | null;
   bets: number;
   won: number;
   lost: number;
@@ -606,13 +608,20 @@ export async function fetchRecovery(): Promise<RecoveryReport> {
   }
 }
 
-export const previewReversal = (params: { topics: string[]; sinceDays: number | null; customer?: string }) =>
+export const previewReversal = (params: {
+  topics: string[];
+  sinceDays: number | null;
+  /** Bets from this exact moment (ISO with offset); wins over sinceDays. */
+  sinceAt?: string;
+  customer?: string;
+}) =>
   adminPost<ReversalPreview>("/v1/admin/recovery/preview", params);
 
 /** One batch; call again until `remaining` is 0. The reason goes in the customers' email. */
 export const runReversalBatch = (params: {
   topics: string[];
   sinceDays: number | null;
+  sinceAt?: string;
   /** Only this customer's bets (username or email). */
   customer?: string;
   shortfall: Shortfall;

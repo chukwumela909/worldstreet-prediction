@@ -34,10 +34,21 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  *   2. reverse the customer's settled bets on them, in batches (winnings
  *      back, stakes on lost bets returned), with the reason kept;
  *   3. email the reversal, which quotes the reason word for word.
+ *
+ * Only bets placed from the day the Terms went live count, by default:
+ * bets before it came before the rule. The date is read as midnight in
+ * Lagos and sent as that exact moment (`sinceAt`), not a count of days,
+ * so not one earlier bet is caught.
  */
 
-const DAY_MS = 86_400_000;
+/** The day the Terms went live, as services/api/src/trading/bet-review.ts has it. */
+const TERMS_LIVE_DATE = "2026-10-21";
+/** Lagos: West Africa Time, UTC+1 all year. */
+const LAGOS_OFFSET = "+01:00";
 const MIN_REASON = 10;
+
+const dayLabel = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Lagos" });
 
 const DEFAULT_REASON =
   "This is a violation of our Terms and Conditions (sections 4b and 4c). You placed bets on X post count markets when the result was already all but decided, which our rules don't allow. We have taken back the winnings from those bets. Any further violation may lead to your account being suspended.";
@@ -48,7 +59,8 @@ interface Checked {
   /** The customer as typed, so a later edit can't change who the run hits. */
   customer: string;
   topics: string[];
-  sinceDays: number | null;
+  /** Bets from this moment (ISO); null = all time. */
+  sinceAt: string | null;
   person: TraderRow | null;
   /** Their settled bets on these markets. */
   mine: ReversalPreview;
@@ -66,7 +78,7 @@ export function BreachDesk() {
   const money = useAdminMoney();
   const [customer, setCustomer] = useState("");
   const [marketsText, setMarketsText] = useState("x posts");
-  const [sinceDate, setSinceDate] = useState("");
+  const [sinceDate, setSinceDate] = useState(TERMS_LIVE_DATE);
   const [reason, setReason] = useState(DEFAULT_REASON);
   const [steps, setSteps] = useState<Record<StepKey, boolean>>({ close: true, takeBack: true, email: true });
   const [shortfall, setShortfall] = useState<Shortfall>("negative");
@@ -96,20 +108,21 @@ export function BreachDesk() {
   const check = async () => {
     setBusy("check");
     reset();
-    // worked out on the press, so rendering stays pure
-    const sinceDays = sinceDate
-      ? Math.max(Math.ceil((Date.now() - new Date(`${sinceDate}T00:00:00`).getTime()) / DAY_MS), 1)
-      : null;
+    const sinceAt = sinceDate ? `${sinceDate}T00:00:00${LAGOS_OFFSET}` : null;
     try {
       const [mine, all, people] = await Promise.all([
-        previewReversal({ topics, sinceDays, customer: who }),
+        previewReversal({ topics, sinceDays: null, ...(sinceAt ? { sinceAt } : {}), customer: who }),
         previewReversal({ topics, sinceDays: null }),
         fetchTraders({ search: who, limit: 10 }).catch(() => null),
       ]);
+      // an API older than sinceAt ignores it and would count all time
+      if (sinceAt && !mine.sinceAt) {
+        throw new Error("The API is older than this page, so it can't count from a date. Deploy the API first.");
+      }
       const lower = who.toLowerCase();
       const person =
         people?.traders.find((t) => t.username.toLowerCase() === lower || t.email.toLowerCase() === lower) ?? null;
-      setChecked({ customer: who, topics, sinceDays, person, mine, all });
+      setChecked({ customer: who, topics, sinceAt, person, mine, all });
       setSteps({ close: !all.paused, takeBack: mine.bets > 0, email: mine.bets > 0 });
       const balance = mine.customerRows?.[0]?.balanceKobo ?? person?.balanceKobo ?? 0;
       setShortfall(balance >= mine.netKobo ? "cap" : "negative");
@@ -136,7 +149,12 @@ export function BreachDesk() {
     if (!checked) return;
     setBusy("run");
     setError(null);
-    const p = { topics: checked.topics, sinceDays: checked.sinceDays, customer: checked.customer };
+    const p = {
+      topics: checked.topics,
+      sinceDays: null,
+      ...(checked.sinceAt ? { sinceAt: checked.sinceAt } : {}),
+      customer: checked.customer,
+    };
     const out = results.filter((r) => r.ok);
     const record = (r: StepResult) => {
       out.push(r);
@@ -239,7 +257,7 @@ export function BreachDesk() {
             />
           </label>
           <label>
-            <span className="block text-xs font-medium text-secondary">Their bets since (optional)</span>
+            <span className="block text-xs font-medium text-secondary">Their bets placed from</span>
             <input
               type="date"
               value={sinceDate}
@@ -249,6 +267,13 @@ export function BreachDesk() {
               }}
               className="mt-1 h-9 rounded-md border border-border bg-sunken px-3 text-sm outline-none focus:border-accent"
             />
+            <span className="mt-1 block text-xs text-tertiary">
+              {sinceDate === TERMS_LIVE_DATE
+                ? "The day the Terms went live"
+                : sinceDate
+                  ? "Not the Terms date (21 Oct 2026)"
+                  : "Empty: all time, before the Terms too"}
+            </span>
           </label>
         </div>
 
@@ -297,7 +322,7 @@ export function BreachDesk() {
                 result={results.find((r) => r.key === "takeBack")}
                 title={
                   checked.mine.bets === 0
-                    ? `${name} has nothing to take back on these markets${checked.sinceDays ? " since that date" : ""}`
+                    ? `${name} has nothing to take back on these markets${checked.sinceAt ? ` since ${dayLabel(checked.sinceAt)}` : ""}`
                     : `Take back ${name}’s winnings: we recover ${money.format(checked.mine.netKobo)}`
                 }
               >
@@ -307,7 +332,8 @@ export function BreachDesk() {
                   <>
                     {checked.mine.bets} bet{checked.mine.bets === 1 ? "" : "s"} ({checked.mine.won} won,{" "}
                     {checked.mine.lost} lost) on {checked.mine.events.length} market
-                    {checked.mine.events.length === 1 ? "" : "s"}. {money.format(checked.mine.takeBackKobo)} of winnings
+                    {checked.mine.events.length === 1 ? "" : "s"},{" "}
+                    {checked.sinceAt ? `placed from ${dayLabel(checked.sinceAt)}` : "of all time"}. {money.format(checked.mine.takeBackKobo)} of winnings
                     come back and {money.format(checked.mine.returnKobo)} of stakes on lost bets is returned, as if the
                     bets never happened. Their balance is {money.format(balanceBefore)}
                     {covers ? ", which covers it." : ", which doesn't cover it."}
