@@ -513,6 +513,7 @@ function TraderTableRow({
               <p className="flex min-w-0 items-center gap-2 text-sm font-semibold">
                 <span className="truncate">{name}</span>
                 {trader.suspendedAt && <SuspendedChip />}
+                {!trader.suspendedAt && trader.withdrawalsLockedAt && <LockedChip />}
               </p>
               <p className="truncate text-xs font-medium text-tertiary">
                 {[trader.username && `@${trader.username}`, trader.email]
@@ -595,6 +596,7 @@ function TraderCard({
           <p className="flex min-w-0 items-center gap-2 text-sm font-semibold">
             <span className="truncate">{name}</span>
             {trader.suspendedAt && <SuspendedChip />}
+                {!trader.suspendedAt && trader.withdrawalsLockedAt && <LockedChip />}
           </p>
           {trader.username && (
             <p className="truncate text-xs font-medium text-tertiary">
@@ -928,6 +930,16 @@ function BalanceBreakdown({
         </p>
       )}
     </details>
+  );
+}
+
+function LockedChip() {
+  return (
+    <span
+      className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${FLAG_TONE.caution.chip}`}
+    >
+      Withdrawals locked
+    </span>
   );
 }
 

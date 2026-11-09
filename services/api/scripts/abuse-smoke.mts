@@ -196,6 +196,16 @@ check(
   !(await AlertRecord.exists({ key: "abuse:odds:u-lucky" })) && Boolean(await AlertRecord.exists({ key: "abuse:near:u-near" })),
 );
 
+console.log("alerts name who they're about");
+const alertsView = (await admin("GET", "/v1/admin/alerts?status=open")).json() as {
+  data: { alerts: { kind: string; people: { username: string; email: string }[] }[] };
+};
+const twinAlert = alertsView.data.alerts.find((a) => a.people.length === 2);
+check(
+  "a customer alert carries the people it's about, so the desk can act on them",
+  twinAlert !== undefined && twinAlert.people.some((p) => p.username === "twin1") && twinAlert.people.every((p) => p.email.includes("@")),
+);
+
 /* ---------------- the Suspended bets tab ---------------- */
 console.log("the Suspended bets tab");
 await User.create({ authUserId: "u-review", email: "review@example.test", username: "review", displayName: "Review", suspendedAt: new Date() });

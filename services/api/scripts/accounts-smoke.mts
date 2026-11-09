@@ -187,6 +187,34 @@ check(
 await admin("POST", "/v1/admin/traders/u-bola/reinstate", { notify: true });
 check("reinstating someone never suspended sends nothing", sent.length === 1);
 
+/* ---------------- locking withdrawals ---------------- */
+console.log("lock withdrawals");
+const sentBeforeLock = sent.length;
+const lock = await admin("POST", "/v1/admin/traders/u-ada/lock-withdrawals", { note: "checking their X post bets" });
+check("locking withdrawals works, and emails nobody", lock.statusCode === 200 && sent.length === sentBeforeLock);
+let lockedSays = "";
+try {
+  await convertNaira("u-ada", { direction: "ngn_to_usd", amountMinor: 100_000, idempotencyKey: "lock-key-0001" }, log);
+} catch (err) {
+  lockedSays = err instanceof ApiError ? `${err.code}|${err.message}` : "other";
+}
+check("a locked account can't withdraw, and is told it's going through checks", lockedSays.startsWith("WITHDRAWALS_LOCKED|") && lockedSays.includes("checks"));
+const lockedBalance = await getNairaBalanceKobo("u-ada");
+check("…and nothing was taken from the balance", lockedBalance === (await getNairaBalanceKobo("u-ada")));
+check("…but it can still bet", (await codeOf(() => order("u-ada", rain))) === "ok");
+check("locking twice is refused (ALREADY_LOCKED)", (await admin("POST", "/v1/admin/traders/u-ada/lock-withdrawals", {})).statusCode === 409);
+const lockedRow = ((await admin("GET", "/v1/admin/traders?search=ada")).json() as { data: { traders: { withdrawalsLockedAt: string | null }[] } }).data.traders[0];
+check("the trader list shows the lock", Boolean(lockedRow?.withdrawalsLockedAt));
+check("unlocking works", (await admin("POST", "/v1/admin/traders/u-ada/unlock-withdrawals", {})).statusCode === 200);
+check(
+  "…and withdrawals are allowed again (the wallet isn't set up here, so it fails there, not on the lock)",
+  (await codeOf(() => convertNaira("u-ada", { direction: "ngn_to_usd", amountMinor: 100_000, idempotencyKey: "lock-key-0002" }, log))) !== "WITHDRAWALS_LOCKED",
+);
+const lockActions = ((await admin("GET", "/v1/admin/traders/u-ada")).json() as { data: { accountActions: { action: string; reason: string }[] } }).data
+  .accountActions;
+check("both are on their record, with the desk's note", lockActions[0]!.action === "unlock_withdrawals" && lockActions[1]!.reason === "checking their X post bets");
+check("unlocking twice is refused (NOT_LOCKED)", (await admin("POST", "/v1/admin/traders/u-ada/unlock-withdrawals", {})).statusCode === 409);
+
 /* ---------------- support: the customer ---------------- */
 console.log("support");
 // a suspended customer can still ask for help

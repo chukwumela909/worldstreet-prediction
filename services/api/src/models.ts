@@ -1,9 +1,9 @@
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose";
 
-/** One suspend or reinstate on an account, by whom and why (accounts.ts). */
+/** One suspend, reinstate, withdrawal lock or unlock on an account, by whom and why (accounts.ts). */
 const accountActionSchema = new Schema(
   {
-    action: { type: String, enum: ["suspend", "reinstate"], required: true },
+    action: { type: String, enum: ["suspend", "reinstate", "lock_withdrawals", "unlock_withdrawals"], required: true },
     reason: { type: String, default: "" },
     by: { type: String, required: true },
     at: { type: Date, required: true },
@@ -32,7 +32,16 @@ const userSchema = new Schema(
     suspendedAt: { type: Date, default: null },
     suspendedBy: { type: String, default: "" },
     suspendedReason: { type: String, default: "" },
-    /** Every suspend and reinstate, oldest first. */
+    /**
+     * Set while the desk has locked the account's withdrawals: it can
+     * still bet and add money, but nothing goes out until it's unlocked
+     * (accounts.ts). The note is the desk's own; the customer only sees
+     * that their account is being checked.
+     */
+    withdrawalsLockedAt: { type: Date, default: null },
+    withdrawalsLockedBy: { type: String, default: "" },
+    withdrawalsLockNote: { type: String, default: "" },
+    /** Every suspend, reinstate, lock and unlock, oldest first. */
     accountActions: { type: [accountActionSchema], default: [] },
   },
   { timestamps: true },

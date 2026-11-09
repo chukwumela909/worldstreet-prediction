@@ -143,3 +143,73 @@ export async function reinstateAccount(params: {
     : null;
   return { authUserId: params.authUserId, suspended: false, suspendedAt: null, reason: "", emailed };
 }
+
+/* ---------------- locking withdrawals ---------------- */
+
+/**
+ * The lighter stop: the account keeps betting and adding money, but can't
+ * take any out until the desk unlocks it. The customer only learns of it
+ * when they try to withdraw, and sees this.
+ */
+export const WITHDRAWALS_LOCKED_MESSAGE =
+  "Your account is going through some checks because we found some suspicious activity, so withdrawals are paused for now. You can still bet as usual. If you have any questions, please contact Support.";
+
+/** Refuse a withdrawal from an account whose withdrawals are locked (403 WITHDRAWALS_LOCKED). */
+export async function assertCanWithdraw(authUserId: string): Promise<void> {
+  const user = await User.findOne({ authUserId }, { withdrawalsLockedAt: 1 }).lean();
+  if (user?.withdrawalsLockedAt) throw new ApiError(403, WITHDRAWALS_LOCKED_MESSAGE, "WITHDRAWALS_LOCKED");
+}
+
+export interface WithdrawalLockResult {
+  authUserId: string;
+  locked: boolean;
+  lockedAt: string | null;
+}
+
+export async function lockWithdrawals(params: {
+  authUserId: string;
+  note: string;
+  actor: string;
+  log: FastifyBaseLogger;
+}): Promise<WithdrawalLockResult> {
+  const at = new Date();
+  const user = await User.findOneAndUpdate(
+    { authUserId: params.authUserId, withdrawalsLockedAt: null },
+    {
+      $set: { withdrawalsLockedAt: at, withdrawalsLockedBy: params.actor, withdrawalsLockNote: params.note },
+      $push: { accountActions: { action: "lock_withdrawals", reason: params.note, by: params.actor, at } },
+    },
+    { new: true },
+  ).lean();
+  if (!user) {
+    const exists = await User.exists({ authUserId: params.authUserId });
+    if (!exists) throw new ApiError(404, "No such account", "USER_NOT_FOUND");
+    throw new ApiError(409, "This account's withdrawals are already locked", "ALREADY_LOCKED");
+  }
+  params.log.warn({ authUserId: params.authUserId, actor: params.actor }, "withdrawals locked");
+  return { authUserId: params.authUserId, locked: true, lockedAt: at.toISOString() };
+}
+
+export async function unlockWithdrawals(params: {
+  authUserId: string;
+  note: string;
+  actor: string;
+  log: FastifyBaseLogger;
+}): Promise<WithdrawalLockResult> {
+  const at = new Date();
+  const user = await User.findOneAndUpdate(
+    { authUserId: params.authUserId, withdrawalsLockedAt: { $ne: null } },
+    {
+      $set: { withdrawalsLockedAt: null, withdrawalsLockedBy: "", withdrawalsLockNote: "" },
+      $push: { accountActions: { action: "unlock_withdrawals", reason: params.note, by: params.actor, at } },
+    },
+    { new: true },
+  ).lean();
+  if (!user) {
+    const exists = await User.exists({ authUserId: params.authUserId });
+    if (!exists) throw new ApiError(404, "No such account", "USER_NOT_FOUND");
+    throw new ApiError(409, "This account's withdrawals aren't locked", "NOT_LOCKED");
+  }
+  params.log.warn({ authUserId: params.authUserId, actor: params.actor }, "withdrawals unlocked");
+  return { authUserId: params.authUserId, locked: false, lockedAt: null };
+}

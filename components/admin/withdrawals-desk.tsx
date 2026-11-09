@@ -33,6 +33,7 @@ const VERDICT: Record<WithdrawalPerson["verdict"], { label: string; chip: string
   clear: { label: "Not suspicious", chip: "bg-yes-tint text-yes" },
   suspicious: { label: "Suspicious", chip: FLAG_TONE.danger.chip },
   fault: { label: "System fault", chip: FLAG_TONE.caution.chip },
+  locked: { label: "Withdrawals locked", chip: FLAG_TONE.caution.chip },
   suspended: { label: "Suspended", chip: FLAG_TONE.danger.chip },
 };
 
@@ -159,7 +160,7 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
   const [confirmAll, setConfirmAll] = useState(false);
   const verdict = VERDICT[p.verdict];
   const toApprove = p.requests.filter(isReview);
-  const canApprove = p.verdict !== "suspended";
+  const canApprove = p.verdict !== "suspended" && p.verdict !== "locked";
   const outKobo = p.paidOutKobo + p.heldKobo;
   const usd = (p.heldUsdMinor / 100).toFixed(2);
 
@@ -243,7 +244,7 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
       </div>
       <ol className="mt-2 flex flex-col gap-2">
         {p.requests.map((r) => (
-          <Request key={r.refKey} request={r} person={p} money={money} onDone={onDone} disabled={busy} />
+          <Request key={r.refKey} request={r} person={p} money={money} onDone={onDone} disabled={busy} canApprove={canApprove} />
         ))}
       </ol>
 
@@ -288,6 +289,13 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
 
 /** In one line: what's going on with this customer, and what to do. */
 function VerdictNote({ person: p }: { person: WithdrawalPerson }) {
+  if (p.verdict === "locked") {
+    return (
+      <p className="mt-2 text-sm font-semibold text-primary">
+        Their withdrawals are locked, so this can&rsquo;t be approved. Reject it, or unlock their withdrawals in Traders first.
+      </p>
+    );
+  }
   if (p.verdict === "suspended") {
     return (
       <p className="mt-2 text-sm font-semibold text-primary">
@@ -336,12 +344,14 @@ function Request({
   money,
   onDone,
   disabled,
+  canApprove,
 }: {
   request: WithdrawalCheckRow;
   person: WithdrawalPerson;
   money: AdminMoney;
   onDone: () => void;
   disabled: boolean;
+  canApprove: boolean;
 }) {
   const [busy, setBusy] = useState<"retry" | "paid" | "return" | null>(null);
   const [confirm, setConfirm] = useState<"send" | "return" | null>(null);
@@ -419,7 +429,7 @@ function Request({
         </div>
       ) : (
         <div className="mt-2 flex flex-wrap gap-2">
-          {review && p.verdict !== "suspended" && (
+          {review && canApprove && (
             <button
               type="button"
               onClick={() => setConfirm("send")}

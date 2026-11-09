@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { NoSymbolIcon as Ban } from "@heroicons/react/24/outline";
+import { LockClosedIcon as Lock, NoSymbolIcon as Ban } from "@heroicons/react/24/outline";
 import {
+  lockWithdrawals,
   reinstateAccount,
   suspendAccount,
+  unlockWithdrawals,
   type AccountAction,
   type TraderRow,
 } from "@/lib/admin-api";
@@ -26,7 +28,7 @@ const MIN_REASON = 5;
 /** What the control needs to know about the account — any desk's row will do. */
 export type AccountRef = Pick<
   TraderRow,
-  "authUserId" | "displayName" | "username" | "email" | "suspendedAt" | "suspendedReason"
+  "authUserId" | "displayName" | "username" | "email" | "suspendedAt" | "suspendedReason" | "withdrawalsLockedAt"
 >;
 
 export function AccountControl({
@@ -218,6 +220,8 @@ export function AccountControl({
       )}
       {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
 
+      {!suspended && <WithdrawalLock trader={trader} onChanged={onChanged} />}
+
       {actions && actions.length > 0 && (
         <details className="mt-2">
           <summary className="cursor-pointer text-xs font-semibold text-secondary">
@@ -226,8 +230,10 @@ export function AccountControl({
           <ul className="mt-1 flex flex-col gap-1 text-xs text-secondary">
             {actions.map((a) => (
               <li key={`${a.action}-${a.at}`}>
-                <span className={`font-semibold ${a.action === "suspend" ? "text-no" : "text-yes"}`}>
-                  {a.action === "suspend" ? "Suspended" : "Lifted"}
+                <span
+                  className={`font-semibold ${a.action === "suspend" || a.action === "lock_withdrawals" ? "text-no" : "text-yes"}`}
+                >
+                  {ACTION_LABEL[a.action] ?? a.action}
                 </span>{" "}
                 · {when(a.at)} · by {a.by}
                 {a.reason && <> — &ldquo;{a.reason}&rdquo;</>}
@@ -236,6 +242,108 @@ export function AccountControl({
           </ul>
         </details>
       )}
+    </div>
+  );
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  suspend: "Suspended",
+  reinstate: "Lifted",
+  lock_withdrawals: "Withdrawals locked",
+  unlock_withdrawals: "Withdrawals unlocked",
+};
+
+/**
+ * The lighter stop: lock withdrawals and leave betting alone. The customer
+ * isn't emailed; they only see that their account is being checked when
+ * they try to withdraw. The note is for the desk.
+ */
+function WithdrawalLock({ trader, onChanged }: { trader: AccountRef; onChanged: () => void }) {
+  const locked = Boolean(trader.withdrawalsLockedAt);
+  const name = trader.displayName || trader.username || "this account";
+  const [step, setStep] = useState<"idle" | "confirm">("idle");
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const go = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      if (locked) await unlockWithdrawals(trader.authUserId, note.trim());
+      else await lockWithdrawals(trader.authUserId, note.trim());
+      showToast(locked ? `${name} can withdraw again` : `${name}'s withdrawals are locked`, "success");
+      setStep("idle");
+      setNote("");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Request failed. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mt-3">
+      {locked && (
+        <div className={`rounded-md border px-3 py-2.5 text-sm ${FLAG_TONE.caution.banner}`}>
+          <p className="flex items-center gap-1.5 font-semibold text-warning">
+            <Lock className="size-4 shrink-0" aria-hidden />
+            Withdrawals locked since {when(trader.withdrawalsLockedAt)}
+          </p>
+          <p className="mt-1 text-xs text-secondary">
+            They can still bet and add money. If they try to withdraw, they&rsquo;re told their account is going through
+            checks.
+          </p>
+        </div>
+      )}
+      {step === "idle" ? (
+        <button
+          type="button"
+          onClick={() => setStep("confirm")}
+          className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-sm border border-border px-3 text-sm font-semibold text-primary hover:border-border-hover"
+        >
+          {!locked && <Lock className="size-4" aria-hidden />}
+          {locked ? "Unlock withdrawals…" : "Lock withdrawals only…"}
+        </button>
+      ) : (
+        <div className="mt-2 rounded-md border border-border bg-surface p-3 text-sm">
+          <p className="font-semibold">
+            {locked
+              ? `Let ${name} withdraw again?`
+              : `Lock ${name}'s withdrawals? They can keep betting. If they try to withdraw, they'll see that their account is going through checks because we found some suspicious activity. No email is sent.`}
+          </p>
+          <label className="mt-2 block">
+            <span className="text-xs font-medium text-secondary">Note for the team (optional, the customer never sees it)</span>
+            <input
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              maxLength={500}
+              placeholder={locked ? "e.g. Checked, all fine" : "e.g. Checking their X post bets"}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-sunken px-3 text-sm outline-none placeholder:text-tertiary focus:border-accent"
+            />
+          </label>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={go}
+              disabled={busy}
+              className="pressable h-9 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
+            >
+              {busy ? "Saving…" : locked ? "Yes, unlock" : "Yes, lock withdrawals"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setStep("idle")}
+              disabled={busy}
+              className="h-9 rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
     </div>
   );
 }

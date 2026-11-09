@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { config } from "./config.js";
 import { ApiError } from "./errors.js";
-import { AlertRecord, AlertState, type AlertKind } from "./models.js";
+import { AlertRecord, AlertState, User, type AlertKind } from "./models.js";
 
 /**
  * Operational alerts for things the automated paths couldn't finish —
@@ -311,6 +311,18 @@ export interface AlertView {
   resolvedBy: string;
   resolvedAt: string | null;
   note: string;
+  /** The customers it's about, so the desk can act on them right there. */
+  people: AlertPerson[];
+}
+
+export interface AlertPerson {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  suspendedAt: string | null;
+  suspendedReason: string;
+  withdrawalsLockedAt: string | null;
 }
 
 export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
@@ -322,6 +334,27 @@ export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
     AlertRecord.find(filter).sort({ status: 1, lastAt: -1 }).limit(200).lean(),
     AlertRecord.aggregate<{ _id: string; n: number }>([{ $group: { _id: "$status", n: { $sum: 1 } } }]),
   ]);
+  const ids = [...new Set(rows.flatMap((r) => r.authUserIds ?? []))];
+  const users = ids.length
+    ? await User.find(
+        { authUserId: { $in: ids } },
+        { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1, suspendedReason: 1, withdrawalsLockedAt: 1 },
+      ).lean()
+    : [];
+  const personById = new Map(
+    users.map((u): [string, AlertPerson] => [
+      u.authUserId,
+      {
+        authUserId: u.authUserId,
+        username: u.username,
+        displayName: u.displayName ?? "",
+        email: u.email ?? "",
+        suspendedAt: u.suspendedAt?.toISOString() ?? null,
+        suspendedReason: u.suspendedReason ?? "",
+        withdrawalsLockedAt: u.withdrawalsLockedAt?.toISOString() ?? null,
+      },
+    ]),
+  );
   const now = Date.now();
   // live money problems first: open, still happening, risk before the rest
   const rank: Record<string, number> = { risk: 0, abuse: 1, fault: 2, settlement: 3, withdrawal: 4, other: 5, test: 6 };
@@ -341,6 +374,7 @@ export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
       resolvedBy: r.resolvedBy ?? "",
       resolvedAt: r.resolvedAt?.toISOString() ?? null,
       note: r.note ?? "",
+      people: (r.authUserIds ?? []).flatMap((id) => personById.get(id) ?? []),
     }));
   alerts.sort(
     (a, b) =>

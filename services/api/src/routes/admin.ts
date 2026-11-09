@@ -1,7 +1,7 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { reinstateAccount, suspendAccount } from "../accounts.js";
+import { lockWithdrawals, reinstateAccount, suspendAccount, unlockWithdrawals } from "../accounts.js";
 import { requireAdmin } from "../admin-auth.js";
 import { ApiError } from "../errors.js";
 import { SupportTicket, User } from "../models.js";
@@ -116,6 +116,10 @@ const withdrawalResolveBody = z.object({
 const suspendBody = z.object({
   reason: z.string().trim().min(5, "Give a reason the customer will understand").max(500),
   notify: z.boolean(),
+});
+/** Locking withdrawals: the note is the desk's own, never shown to the customer. */
+const withdrawalLockBody = z.object({
+  note: z.string().trim().max(500).default(""),
 });
 const reinstateBody = z.object({
   reason: z.string().trim().max(500).default(""),
@@ -682,6 +686,38 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           actor: actor.label,
           log: request.log,
         }),
+      };
+    },
+  );
+
+  /**
+   * Lock an account's withdrawals: it keeps betting and adding money, but
+   * nothing goes out until unlocked. The customer learns of it only when
+   * they try to withdraw (accounts.ts).
+   */
+  app.post(
+    "/admin/traders/:authUserId/lock-withdrawals",
+    { schema: { body: withdrawalLockBody }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      const { authUserId } = request.params as { authUserId: string };
+      return {
+        success: true,
+        data: await lockWithdrawals({ authUserId, note: request.body.note, actor: actor.label, log: request.log }),
+      };
+    },
+  );
+
+  /** Let the account withdraw again. */
+  app.post(
+    "/admin/traders/:authUserId/unlock-withdrawals",
+    { schema: { body: withdrawalLockBody }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      const { authUserId } = request.params as { authUserId: string };
+      return {
+        success: true,
+        data: await unlockWithdrawals({ authUserId, note: request.body.note, actor: actor.label, log: request.log }),
       };
     },
   );

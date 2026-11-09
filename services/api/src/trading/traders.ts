@@ -57,6 +57,8 @@ export interface TraderRow {
   /** Set while the desk has the account suspended (accounts.ts). */
   suspendedAt: string | null;
   suspendedReason: string;
+  /** Set while its withdrawals are locked (accounts.ts). */
+  withdrawalsLockedAt: string | null;
 }
 
 export interface TraderSummary {
@@ -94,6 +96,7 @@ interface ProfileDoc {
   createdAt?: Date | null;
   suspendedAt?: Date | null;
   suspendedReason?: string | null;
+  withdrawalsLockedAt?: Date | null;
 }
 
 interface PositionStats {
@@ -159,6 +162,7 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
     createdAt: 1,
     suspendedAt: 1,
     suspendedReason: 1,
+    withdrawalsLockedAt: 1,
   };
 
   // Everyone who has ever staked — the list must never lose one of
@@ -309,6 +313,7 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
       lastTradeAt: s?.lastTradeAt ? new Date(s.lastTradeAt).toISOString() : null,
       suspendedAt: u.suspendedAt ? new Date(u.suspendedAt).toISOString() : null,
       suspendedReason: u.suspendedReason ?? "",
+      withdrawalsLockedAt: u.withdrawalsLockedAt ? new Date(u.withdrawalsLockedAt).toISOString() : null,
     };
   });
 

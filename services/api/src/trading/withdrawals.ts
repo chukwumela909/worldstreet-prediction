@@ -373,9 +373,12 @@ export async function resolveWithdrawalCheck(p: {
     }
     // a suspended account moves no money, even one approved by mistake
     if (review) {
-      const user = await User.findOne({ authUserId: check.authUserId }, { suspendedAt: 1 }).lean();
+      const user = await User.findOne({ authUserId: check.authUserId }, { suspendedAt: 1, withdrawalsLockedAt: 1 }).lean();
       if (user?.suspendedAt) {
         throw new ApiError(409, "This account is suspended. Reject the withdrawal, or lift the suspension first.", "ACCOUNT_SUSPENDED");
+      }
+      if (user?.withdrawalsLockedAt) {
+        throw new ApiError(409, "This customer's withdrawals are locked. Reject it, or unlock their withdrawals first.", "WITHDRAWALS_LOCKED");
       }
     }
     const sent = await sendWithdrawal({ ...check, log: p.log });
@@ -412,9 +415,11 @@ export interface WithdrawalPerson {
   /**
    * What the desk needs to know first. "clear": nothing against them, it's
    * only waiting because of its size or the wallet. "suspicious" and "fault"
-   * come from their open alerts, and "suspended" outranks both.
+   * come from their open alerts; "suspended" and then "locked" (withdrawals
+   * locked) outrank both.
    */
-  verdict: "clear" | "suspicious" | "fault" | "suspended";
+  verdict: "clear" | "suspicious" | "fault" | "locked" | "suspended";
+  withdrawalsLockedAt: string | null;
   /** Their open alerts, in the admins' words. */
   flags: { id: string; kind: string; subject: string }[];
   /** In their Predict balance now, after what's set aside for these requests. */
@@ -445,7 +450,7 @@ export async function getWithdrawalDesk(): Promise<{ people: WithdrawalPerson[];
   const [users, accounts, flags, ledger, bets] = await Promise.all([
     User.find(
       { authUserId: { $in: ids } },
-      { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1, suspendedReason: 1 },
+      { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1, suspendedReason: 1, withdrawalsLockedAt: 1 },
     ).lean(),
     NairaAccount.find({ authUserId: { $in: ids } }, { authUserId: 1, balanceKobo: 1 }).lean(),
     AlertRecord.find(
@@ -513,9 +518,12 @@ export async function getWithdrawalDesk(): Promise<{ people: WithdrawalPerson[];
       email: user?.email ?? "",
       suspendedAt: user?.suspendedAt?.toISOString() ?? null,
       suspendedReason: user?.suspendedReason ?? "",
+      withdrawalsLockedAt: user?.withdrawalsLockedAt?.toISOString() ?? null,
       verdict: user?.suspendedAt
         ? "suspended"
-        : open.some((f) => f.kind === "abuse")
+        : user?.withdrawalsLockedAt
+          ? "locked"
+          : open.some((f) => f.kind === "abuse")
           ? "suspicious"
           : open.length > 0
             ? "fault"
@@ -532,7 +540,7 @@ export async function getWithdrawalDesk(): Promise<{ people: WithdrawalPerson[];
     };
   });
   // the ones to look hardest at first, then whoever has waited longest
-  const rank = { suspended: 0, suspicious: 1, fault: 2, clear: 3 };
+  const rank = { suspended: 0, locked: 1, suspicious: 2, fault: 3, clear: 4 };
   people.sort(
     (a, b) =>
       rank[a.verdict] - rank[b.verdict] ||

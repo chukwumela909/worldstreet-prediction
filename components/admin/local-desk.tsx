@@ -651,7 +651,8 @@ function QueueCard({
   );
 }
 
-function MarketRow({
+/** One market's settle-or-void control; the Alerts tab reuses it. */
+export function MarketRow({
   eventId,
   market,
   onDone,

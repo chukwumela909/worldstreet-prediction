@@ -1076,6 +1076,8 @@ export interface TraderRow {
   /** Set while the account is suspended; absent on an older API. */
   suspendedAt?: string | null;
   suspendedReason?: string;
+  /** Set while its withdrawals are locked; absent on an older API. */
+  withdrawalsLockedAt?: string | null;
 }
 
 export interface TraderSummary {
@@ -1122,7 +1124,7 @@ export interface TraderLedgerEntry {
 }
 
 export interface AccountAction {
-  action: "suspend" | "reinstate";
+  action: "suspend" | "reinstate" | "lock_withdrawals" | "unlock_withdrawals";
   reason: string;
   by: string;
   at: string;
@@ -1195,6 +1197,13 @@ export const suspendAccount = (authUserId: string, params: { reason: string; not
 
 export const reinstateAccount = (authUserId: string, params: { reason: string; notify: boolean }) =>
   adminPost<AccountActionResult>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/reinstate`, params);
+
+/** Stop an account withdrawing while it keeps betting; the note stays on the desk. */
+export const lockWithdrawals = (authUserId: string, note: string) =>
+  adminPost<{ locked: boolean }>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/lock-withdrawals`, { note });
+
+export const unlockWithdrawals = (authUserId: string, note: string) =>
+  adminPost<{ locked: boolean }>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/unlock-withdrawals`, { note });
 
 /* ------------------------------------------------------------------ */
 /* Support desk                                                        */
@@ -1555,7 +1564,8 @@ export interface WithdrawalPerson {
   email: string;
   suspendedAt: string | null;
   suspendedReason: string;
-  verdict: "clear" | "suspicious" | "fault" | "suspended";
+  verdict: "clear" | "suspicious" | "fault" | "locked" | "suspended";
+  withdrawalsLockedAt: string | null;
   /** Their open alerts. */
   flags: { id: string; kind: string; subject: string }[];
   /** In their Predict balance now, after what's set aside for these requests. */
@@ -1639,6 +1649,20 @@ export interface AlertItem {
   resolvedBy: string;
   resolvedAt: string | null;
   note: string;
+  /** The customers it's about; absent on an older API. */
+  people?: AlertPerson[];
+}
+
+/** A customer an alert is about, enough to act on them from the alert. */
+export interface AlertPerson {
+  authUserId: string;
+  username: string;
+  displayName: string;
+  email: string;
+  suspendedAt: string | null;
+  suspendedReason: string;
+  /** Absent on an older API. */
+  withdrawalsLockedAt?: string | null;
 }
 
 export interface AlertsView {
