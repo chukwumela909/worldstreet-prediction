@@ -9,6 +9,10 @@
  *  - the web hides it (lib/paused.ts reads the topics from
  *    GET /v1/markets/pricing — the same rule, kept in step);
  *  - POST /admin/void-paused refunds every open bet on it.
+ *
+ * Stopped topics (`stoppedTopics`) match the same way but only refuse new
+ * bets (409 MARKET_STOPPED): the market stays listed, and its open bets
+ * stay open and settle as normal.
  */
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

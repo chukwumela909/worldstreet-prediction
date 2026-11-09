@@ -142,6 +142,7 @@ const settingsBody = z
     countdownCutoffSeconds: z.number().int(),
     lossAlertKobo: z.number().int(),
     pausedTopics: z.array(z.string().max(80)).max(50),
+    stoppedTopics: z.array(z.string().max(80)).max(50),
     maxStakePerMarketKobo: z.number().int(),
     earlyCloseHours: z.number().int(),
     earlyCloseTopics: z.array(z.string().max(80)).max(50),

@@ -23,10 +23,14 @@ import { isApiConfigured } from "@/lib/api-client";
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { showToast } from "@/lib/toast-store";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
+import { StopBetsPanel } from "@/components/admin/stop-bets-card";
 
 /**
  * Take action: one card for "close these markets, take back what this
  * customer won on them, and tell them why".
+ *
+ * Above it, Stop new bets: no new bets on a type of market, and nothing
+ * else (no refunds, no emails), for when that's all the desk wants.
  *
  * Check: who the customer is, their settled bets on the markets (what
  * taking back would recover), how many open bets everyone holds on them,
@@ -283,6 +287,8 @@ export function BreachDesk() {
         first. One press closes the markets and takes the money back; the email goes only when you press Send.
       </p>
 
+      <StopBetsPanel suggestion="x posts" />
+
       <section className="mt-5 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
         <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
           <label className="min-w-0">
@@ -379,7 +385,7 @@ export function BreachDesk() {
               >
                 {checked.all.paused
                   ? "No one can bet on them, and open bets on them are refunded automatically."
-                  : `No one can place a new bet on them. ${checked.all.openBets} open bet${checked.all.openBets === 1 ? "" : "s"} on them (all customers) get${checked.all.openBets === 1 ? "s" : ""} the stake back.`}
+                  : `No one can place a new bet on them. ${checked.all.openBets} open bet${checked.all.openBets === 1 ? "" : "s"} on them (all customers) get${checked.all.openBets === 1 ? "s" : ""} the stake back${checked.all.openBets > 0 ? ", and each of those customers gets an automatic email saying their bet was refunded" : ""}. To only stop new bets, with no refunds or emails, use Stop new bets above and untick this.`}
               </Step>
 
               <Step

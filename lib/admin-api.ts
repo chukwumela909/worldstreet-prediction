@@ -973,6 +973,11 @@ export interface BookSettings {
    * leave the site; [] = nothing paused. Edited on the Paused markets card.
    */
   pausedTopics: string[];
+  /**
+   * Stopped topics: matching markets take no new bets, but stay on the
+   * site and their open bets settle as normal. Absent on an older API.
+   */
+  stoppedTopics?: string[];
   /** The most one customer may stake on one market, all bets together, kobo; 0 = no cap. */
   maxStakePerMarketKobo: number;
   /** Markets matching earlyCloseTopics stop taking bets this many hours before their close; 0 = off. */

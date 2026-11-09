@@ -16,6 +16,7 @@ import { showToast } from "@/lib/toast-store";
 import { PausedMarketsCard } from "@/components/admin/paused-markets";
 import { PausedRefundsReport } from "@/components/admin/paused-refunds";
 import { EarlyCloseCard } from "@/components/admin/early-close-card";
+import { StopBetsCard } from "@/components/admin/stop-bets-card";
 import {
   fetchBookSettings,
   updateBookSettings,
@@ -188,7 +189,7 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
 
 /** Page order — the groups below, flattened. */
 /** The settings this form edits — all but the topic lists, which have their own cards. */
-type FormKey = Exclude<BookSettingKey, "pausedTopics" | "earlyCloseTopics">;
+type FormKey = Exclude<BookSettingKey, "pausedTopics" | "earlyCloseTopics" | "stoppedTopics">;
 
 const ORDER: FormKey[] = [
   "internationalTrading",
@@ -257,6 +258,7 @@ function labelOf(key: string): string {
   if (key === "internationalTrading") return INTL_LABEL;
   if (key === "pausedTopics") return "Paused topics";
   if (key === "earlyCloseTopics") return "Markets that close early";
+  if (key === "stoppedTopics") return "Stopped markets (no new bets)";
   return isNumericKey(key) ? FIELDS[key].label : key;
 }
 
@@ -552,6 +554,12 @@ export function SettingsDesk() {
               />
               <PausedRefundsReport />
             </>
+          )}
+          {Array.isArray(state.settings.stoppedTopics) && (
+            <StopBetsCard
+              state={state}
+              onSaved={(next) => setSaved({ state: next, over: resource.data })}
+            />
           )}
           {Array.isArray(state.settings.earlyCloseTopics) && (
             <EarlyCloseCard

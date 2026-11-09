@@ -221,6 +221,7 @@ const bookSettingsSchema = new Schema(
     lossAlertKobo: { type: Number },
     // no default: an unset field falls back to settings.ts's own
     pausedTopics: { type: [String], default: undefined },
+    stoppedTopics: { type: [String], default: undefined },
     maxStakePerMarketKobo: { type: Number },
     earlyCloseHours: { type: Number },
     earlyCloseTopics: { type: [String], default: undefined },

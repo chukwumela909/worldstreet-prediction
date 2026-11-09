@@ -175,6 +175,10 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
   if (isPausedMarket(settings.pausedTopics, event.title, event.slug, market.title)) {
     throw new ApiError(409, "This market is paused for now", "MARKET_PAUSED");
   }
+  // the desk's quiet stop: no new bets, while the ones placed stay open
+  if (isPausedMarket(settings.stoppedTopics, event.title, event.slug, market.title)) {
+    throw new ApiError(409, "Betting on this market is closed for now", "MARKET_STOPPED");
+  }
 
   // A game stops taking bets at kickoff: in play, anyone watching knows
   // more than the price we copy. One whose kickoff no source states is

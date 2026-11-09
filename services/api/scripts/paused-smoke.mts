@@ -269,6 +269,32 @@ check("the average price paid, stake-weighted", t.avgPriceKobo === 5_500 && bola
 check("other topics stay out", !topicBets.bets.some((b) => /ETH/.test(b.eventTitle)));
 check("a topic with nothing on it is empty", (await getTopicBets(["dogecoin"], 72)).totals.bets === 0);
 
+/* ---------------- stopping new bets only ---------------- */
+console.log("stopped");
+const xMarket = await ownMarket("Pop Base's Number of X Posts by 1PM Today?");
+await openBet(xMarket, "u3", 15_000);
+const stoppedSaved = await settings.updateBookSettings({ stoppedTopics: [" X Posts "] }, "smoke");
+check("stopped topics save, normalized", JSON.stringify(stoppedSaved.settings.stoppedTopics) === JSON.stringify(["x posts"]));
+check("…and the change is in the history", stoppedSaved.history.some((h) => h.field === "stoppedTopics"));
+const sentBefore = sent.length;
+const balBefore = await getNairaBalanceKobo("u1");
+check("a new bet on a stopped market is refused (MARKET_STOPPED)", (await order(xMarket, "stopped-key-1")) === "MARKET_STOPPED");
+check("…and nothing is charged", (await getNairaBalanceKobo("u1")) === balBefore);
+check("a bet elsewhere still goes through", (await order(ethMarket, "stopped-key-2")) === "ok");
+await runSettlementPass(log);
+check(
+  "the settlement pass leaves the open bet on a stopped market open",
+  (await Position.countDocuments({ marketId: xMarket.marketId, status: "open" })) === 1,
+);
+check("…and emails nobody", sent.length === sentBefore);
+const stoppedList = await app.inject({ method: "GET", url: "/v1/markets" });
+check(
+  "a stopped market stays on the listing",
+  (stoppedList.json() as { data: { events: { title: string }[] } }).data.events.some((e) => /X Posts/.test(e.title)),
+);
+await settings.updateBookSettings({ stoppedTopics: [] }, "smoke");
+check("allowed again, it takes bets", (await order(xMarket, "stopped-key-3")) === "ok");
+
 /* ---------------- what the public sees ---------------- */
 console.log("public");
 const listing = await app.inject({ method: "GET", url: "/v1/markets" });

@@ -70,6 +70,13 @@ export interface BookSettings {
    */
   pausedTopics: string[];
   /**
+   * Stopped topics ("x posts"): a market matching one, the way paused
+   * topics match, takes no new bets, and nothing else changes. It stays
+   * on the site, and bets already on it stay open and settle as normal:
+   * no refund, no email. The desk's quiet stop; pausing is the loud one.
+   */
+  stoppedTopics: string[];
+  /**
    * The most one customer can stake on one market, all their bets on it
    * together; 0 = no cap. Stops stacking bet after bet on one result —
    * 41 bets of ₦50,000 on one count market was how that money went.
@@ -101,9 +108,9 @@ export interface BookSettings {
 
 export type SettingKey = keyof BookSettings;
 /** The settings that are lists of topics, edited on their own cards. */
-type TopicKey = "pausedTopics" | "earlyCloseTopics";
+type TopicKey = "pausedTopics" | "earlyCloseTopics" | "stoppedTopics";
 const isTopicKey = (key: SettingKey): key is TopicKey =>
-  key === "pausedTopics" || key === "earlyCloseTopics";
+  key === "pausedTopics" || key === "earlyCloseTopics" || key === "stoppedTopics";
 type NumericKey = Exclude<SettingKey, "internationalTrading" | TopicKey>;
 
 /** At most this many paused topics, each 2–40 characters. */
@@ -156,6 +163,7 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "earlyCloseTopics",
   "withdrawalReviewKobo",
   "maxBookLossKobo",
+  "stoppedTopics",
 ];
 
 /**
@@ -185,6 +193,7 @@ export function defaultSettings(): BookSettings {
     // the October 2026 Bitcoin pause, in force from the first deploy;
     // the desk lifts it by clearing the topics in Settings
     pausedTopics: ["bitcoin", "btc"],
+    stoppedTopics: [],
     maxStakePerMarketKobo: 20_000_000, // ₦200,000: four full bets on one market
     earlyCloseHours: 3,
     // "Pop Base's Number of X Posts by 1PM Today?", "How many likes for…"
@@ -205,7 +214,7 @@ function merge(row: Partial<Record<SettingKey, unknown>> | null): BookSettings {
     const v = row[key];
     if (key === "internationalTrading") {
       if (typeof v === "boolean") out.internationalTrading = v;
-    } else if (key === "pausedTopics" || key === "earlyCloseTopics") {
+    } else if (isTopicKey(key)) {
       if (Array.isArray(v) && v.every((t) => typeof t === "string")) {
         out[key] = normalizeTopics(v);
       }
