@@ -166,6 +166,8 @@ const recoveryPreviewBody = z.object({
   sinceAt: z.iso.datetime({ offset: true }).optional(),
   /** Only this customer's bets (username or email); empty = everyone's. */
   customer: z.string().trim().max(200).optional(),
+  /** With a customer: the reason to write the email preview with. */
+  reason: z.string().trim().max(1000).optional(),
 });
 const recoveryRunBody = recoveryPreviewBody.extend({
   shortfall: z.enum(["negative", "cap"]),
@@ -174,7 +176,11 @@ const recoveryRunBody = recoveryPreviewBody.extend({
   /** Typed by the admin — reversing moves real balances. */
   confirm: z.literal("REVERSE"),
 });
-const recoveryNotifyBody = z.object({ dryRun: z.boolean() });
+const recoveryNotifyBody = z.object({
+  dryRun: z.boolean(),
+  /** Only this customer (username or email); a dry run then returns the emails as written. */
+  customer: z.string().trim().max(200).optional(),
+});
 
 /** One market named by its slug — what the desk gets from pasting its link. */
 const MARKET_SLUG = /^[a-z0-9][a-z0-9-]{1,199}$/;
@@ -457,7 +463,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     const { pausedTopics } = await getBookSettings();
     const authUserId = request.body.customer ? await findCustomerId(request.body.customer) : undefined;
     const sinceAt = request.body.sinceAt ? new Date(request.body.sinceAt) : null;
-    const preview = await previewReversal(topics, request.body.sinceDays, authUserId, sinceAt);
+    const preview = await previewReversal(topics, request.body.sinceDays, authUserId, sinceAt, request.body.reason);
     return {
       success: true,
       data: { ...preview, paused: topics.every((t) => pausedTopics.includes(t)) },
@@ -524,10 +530,14 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   /** Email every customer with reversed bets not yet told, once each; `dryRun` only counts. */
   app.post(
     "/admin/recovery/notify",
-    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
+    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
     async (request) => {
       await requireAdmin(request);
-      return { success: true, data: await notifyReversals({ dryRun: request.body.dryRun, log: request.log }) };
+      const authUserId = request.body.customer ? await findCustomerId(request.body.customer) : undefined;
+      return {
+        success: true,
+        data: await notifyReversals({ dryRun: request.body.dryRun, ...(authUserId ? { authUserId } : {}), log: request.log }),
+      };
     },
   );
 

@@ -219,7 +219,7 @@ function TakeBack({ trader, money, onChanged }: { trader: TraderRow; money: Admi
   const email = async () => {
     setBusy("email");
     try {
-      const res = await notifyReversals(false);
+      const res = await notifyReversals(false, trader.username);
       showToast(
         res.mailConfigured ? `Emailed ${res.emailed} customer${res.emailed === 1 ? "" : "s"} the reason` : "Email isn't set up on the API",
         res.mailConfigured ? "success" : "error",
@@ -402,7 +402,7 @@ function TakeBack({ trader, money, onChanged }: { trader: TraderRow; money: Admi
             Done: {done.reversed} bet{done.reversed === 1 ? "" : "s"} reversed, balance changed by{" "}
             {money.formatSigned(done.changeKobo)}.
           </p>
-          <p className="mt-1 text-secondary">Now email them the reason. This also emails anyone else with a reversal not yet told.</p>
+          <p className="mt-1 text-secondary">Now email them the reason. Only this customer is emailed.</p>
           <button
             type="button"
             onClick={email}

@@ -573,6 +573,15 @@ export interface ReversalPreview {
   paused: boolean;
   /** Each customer it touches, with their balance. */
   customerRows?: { authUserId: string; username: string; email: string; bets: number; changeKobo: number; balanceKobo: number }[];
+  /** For one customer, given a reason: the email it will lead to; absent on an older API. */
+  letter?: ReversalLetter | null;
+}
+
+/** One reversal email, exactly as it goes out. */
+export interface ReversalLetter {
+  to: string;
+  subject: string;
+  text: string;
 }
 
 export interface ReversalBatch {
@@ -587,6 +596,8 @@ export interface ReversalNotice {
   emailed: number;
   mailConfigured: boolean;
   dryRun: boolean;
+  /** For one customer on a dry run: their waiting emails as written; absent on an older API. */
+  letters?: ReversalLetter[];
 }
 
 async function adminPost<T>(path: string, body: unknown): Promise<T> {
@@ -614,6 +625,8 @@ export const previewReversal = (params: {
   /** Bets from this exact moment (ISO with offset); wins over sinceDays. */
   sinceAt?: string;
   customer?: string;
+  /** With a customer: write the email preview with this reason. */
+  reason?: string;
 }) =>
   adminPost<ReversalPreview>("/v1/admin/recovery/preview", params);
 
@@ -628,8 +641,9 @@ export const runReversalBatch = (params: {
   reason: string;
 }) => adminPost<ReversalBatch>("/v1/admin/recovery/run", { ...params, confirm: "REVERSE" });
 
-export const notifyReversals = (dryRun: boolean) =>
-  adminPost<ReversalNotice>("/v1/admin/recovery/notify", { dryRun });
+/** Everyone with a reversal not yet emailed, or only `customer` (username or email). */
+export const notifyReversals = (dryRun: boolean, customer?: string) =>
+  adminPost<ReversalNotice>("/v1/admin/recovery/notify", { dryRun, ...(customer ? { customer } : {}) });
 
 export interface DebtClearing {
   customers: number;

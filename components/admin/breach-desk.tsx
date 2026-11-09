@@ -1,7 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import { CheckCircleIcon as Check, XCircleIcon as Cross } from "@heroicons/react/24/outline";
+import {
+  CheckCircleIcon as Check,
+  EnvelopeIcon as Mail,
+  XCircleIcon as Cross,
+} from "@heroicons/react/24/outline";
 import {
   fetchBookSettings,
   fetchTraders,
@@ -10,21 +14,24 @@ import {
   runReversalBatch,
   updateBookSettings,
   voidPausedMarkets,
+  type ReversalLetter,
   type ReversalPreview,
   type Shortfall,
   type TraderRow,
 } from "@/lib/admin-api";
 import { isApiConfigured } from "@/lib/api-client";
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
+import { showToast } from "@/lib/toast-store";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
  * Take action: one card for "close these markets, take back what this
- * customer won on them, and tell them why". Two presses.
+ * customer won on them, and tell them why".
  *
  * Check: who the customer is, their settled bets on the markets (what
- * taking back would recover), and how many open bets everyone holds on
- * them. Nothing moves.
+ * taking back would recover), how many open bets everyone holds on them,
+ * and the email it will lead to, written by the API exactly as it will
+ * go out, to copy and share before anything moves. Nothing moves.
  *
  * Do it, in order, each step skipped once it's done so pressing again
  * after a failure finishes the job without doing anything twice:
@@ -32,8 +39,10 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  *      (no new bets) and every open bet on them is refunded now, rather
  *      than at the next minute's pass;
  *   2. reverse the customer's settled bets on them, in batches (winnings
- *      back, stakes on lost bets returned), with the reason kept;
- *   3. email the reversal, which quotes the reason word for word.
+ *      back, stakes on lost bets returned), with the reason kept.
+ *
+ * Send, on its own press: the email waiting for this customer, shown as
+ * it goes out (their balance as it is by then), to them alone.
  *
  * Only bets placed from the day the Terms went live count, by default:
  * bets before it came before the rule. The date is read as midnight in
@@ -51,7 +60,7 @@ const dayLabel = (iso: string) =>
   new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Lagos" });
 
 const DEFAULT_REASON =
-  "This is a violation of our Terms and Conditions (sections 4b and 4c). You placed bets on X post count markets when the result was already all but decided, which our rules don't allow. We have taken back the winnings from those bets. Any further violation may lead to your account being suspended.";
+  "You placed bets on X post count markets when the result was already all but decided. This breaks our Terms and Conditions (sections 4b and 4c). Any further violation may lead to your account being suspended.";
 
 type StepKey = "close" | "takeBack" | "email";
 
@@ -61,8 +70,9 @@ interface Checked {
   topics: string[];
   /** Bets from this moment (ISO); null = all time. */
   sinceAt: string | null;
+  reason: string;
   person: TraderRow | null;
-  /** Their settled bets on these markets. */
+  /** Their settled bets on these markets, and the email reversing them leads to. */
   mine: ReversalPreview;
   /** Everyone's, for the open bets the close refunds. */
   all: ReversalPreview;
@@ -80,13 +90,14 @@ export function BreachDesk() {
   const [marketsText, setMarketsText] = useState("x posts");
   const [sinceDate, setSinceDate] = useState(TERMS_LIVE_DATE);
   const [reason, setReason] = useState(DEFAULT_REASON);
-  const [steps, setSteps] = useState<Record<StepKey, boolean>>({ close: true, takeBack: true, email: true });
+  const [steps, setSteps] = useState<Record<"close" | "takeBack", boolean>>({ close: true, takeBack: true });
   const [shortfall, setShortfall] = useState<Shortfall>("negative");
   const [checked, setChecked] = useState<Checked | null>(null);
-  const [busy, setBusy] = useState<"check" | "run" | null>(null);
+  /** Their reversal emails not yet sent, as written; null on an API too old to say. */
+  const [pending, setPending] = useState<ReversalLetter[] | null>(null);
+  const [busy, setBusy] = useState<"check" | "run" | "send" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<StepResult[]>([]);
-  const [finished, setFinished] = useState(false);
 
   if (!isApiConfigured()) {
     return <p className="text-sm text-secondary">This page needs the prediction API (NEXT_PUBLIC_API_URL).</p>;
@@ -100,20 +111,27 @@ export function BreachDesk() {
 
   const reset = () => {
     setChecked(null);
+    setPending(null);
     setResults([]);
-    setFinished(false);
     setError(null);
   };
+
+  /** Their emails waiting to go, as written; null when the API can't say. */
+  const loadPending = (name: string) =>
+    notifyReversals(true, name)
+      .then((r) => r.letters ?? null)
+      .catch(() => null);
 
   const check = async () => {
     setBusy("check");
     reset();
     const sinceAt = sinceDate ? `${sinceDate}T00:00:00${LAGOS_OFFSET}` : null;
     try {
-      const [mine, all, people] = await Promise.all([
-        previewReversal({ topics, sinceDays: null, ...(sinceAt ? { sinceAt } : {}), customer: who }),
+      const [mine, all, people, waiting] = await Promise.all([
+        previewReversal({ topics, sinceDays: null, ...(sinceAt ? { sinceAt } : {}), customer: who, reason: reason.trim() }),
         previewReversal({ topics, sinceDays: null }),
         fetchTraders({ search: who, limit: 10 }).catch(() => null),
+        loadPending(who),
       ]);
       // an API older than sinceAt ignores it and would count all time
       if (sinceAt && !mine.sinceAt) {
@@ -122,8 +140,9 @@ export function BreachDesk() {
       const lower = who.toLowerCase();
       const person =
         people?.traders.find((t) => t.username.toLowerCase() === lower || t.email.toLowerCase() === lower) ?? null;
-      setChecked({ customer: who, topics, sinceAt, person, mine, all });
-      setSteps({ close: !all.paused, takeBack: mine.bets > 0, email: mine.bets > 0 });
+      setChecked({ customer: who, topics, sinceAt, reason: reason.trim(), person, mine, all });
+      setPending(waiting);
+      setSteps({ close: !all.paused, takeBack: mine.bets > 0 });
       const balance = mine.customerRows?.[0]?.balanceKobo ?? person?.balanceKobo ?? 0;
       setShortfall(balance >= mine.netKobo ? "cap" : "negative");
     } catch (err) {
@@ -141,9 +160,12 @@ export function BreachDesk() {
   // a take-back waits while they hold open bets on markets still taking bets
   const blockedByOpenBets = checked ? checked.mine.openBets > 0 && !checked.all.paused && !steps.close : false;
   const done = (key: StepKey) => results.some((r) => r.key === key && r.ok);
-  const chosen = (["close", "takeBack", "email"] as const).filter(
-    (k) => steps[k] && !(k === "takeBack" && blockedByOpenBets) && !(k === "email" && !steps.takeBack && !done("takeBack")),
+  const chosen = (["close", "takeBack"] as const).filter(
+    (k) => steps[k] && !done(k) && !(k === "takeBack" && blockedByOpenBets),
   );
+  const waiting = pending ?? [];
+
+  const record = (r: StepResult) => setResults((prev) => [...prev.filter((x) => x.key !== r.key), r]);
 
   const run = async () => {
     if (!checked) return;
@@ -155,13 +177,8 @@ export function BreachDesk() {
       ...(checked.sinceAt ? { sinceAt: checked.sinceAt } : {}),
       customer: checked.customer,
     };
-    const out = results.filter((r) => r.ok);
-    const record = (r: StepResult) => {
-      out.push(r);
-      setResults([...out]);
-    };
     try {
-      if (chosen.includes("close") && !done("close")) {
+      if (chosen.includes("close")) {
         const state = await fetchBookSettings();
         await updateBookSettings({
           pausedTopics: [...new Set([...(state.settings.pausedTopics ?? []), ...checked.topics])],
@@ -180,38 +197,32 @@ export function BreachDesk() {
         });
       }
 
-      if (chosen.includes("takeBack") && !done("takeBack")) {
+      if (chosen.includes("takeBack")) {
         let reversed = 0;
         let changeKobo = 0;
         for (let guard = 0; guard < 1_000; guard++) {
-          const batch = await runReversalBatch({ ...p, shortfall, reason: reason.trim() });
+          const batch = await runReversalBatch({ ...p, shortfall, reason: checked.reason });
           reversed += batch.reversed;
           changeKobo += batch.changeKobo;
           if (batch.remaining === 0 || batch.reversed === 0) break;
         }
         // read back, since the close may have refunded an open bet of theirs too
-        const now = await fetchTraders({ search: checked.customer, limit: 10 })
-          .then((l) => l.traders.find((t) => t.authUserId === (checked.person?.authUserId ?? checked.mine.customerRows?.[0]?.authUserId)))
-          .catch(() => undefined);
+        const [now, letters] = await Promise.all([
+          fetchTraders({ search: checked.customer, limit: 10 })
+            .then((l) =>
+              l.traders.find((t) => t.authUserId === (checked.person?.authUserId ?? checked.mine.customerRows?.[0]?.authUserId)),
+            )
+            .catch(() => undefined),
+          loadPending(checked.customer),
+        ]);
         if (now) setChecked({ ...checked, person: now });
+        setPending(letters);
         record({
           key: "takeBack",
           ok: true,
           text: `${reversed} bet${reversed === 1 ? "" : "s"} reversed: their balance went down by ${money.format(-changeKobo)}.${now ? ` It is now ${money.format(now.balanceKobo)}.` : ""}`,
         });
       }
-
-      if (chosen.includes("email") && !done("email")) {
-        const res = await notifyReversals(false);
-        record({
-          key: "email",
-          ok: res.mailConfigured,
-          text: res.mailConfigured
-            ? `Email sent with the reason. (${res.emailed} email${res.emailed === 1 ? "" : "s"} went out.)`
-            : "Email isn't set up on the API, so nothing was sent. Message them from Support.",
-        });
-      }
-      setFinished(true);
     } catch (err) {
       setError(
         `${err instanceof Error && err.message ? err.message : "Something failed."} Press the button again to finish. Steps already done are skipped.`,
@@ -221,14 +232,45 @@ export function BreachDesk() {
     }
   };
 
-  const toggle = (key: StepKey) => setSteps((s) => ({ ...s, [key]: !s[key] }));
+  const send = async () => {
+    if (!checked) return;
+    setBusy("send");
+    setError(null);
+    try {
+      const res = await notifyReversals(false, checked.customer);
+      if (res.mailConfigured && res.emailed > 0) {
+        record({ key: "email", ok: true, text: `Sent to ${waiting[0]?.to ?? name}.` });
+        setPending([]);
+      } else {
+        // the email stays on screen, so it can be sent again or copied
+        setError(
+          res.mailConfigured
+            ? "The email didn't go out. Try again in a minute."
+            : "Email isn't set up on the API, so nothing was sent. Copy the email and send it from Support.",
+        );
+      }
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Couldn't send. Try again.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copy = async (letter: ReversalLetter) => {
+    const ok = await copyText(`To: ${letter.to}\nSubject: ${letter.subject}\n\n${letter.text}`);
+    showToast(ok ? "Email copied" : "Couldn't copy. Select the text and copy it instead.", ok ? "success" : "error");
+  };
+
+  const toggle = (key: "close" | "takeBack") => setSteps((s) => ({ ...s, [key]: !s[key] }));
+  const emailResult = results.find((r) => r.key === "email");
+  const allDone = chosen.length === 0 && results.length > 0 && waiting.length === 0;
 
   return (
     <div className="max-w-3xl">
       <h1 className="text-2xl font-semibold tracking-tight">Take action</h1>
       <p className="mt-1 text-sm text-secondary">
         Close a type of market, take back what one customer won on it, and email them about the violation. Check
-        first, then one press does it all.
+        first. One press closes the markets and takes the money back; the email goes only when you press Send.
       </p>
 
       <section className="mt-5 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
@@ -276,12 +318,28 @@ export function BreachDesk() {
             </span>
           </label>
         </div>
+        <label className="mt-3 block">
+          <span className="block text-xs font-medium text-secondary">
+            Reason: the email gives this word for word, under &ldquo;Why we did this&rdquo;
+          </span>
+          <textarea
+            value={reason}
+            onChange={(e) => {
+              setReason(e.target.value);
+              if (checked && !results.some((r) => r.key === "takeBack")) reset();
+            }}
+            disabled={results.some((r) => r.key === "takeBack")}
+            rows={3}
+            maxLength={1000}
+            className="mt-1 block w-full rounded-md border border-border bg-sunken px-3 py-2 text-sm outline-none focus:border-accent disabled:opacity-60"
+          />
+        </label>
 
         {!checked && (
           <button
             type="button"
             onClick={check}
-            disabled={busy !== null || !who || topics.length === 0}
+            disabled={busy !== null || !who || topics.length === 0 || reason.trim().length < MIN_REASON}
             className="pressable mt-4 h-10 rounded-sm bg-accent px-5 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
           >
             {busy === "check" ? "Checking…" : "1. Check"}
@@ -333,9 +391,10 @@ export function BreachDesk() {
                     {checked.mine.bets} bet{checked.mine.bets === 1 ? "" : "s"} ({checked.mine.won} won,{" "}
                     {checked.mine.lost} lost) on {checked.mine.events.length} market
                     {checked.mine.events.length === 1 ? "" : "s"},{" "}
-                    {checked.sinceAt ? `placed from ${dayLabel(checked.sinceAt)}` : "of all time"}. {money.format(checked.mine.takeBackKobo)} of winnings
-                    come back and {money.format(checked.mine.returnKobo)} of stakes on lost bets is returned, as if the
-                    bets never happened. Their balance is {money.format(balanceBefore)}
+                    {checked.sinceAt ? `placed from ${dayLabel(checked.sinceAt)}` : "of all time"}.{" "}
+                    {money.format(checked.mine.takeBackKobo)} of winnings come back and{" "}
+                    {money.format(checked.mine.returnKobo)} of stakes on lost bets is returned, as if the bets never
+                    happened. Their balance is {money.format(balanceBefore)}
                     {covers ? ", which covers it." : ", which doesn't cover it."}
                     {blockedByOpenBets && (
                       <span className={`mt-2 block rounded-md px-2 py-1 font-semibold ${FLAG_TONE.caution.chip}`}>
@@ -387,50 +446,52 @@ export function BreachDesk() {
                 )}
               </Step>
 
-              <Step
-                n={3}
-                on={steps.email && steps.takeBack && !blockedByOpenBets}
-                onToggle={() => toggle("email")}
-                locked={checked.mine.bets === 0 || !steps.takeBack || done("email")}
-                result={results.find((r) => r.key === "email")}
-                title={`Email ${name} about the violation`}
-              >
-                {checked.mine.bets === 0 ? (
-                  "Sent only with a take-back. With nothing to take back, write to them from Support."
-                ) : (
+              <Step n={3} manual result={emailResult} title={`Email ${name} about the violation`}>
+                {waiting.length > 0 ? (
                   <>
-                    The email lists the bets reversed and their new balance, and gives this reason word for word
-                    {checked.person?.email ? ` (to ${checked.person.email})` : ""}:
-                    <textarea
-                      value={reason}
-                      onChange={(e) => setReason(e.target.value)}
-                      disabled={done("takeBack")}
-                      rows={4}
-                      maxLength={1000}
-                      className="mt-2 block w-full rounded-md border border-border bg-sunken px-3 py-2 text-sm text-primary outline-none focus:border-accent disabled:opacity-60"
-                    />
+                    <span className="font-semibold text-primary">Ready to send.</span>
+                    {` This is the email exactly as it will go out, to ${name} only. Press Send when you’re happy with it.`}
+                    {waiting.map((l, i) => (
+                      <Letter key={i} letter={l} onCopy={() => void copy(l)} />
+                    ))}
+                    <button
+                      type="button"
+                      onClick={send}
+                      disabled={busy !== null}
+                      className="pressable mt-3 inline-flex h-10 items-center gap-2 rounded-sm bg-accent px-5 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
+                    >
+                      <Mail className="size-4" />
+                      {busy === "send" ? "Sending…" : waiting.length === 1 ? "3. Send this email" : `3. Send these ${waiting.length} emails`}
+                    </button>
                   </>
+                ) : checked.mine.letter && !done("takeBack") ? (
+                  <>
+                    This is the email {name} will get once step 2 is done. Copy it to share with your manager.
+                    Nothing is sent until you press Send, which appears here after step 2.
+                    {!covers && shortfall === "cap" && " The figures assume the whole amount is taken."}
+                    <Letter letter={checked.mine.letter} onCopy={() => void copy(checked.mine.letter!)} />
+                  </>
+                ) : checked.mine.bets > 0 && (checked.mine.letter === undefined || pending === null) ? (
+                  "The API is older than this page, so it can't show or send the email from here. Deploy the API first."
+                ) : (
+                  "Nothing to email: there's nothing to take back."
                 )}
               </Step>
             </ol>
 
-            {!finished && chosen.length === 0 && results.length === 0 ? (
-              <p className="mt-4 rounded-md bg-element-2 px-3 py-2 text-sm">
-                Nothing left to do for {name} on these markets.
-              </p>
-            ) : !finished ? (
+            {chosen.length > 0 ? (
               <div className="mt-4 flex flex-wrap items-center gap-3">
                 <button
                   type="button"
                   onClick={run}
-                  disabled={busy !== null || chosen.length === 0 || (steps.takeBack && reason.trim().length < MIN_REASON)}
+                  disabled={busy !== null}
                   className="pressable h-10 rounded-sm bg-no-solid px-5 text-sm font-semibold text-white disabled:opacity-40"
                 >
                   {busy === "run"
                     ? "Working…"
-                    : chosen.length === 3
-                      ? "2. Do all 3 now"
-                      : `2. Do ${chosen.length === 1 ? "this step" : `these ${chosen.length} steps`} now`}
+                    : chosen.length === 2
+                      ? "2. Do steps 1 and 2 now"
+                      : `2. Do step ${chosen[0] === "close" ? 1 : 2} now`}
                 </button>
                 <button
                   type="button"
@@ -440,9 +501,9 @@ export function BreachDesk() {
                 >
                   Change
                 </button>
-                <span className="text-xs text-tertiary">This can&rsquo;t be undone.</span>
+                <span className="text-xs text-tertiary">This can&rsquo;t be undone. The email waits for you.</span>
               </div>
-            ) : (
+            ) : allDone ? (
               <div
                 className={`mt-4 rounded-md px-3 py-2 text-sm ${results.every((r) => r.ok) ? "bg-yes-tint" : FLAG_TONE.caution.chip}`}
               >
@@ -460,12 +521,66 @@ export function BreachDesk() {
                   Act on another customer
                 </button>
               </div>
-            )}
+            ) : results.length === 0 && waiting.length === 0 ? (
+              <p className="mt-4 rounded-md bg-element-2 px-3 py-2 text-sm">Nothing to do for {name} on these markets.</p>
+            ) : null}
           </>
         )}
 
         {error && <p className={`mt-3 rounded-md px-3 py-2 text-sm font-semibold ${FLAG_TONE.danger.chip}`}>{error}</p>}
       </section>
+    </div>
+  );
+}
+
+/**
+ * Copy to the clipboard: the modern way, else the older one, which some
+ * browsers and embedded views still allow when the first is refused.
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.style.position = "fixed";
+    area.style.opacity = "0";
+    document.body.appendChild(area);
+    area.select();
+    try {
+      return document.execCommand("copy");
+    } catch {
+      return false;
+    } finally {
+      area.remove();
+    }
+  }
+}
+
+/** One email as it goes out, with a way to copy it whole. */
+function Letter({ letter, onCopy }: { letter: ReversalLetter; onCopy: () => void }) {
+  return (
+    <div className="mt-2 rounded-md border border-border bg-page">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2 text-xs">
+        <div className="min-w-0">
+          <p className="text-secondary">
+            To: <span className="text-primary">{letter.to}</span>
+          </p>
+          <p className="text-secondary">
+            Subject: <span className="font-semibold text-primary">{letter.subject}</span>
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onCopy}
+          className="h-8 shrink-0 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary"
+        >
+          Copy email
+        </button>
+      </div>
+      <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-sm leading-6 text-primary">{letter.text}</div>
     </div>
   );
 }
@@ -491,21 +606,24 @@ function Person({ checked, balanceKobo, money }: { checked: Checked; balanceKobo
 
 function Step({
   n,
-  on,
+  on = false,
   onToggle,
-  locked,
+  locked = false,
   already = false,
+  manual = false,
   result,
   title,
   children,
 }: {
   n: number;
-  on: boolean;
-  onToggle: () => void;
+  on?: boolean;
+  onToggle?: () => void;
   /** Nothing to choose: already done, or nothing to do. */
-  locked: boolean;
+  locked?: boolean;
   /** Already the case before anything ran: shown ticked. */
   already?: boolean;
+  /** Done on its own press, not by the main button: no tick box. */
+  manual?: boolean;
   result?: StepResult;
   title: string;
   children: React.ReactNode;
@@ -521,6 +639,8 @@ function Step({
           ) : (
             <Cross className="mt-0.5 size-5 shrink-0 text-no" aria-label="Not done" />
           )
+        ) : manual ? (
+          <Mail className="mt-0.5 size-5 shrink-0 text-secondary" aria-hidden />
         ) : (
           <input
             type="checkbox"

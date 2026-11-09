@@ -253,13 +253,22 @@ check("sending emails each of them once", real.data.emailed === 3 && sent.length
 check(
   "…quoting the desk's reason, with what changed",
   Boolean(
-    toKemi?.text.includes(`Why: ${REASON}`) && toKemi.text.includes("Ethereum Up or Down") &&
+    toKemi?.text.includes(`Why we did this:\n${REASON}`) && toKemi.text.includes("Ethereum Up or Down") &&
       toKemi.text.includes("below zero") && toKemi.subject === "Important: some of your bets have been reversed",
   ),
 );
 check(
+  "…in two figures that add up to the change: winnings taken back, stakes returned",
+  Boolean(
+    toKemi?.text.includes("• Winnings taken back: ₦") &&
+      toKemi.text.includes("• Change to your balance: −₦") &&
+      toKemi.text.includes("Market:\n• Ethereum Up or Down") &&
+      !toKemi.text.includes("Payouts on them"),
+  ),
+);
+check(
   "…and the first reversals, kept without a reason, give the crypto glitch as theirs",
-  Boolean(toAda?.text.includes("Why: A glitch in our system") && toAda.subject === "Important: some of your bets have been reversed"),
+  Boolean(toAda?.text.includes("Why we did this:\nA glitch in our system") && toAda.subject === "Important: some of your bets have been reversed"),
 );
 check("…and nobody twice", ((await admin("POST", "/v1/admin/recovery/notify", { dryRun: false })).json() as { data: { emailed: number } }).data.emailed === 0);
 check(
@@ -351,7 +360,7 @@ await admin("POST", "/v1/admin/recovery/notify", { dryRun: false });
 const toBola = sent.filter((m) => m.to[0] === "bola@example.test");
 check(
   "bola's email gives that market's reason",
-  toBola.length === 1 && toBola[0]!.text.includes(`Why: ${TV_REASON}`) && toBola[0]!.text.includes("Market: Channels TV") &&
+  toBola.length === 1 && toBola[0]!.text.includes(`Why we did this:\n${TV_REASON}`) && toBola[0]!.text.includes("Market:\n• Channels TV") &&
     sent.length === 2,
 );
 const incidents = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { incidents: { reason: string }[] } }).data.incidents;
@@ -438,6 +447,68 @@ check(
 check(
   "a start moment without a time zone is refused",
   (await admin("POST", "/v1/admin/recovery/preview", { topics: ["late owl"], sinceDays: null, sinceAt: "2026-10-21" })).statusCode === 400,
+);
+
+/* ---------------- the email, read before it goes ---------------- */
+console.log("the email, read before it goes");
+const night = await ownMarket("Night Owl number of X posts - 10 or more?");
+await bet(night, "u-lose", "up", 1_000_000, 8_000);
+await adminSettleMarket({ eventId: night.eventId, marketId: night.marketId, winningOutcomeId: night.up, actor: "auto", log });
+const NIGHT_REASON = "You placed bets on X post count markets when the result was already all but decided.";
+const lettered = (await admin("POST", "/v1/admin/recovery/preview", {
+  topics: ["night owl"],
+  sinceDays: null,
+  customer: "tunde",
+  reason: NIGHT_REASON,
+})).json() as { data: { letter: { to: string; subject: string; text: string } | null } };
+check(
+  "a preview for one customer, with a reason, writes the email it leads to",
+  lettered.data.letter?.to === "tunde@example.test" &&
+    lettered.data.letter.text.includes(`Why we did this:\n${NIGHT_REASON}`) &&
+    lettered.data.letter.text.includes("• Winnings taken back: ₦2,500.00") &&
+    lettered.data.letter.text.includes("Market:\n• Night Owl"),
+);
+check(
+  "…and none without a customer",
+  !((await admin("POST", "/v1/admin/recovery/preview", { topics: ["night owl"], sinceDays: null, reason: NIGHT_REASON })).json() as {
+    data: { letter?: unknown };
+  }).data.letter,
+);
+await admin("POST", "/v1/admin/recovery/run", {
+  topics: ["night owl"],
+  sinceDays: null,
+  customer: "tunde",
+  shortfall: "negative",
+  reason: NIGHT_REASON,
+  confirm: "REVERSE",
+});
+sent.length = 0;
+const pendingTunde = (await admin("POST", "/v1/admin/recovery/notify", { dryRun: true, customer: "tunde" })).json() as {
+  data: { customers: number; letters: { to: string; text: string }[] };
+};
+const nightLetter = pendingTunde.data.letters.find((l) => l.text.includes(NIGHT_REASON));
+check(
+  "a dry run for one customer returns their waiting emails as written, sends none",
+  pendingTunde.data.customers === 1 &&
+    pendingTunde.data.letters.every((l) => l.to === "tunde@example.test") &&
+    Boolean(nightLetter?.text.includes("• Winnings taken back: ₦2,500.00")) &&
+    sent.length === 0,
+);
+check(
+  "…the same email the preview wrote, apart from the balance",
+  nightLetter?.text.split("• Your balance now")[0] === lettered.data.letter?.text.split("• Your balance now")[0],
+);
+const sentTunde = (await admin("POST", "/v1/admin/recovery/notify", { dryRun: false, customer: "tunde" })).json() as {
+  data: { emailed: number };
+};
+check(
+  "sending for one customer emails only them",
+  sentTunde.data.emailed === 1 && sent.length > 0 && sent.every((m) => m.to[0] === "tunde@example.test"),
+);
+check(
+  "…and leaves everyone else's waiting email for later",
+  ((await admin("POST", "/v1/admin/recovery/notify", { dryRun: true, customer: "ada" })).json() as { data: { letters: unknown[] } }).data
+    .letters.length === 1,
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

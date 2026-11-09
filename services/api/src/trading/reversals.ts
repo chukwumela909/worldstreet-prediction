@@ -124,6 +124,11 @@ export interface ReversalPreview {
   openBets: number;
   /** The markets matched, most bets first, so the desk can check the scope. */
   events: { title: string; bets: number }[];
+  /**
+   * For one customer, given a reason: the email the reversal will lead to,
+   * as if their whole take-back is collected. Null with nothing to reverse.
+   */
+  letter?: ReversalLetter | null;
   customerRows: {
     authUserId: string;
     username: string;
@@ -139,6 +144,8 @@ export async function previewReversal(
   sinceDays: number | null,
   authUserId?: string,
   sinceAt?: Date | null,
+  /** With a customer: write the email this would lead to, giving this reason. */
+  reason?: string,
 ): Promise<ReversalPreview> {
   const base: ReversalPreview = {
     topics: [...topics],
@@ -218,6 +225,25 @@ export async function previewReversal(
     })
     .sort((a, b) => a.changeKobo - b.changeKobo)
     .slice(0, MAX_ROWS);
+
+  const row = authUserId ? base.customerRows[0] : undefined;
+  if (row && reason) {
+    base.letter = row.email
+      ? {
+          to: row.email,
+          ...reversalLetter({
+            username: row.username,
+            bets: base.bets,
+            reason,
+            takenKobo: base.takeBackKobo,
+            returnedKobo: base.returnKobo,
+            onlyLost: true,
+            balanceKobo: row.balanceKobo + row.changeKobo,
+            markets: [...events.entries()].sort((x, y) => y[1] - x[1]).map(([t]) => t),
+          }),
+        }
+      : null;
+  }
   return base;
 }
 
@@ -387,9 +413,9 @@ interface Reversed {
   reversalNotifiedAt?: Date | null;
 }
 
-async function reversedBets(): Promise<Reversed[]> {
+async function reversedBets(authUserId?: string): Promise<Reversed[]> {
   return Position.find(
-    { reversedFrom: { $exists: true } },
+    { reversedFrom: { $exists: true }, ...(authUserId ? { authUserId } : {}) },
     {
       authUserId: 1,
       eventTitle: 1,
@@ -563,32 +589,113 @@ export async function clearDebts(params: {
 
 /* ---------------- telling them ---------------- */
 
+/** One email, as it goes out. */
+export interface ReversalLetter {
+  to: string;
+  subject: string;
+  text: string;
+}
+
 export interface ReversalNotice {
   customers: number;
   emailed: number;
   mailConfigured: boolean;
   dryRun: boolean;
+  /** For one customer on a dry run: their emails exactly as they'd go out. */
+  letters?: ReversalLetter[];
 }
 
-/**
- * One email per customer per incident they haven't been told about: what
- * was undone, what changed on their balance, and why — in the desk's own
- * words for the reason. The first reversals, made before reasons were
- * kept, give the reason they were made for (UNRECORDED_REASON).
- */
 /** What the first reversals were for — they were made before reasons were kept. */
 const UNRECORDED_REASON =
   "A glitch in our system affected the prices on our 15-minute crypto markets, and it was being exploited.";
 
+const naira = (kobo: number) =>
+  `${kobo < 0 ? "−" : ""}₦${(Math.abs(kobo) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/** What one email says: from the reversed bets, or from a preview before anything moves. */
+export interface LetterFacts {
+  username: string;
+  bets: number;
+  reason: string;
+  /** Winnings taken back (less, where the balance couldn't cover them). */
+  takenKobo: number;
+  /** Stakes returned. */
+  returnedKobo: number;
+  /** Every returned stake was on a lost bet, none on an open one. */
+  onlyLost: boolean;
+  balanceKobo: number;
+  /** Most bets first. */
+  markets: string[];
+}
+
+/**
+ * The reversal email: what was undone, what changed on their balance, and
+ * why — the reason in the desk's own words. The one place it's written,
+ * so the desk's preview and the email sent can't differ.
+ */
+export function reversalLetter(f: LetterFacts): { subject: string; text: string } {
+  const net = f.returnedKobo - f.takenKobo;
+  return {
+    subject: "Important: some of your bets have been reversed",
+    text: [
+      `Hi ${f.username},`,
+      "",
+      `We've reversed ${f.bets === 1 ? "one of your bets" : `${f.bets} of your bets`} on WorldStreet Predict.`,
+      "",
+      "Why we did this:",
+      f.reason,
+      "",
+      "What changed:",
+      ...(f.takenKobo > 0 ? [`• Winnings taken back: ${naira(f.takenKobo)}`] : []),
+      ...(f.returnedKobo > 0
+        ? [`• ${f.onlyLost ? "Stakes returned on bets you lost" : "Stakes returned"}: ${naira(f.returnedKobo)}`]
+        : []),
+      `• Change to your balance: ${net > 0 ? "+" : ""}${naira(net)}`,
+      `• Your balance now: ${naira(f.balanceKobo)}`,
+      ...(f.balanceKobo < 0
+        ? [
+            "",
+            "Your balance is below zero because some of those winnings had already been used. You can't bet or withdraw until it's back above zero, and any new credit goes towards it first.",
+          ]
+        : []),
+      "",
+      `${f.markets.length === 1 ? "Market" : "Markets"}:`,
+      ...f.markets.slice(0, 5).map((m) => `• ${m}`),
+      ...(f.markets.length > 5 ? [`• and ${f.markets.length - 5} more`] : []),
+      "",
+      "Questions? Contact us from the Support page on WorldStreet Predict.",
+      "",
+      "The WorldStreet team",
+    ].join("\n"),
+  };
+}
+
+/** Market titles, most bets first. */
+function byMostBets(titles: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const t of titles) counts.set(t, (counts.get(t) ?? 0) + 1);
+  return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
+}
+
+/**
+ * One email per customer per incident they haven't been told about. The
+ * first reversals, made before reasons were kept, give the reason they
+ * were made for (UNRECORDED_REASON). `authUserId` keeps it to one
+ * customer; a dry run for one customer returns their emails as written,
+ * so the desk can read them, and share them, before sending.
+ */
 export async function notifyReversals(params: {
   dryRun: boolean;
+  authUserId?: string;
   log: FastifyBaseLogger;
 }): Promise<ReversalNotice> {
-  const untold = (await reversedBets()).filter((b) => !b.reversalNotifiedAt);
+  const untold = (await reversedBets(params.authUserId)).filter((b) => !b.reversalNotifiedAt);
   const byUser = new Map<string, Reversed[]>();
   for (const b of untold) byUser.set(b.authUserId, [...(byUser.get(b.authUserId) ?? []), b]);
   const base = { customers: byUser.size, mailConfigured: isCustomerMailConfigured() };
-  if (params.dryRun || byUser.size === 0) return { ...base, emailed: 0, dryRun: params.dryRun };
+  const one = Boolean(params.authUserId);
+  if (byUser.size === 0) return { ...base, emailed: 0, dryRun: params.dryRun, ...(one ? { letters: [] } : {}) };
+  if (params.dryRun && !one) return { ...base, emailed: 0, dryRun: true };
 
   // one letter per customer per reason: [customer, that reason's bets]
   const letters: [string, Reversed[]][] = [];
@@ -608,58 +715,30 @@ export async function notifyReversals(params: {
   ]);
   const balanceById = new Map(accounts.map((a) => [a.authUserId, a.balanceKobo]));
   const userById = new Map(users.filter((u) => u.email).map((u) => [u.authUserId, u]));
-  const naira = (kobo: number) =>
-    `${kobo < 0 ? "−" : ""}₦${(Math.abs(kobo) / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
   const sendable = letters.filter(([id]) => userById.has(id));
-  const results = await sendCustomerEmails(
-    params.log,
-    sendable.map(([id, bets]) => {
-      const u = userById.get(id)!;
-      const reason = bets[0]?.reversalReason || UNRECORDED_REASON;
-      const staked = bets.reduce((s, b) => s + b.stakeKobo, 0);
-      const winnings = bets
-        .filter((b) => b.reversedFrom === "won")
-        .reduce((s, b) => s + b.potentialPayoutKobo, 0);
-      const net = bets.reduce((s, b) => s + (b.reversalKobo ?? 0), 0);
-      const balance = balanceById.get(id) ?? 0;
-      const markets = [...new Set(bets.map((b) => b.eventTitle))];
-      const effect = [
-        "What this means for you:",
-        `• Bets cancelled: ${bets.length}`,
-        `• Your stakes on them (${naira(staked)}) have been returned`,
-        ...(winnings > 0 ? [`• Payouts on them (${naira(winnings)}) have been taken back`] : []),
-        `• Change to your balance: ${net > 0 ? "+" : ""}${naira(net)}`,
-        `• Your balance now: ${naira(balance)}`,
-        ...(balance < 0
-          ? [
-              "",
-              "Your balance is below zero because some of those payouts had already been used. You won't be able to bet or withdraw until it's back above zero; any new credit covers it first.",
-            ]
-          : []),
-      ];
-      return {
-        to: u.email,
-        subject: "Important: some of your bets have been reversed",
-        text: [
-          `Hi ${u.username},`,
-          "",
-          `We've reversed ${bets.length === 1 ? "one of your bets" : `${bets.length} of your bets`} on WorldStreet Predict.`,
-          "",
-          `Why: ${reason}`,
-          "",
-          `${markets.length === 1 ? "Market" : "Markets"}: ${markets.slice(0, 5).join("; ")}${markets.length > 5 ? `; and ${markets.length - 5} more` : ""}`,
-          "",
-          ...effect,
-          "",
-          "If you have a question about this, contact us from the Support page on WorldStreet Predict.",
-          "",
-          "The WorldStreet team",
-        ].join("\n"),
-      };
-    }),
-  );
+  const mails: ReversalLetter[] = sendable.map(([id, bets]) => {
+    const u = userById.get(id)!;
+    return {
+      to: u.email,
+      ...reversalLetter({
+        username: u.username,
+        bets: bets.length,
+        reason: bets[0]?.reversalReason || UNRECORDED_REASON,
+        // what actually moved, bet by bet: a won bet's winnings taken back
+        // (less, where the balance couldn't cover them), a lost or open
+        // bet's stake returned — the same two figures the desk saw
+        takenKobo: bets.reduce((s, b) => s + Math.max(-(b.reversalKobo ?? 0), 0), 0),
+        returnedKobo: bets.reduce((s, b) => s + Math.max(b.reversalKobo ?? 0, 0), 0),
+        onlyLost: bets.every((b) => b.reversedFrom !== "open"),
+        balanceKobo: balanceById.get(id) ?? 0,
+        markets: byMostBets(bets.map((b) => b.eventTitle)),
+      }),
+    };
+  });
+  if (params.dryRun) return { ...base, emailed: 0, dryRun: true, letters: mails };
 
+  const results = await sendCustomerEmails(params.log, mails);
   const told = sendable.filter((_, i) => results[i]).flatMap(([, bets]) => bets.map((b) => b._id));
   if (told.length > 0) {
     await Position.updateMany({ _id: { $in: told } }, { $set: { reversalNotifiedAt: new Date() } });
