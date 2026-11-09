@@ -8,6 +8,7 @@ import {
   ArrowUturnLeftIcon as Recovery,
   BanknotesIcon as Coins,
   BeakerIcon as Test,
+  BoltIcon as Act,
   ChatBubbleLeftRightIcon as Support,
   Cog6ToothIcon as Settings,
   ShieldExclamationIcon as Shield,
@@ -33,6 +34,7 @@ const NAV = [
     ],
   },
   { label: "Traders", icon: Users, pages: [{ href: "/admin/traders", label: "Traders" }] },
+  { label: "Take action", icon: Act, pages: [{ href: "/admin/action", label: "Take action" }] },
   {
     label: "Watch",
     icon: Shield,
