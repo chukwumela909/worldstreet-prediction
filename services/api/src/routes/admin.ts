@@ -180,6 +180,9 @@ const recoveryNotifyBody = z.object({
   dryRun: z.boolean(),
   /** Only this customer (username or email); a dry run then returns the emails as written. */
   customer: z.string().trim().max(200).optional(),
+  /** The desk's edited wording of that customer's one waiting email. */
+  subject: z.string().trim().min(3).max(200).optional(),
+  text: z.string().trim().min(20).max(10_000).optional(),
 });
 
 /** One market named by its slug — what the desk gets from pasting its link. */
@@ -533,10 +536,19 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 20, timeWindow: "1 minute" } } },
     async (request) => {
       await requireAdmin(request);
+      const { subject, text } = request.body;
+      if ((subject === undefined) !== (text === undefined) || ((subject || text) && !request.body.customer)) {
+        throw new ApiError(400, "An edited email needs a customer, a subject and the text", "BAD_EDIT");
+      }
       const authUserId = request.body.customer ? await findCustomerId(request.body.customer) : undefined;
       return {
         success: true,
-        data: await notifyReversals({ dryRun: request.body.dryRun, ...(authUserId ? { authUserId } : {}), log: request.log }),
+        data: await notifyReversals({
+          dryRun: request.body.dryRun,
+          ...(authUserId ? { authUserId } : {}),
+          ...(subject && text ? { edited: { subject, text } } : {}),
+          log: request.log,
+        }),
       };
     },
   );

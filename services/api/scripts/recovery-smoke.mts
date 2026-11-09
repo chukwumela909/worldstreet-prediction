@@ -419,6 +419,19 @@ const atPreview = (await admin("POST", "/v1/admin/recovery/preview", {
   sinceAt: RULE_LIVE,
   customer: LOSER,
 })).json() as { data: { bets: number; sinceAt: string | null; events: { title: string }[] } };
+const everyone = (await admin("POST", "/v1/admin/recovery/preview", {
+  topics: ["early bird", "late owl"],
+  sinceDays: null,
+  sinceAt: RULE_LIVE,
+})).json() as { data: { customerRows: { username: string; bets: number; won: number; lost: number; suspended: boolean }[] } };
+check(
+  "without a customer it lists everyone with bets there, with their wins and losses",
+  everyone.data.customerRows.length === 1 &&
+    everyone.data.customerRows[0]!.username === "tunde" &&
+    everyone.data.customerRows[0]!.won === 1 &&
+    everyone.data.customerRows[0]!.lost === 0 &&
+    everyone.data.customerRows[0]!.suspended === false,
+);
 check(
   "a start moment previews only the bets placed from it, and says so",
   atPreview.data.bets === 1 &&
@@ -509,6 +522,29 @@ check(
   "…and leaves everyone else's waiting email for later",
   ((await admin("POST", "/v1/admin/recovery/notify", { dryRun: true, customer: "ada" })).json() as { data: { letters: unknown[] } }).data
     .letters.length === 1,
+);
+check(
+  "an edited email needs a customer, a subject and the text",
+  (await admin("POST", "/v1/admin/recovery/notify", { dryRun: false, subject: "Hello there", text: "An edited email body for everyone." })).statusCode === 400 &&
+    (await admin("POST", "/v1/admin/recovery/notify", { dryRun: false, customer: "ada", text: "An edited email body for ada only." })).statusCode === 400,
+);
+sent.length = 0;
+const EDITED = "Hi ada,\n\nThis is the desk's own wording, edited before sending.\n\nThe WorldStreet team";
+const editedSend = (await admin("POST", "/v1/admin/recovery/notify", {
+  dryRun: false,
+  customer: "ada",
+  subject: "About your account",
+  text: EDITED,
+})).json() as { data: { emailed: number } };
+check(
+  "the desk can send its own wording of a customer's waiting email",
+  editedSend.data.emailed === 1 && sent.length === 1 && sent[0]!.to[0] === "ada@example.test" &&
+    sent[0]!.subject === "About your account" && sent[0]!.text === EDITED,
+);
+check(
+  "…and it counts as told",
+  ((await admin("POST", "/v1/admin/recovery/notify", { dryRun: true, customer: "ada" })).json() as { data: { letters: unknown[] } }).data
+    .letters.length === 0,
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

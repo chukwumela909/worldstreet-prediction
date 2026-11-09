@@ -42,7 +42,11 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  *      back, stakes on lost bets returned), with the reason kept.
  *
  * Send, on its own press: the email waiting for this customer, shown as
- * it goes out (their balance as it is by then), to them alone.
+ * it goes out (their balance as it is by then), to them alone. The desk
+ * can edit all of it, subject and text, first; the edit is what's sent.
+ *
+ * Below it, everyone with settled bets on the same markets from the same
+ * date, most profit first, each with a button that fills the card in.
  *
  * Only bets placed from the day the Terms went live count, by default:
  * bets before it came before the rule. The date is read as midnight in
@@ -95,6 +99,8 @@ export function BreachDesk() {
   const [checked, setChecked] = useState<Checked | null>(null);
   /** Their reversal emails not yet sent, as written; null on an API too old to say. */
   const [pending, setPending] = useState<ReversalLetter[] | null>(null);
+  /** The desk's own wording of the one waiting email, while editing it. */
+  const [draft, setDraft] = useState<{ subject: string; text: string } | null>(null);
   const [busy, setBusy] = useState<"check" | "run" | "send" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<StepResult[]>([]);
@@ -112,6 +118,7 @@ export function BreachDesk() {
   const reset = () => {
     setChecked(null);
     setPending(null);
+    setDraft(null);
     setResults([]);
     setError(null);
   };
@@ -122,25 +129,25 @@ export function BreachDesk() {
       .then((r) => r.letters ?? null)
       .catch(() => null);
 
-  const check = async () => {
+  const check = async (target: string = who) => {
     setBusy("check");
     reset();
-    const sinceAt = sinceDate ? `${sinceDate}T00:00:00${LAGOS_OFFSET}` : null;
+    const sinceAt = sinceAtFor(sinceDate);
     try {
       const [mine, all, people, waiting] = await Promise.all([
-        previewReversal({ topics, sinceDays: null, ...(sinceAt ? { sinceAt } : {}), customer: who, reason: reason.trim() }),
+        previewReversal({ topics, sinceDays: null, ...(sinceAt ? { sinceAt } : {}), customer: target, reason: reason.trim() }),
         previewReversal({ topics, sinceDays: null }),
-        fetchTraders({ search: who, limit: 10 }).catch(() => null),
-        loadPending(who),
+        fetchTraders({ search: target, limit: 10 }).catch(() => null),
+        loadPending(target),
       ]);
       // an API older than sinceAt ignores it and would count all time
       if (sinceAt && !mine.sinceAt) {
         throw new Error("The API is older than this page, so it can't count from a date. Deploy the API first.");
       }
-      const lower = who.toLowerCase();
+      const lower = target.toLowerCase();
       const person =
         people?.traders.find((t) => t.username.toLowerCase() === lower || t.email.toLowerCase() === lower) ?? null;
-      setChecked({ customer: who, topics, sinceAt, reason: reason.trim(), person, mine, all });
+      setChecked({ customer: target, topics, sinceAt, reason: reason.trim(), person, mine, all });
       setPending(waiting);
       setSteps({ close: !all.paused, takeBack: mine.bets > 0 });
       const balance = mine.customerRows?.[0]?.balanceKobo ?? person?.balanceKobo ?? 0;
@@ -220,7 +227,7 @@ export function BreachDesk() {
         record({
           key: "takeBack",
           ok: true,
-          text: `${reversed} bet${reversed === 1 ? "" : "s"} reversed: their balance went down by ${money.format(-changeKobo)}.${now ? ` It is now ${money.format(now.balanceKobo)}.` : ""}`,
+          text: `${reversed} bet${reversed === 1 ? "" : "s"} reversed: their balance went ${changeKobo > 0 ? "up" : "down"} by ${money.format(Math.abs(changeKobo))}.${now ? ` It is now ${money.format(now.balanceKobo)}.` : ""}`,
         });
       }
     } catch (err) {
@@ -237,10 +244,12 @@ export function BreachDesk() {
     setBusy("send");
     setError(null);
     try {
-      const res = await notifyReversals(false, checked.customer);
+      const edited = draft ? { subject: draft.subject.trim(), text: draft.text.trim() } : undefined;
+      const res = await notifyReversals(false, checked.customer, edited);
       if (res.mailConfigured && res.emailed > 0) {
-        record({ key: "email", ok: true, text: `Sent to ${waiting[0]?.to ?? name}.` });
+        record({ key: "email", ok: true, text: `Sent${edited ? " your edited email" : ""} to ${waiting[0]?.to ?? name}.` });
         setPending([]);
+        setDraft(null);
       } else {
         // the email stays on screen, so it can be sent again or copied
         setError(
@@ -263,6 +272,7 @@ export function BreachDesk() {
 
   const toggle = (key: "close" | "takeBack") => setSteps((s) => ({ ...s, [key]: !s[key] }));
   const emailResult = results.find((r) => r.key === "email");
+  const draftReady = !draft || (draft.subject.trim().length >= 3 && draft.text.trim().length >= 20);
   const allDone = chosen.length === 0 && results.length > 0 && waiting.length === 0;
 
   return (
@@ -338,7 +348,7 @@ export function BreachDesk() {
         {!checked && (
           <button
             type="button"
-            onClick={check}
+            onClick={() => void check()}
             disabled={busy !== null || !who || topics.length === 0 || reason.trim().length < MIN_REASON}
             className="pressable mt-4 h-10 rounded-sm bg-accent px-5 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
           >
@@ -381,7 +391,9 @@ export function BreachDesk() {
                 title={
                   checked.mine.bets === 0
                     ? `${name} has nothing to take back on these markets${checked.sinceAt ? ` since ${dayLabel(checked.sinceAt)}` : ""}`
-                    : `Take back ${name}’s winnings: we recover ${money.format(checked.mine.netKobo)}`
+                    : checked.mine.netKobo >= 0
+                      ? `Take back ${name}’s winnings: we recover ${money.format(checked.mine.netKobo)}`
+                      : `Reverse ${name}’s bets: this gives them back ${money.format(-checked.mine.netKobo)}, as their losses were bigger than their winnings`
                 }
               >
                 {checked.mine.bets === 0 ? (
@@ -450,14 +462,36 @@ export function BreachDesk() {
                 {waiting.length > 0 ? (
                   <>
                     <span className="font-semibold text-primary">Ready to send.</span>
-                    {` This is the email exactly as it will go out, to ${name} only. Press Send when you’re happy with it.`}
-                    {waiting.map((l, i) => (
-                      <Letter key={i} letter={l} onCopy={() => void copy(l)} />
-                    ))}
+                    {draft
+                      ? ` Your edited email goes to ${name} only, exactly as it reads below. Press Send when you’re happy with it.`
+                      : ` This is the email exactly as it will go out, to ${name} only. Edit any of it, or press Send when you’re happy with it.`}
+                    {waiting.length === 1 && draft ? (
+                      <DraftEditor
+                        to={waiting[0]!.to}
+                        draft={draft}
+                        onChange={setDraft}
+                        onCopy={() => void copy({ to: waiting[0]!.to, ...draft })}
+                        onUndo={() => setDraft(null)}
+                      />
+                    ) : (
+                      waiting.map((l, i) => (
+                        <Letter
+                          key={i}
+                          letter={l}
+                          onCopy={() => void copy(l)}
+                          onEdit={waiting.length === 1 ? () => setDraft({ subject: l.subject, text: l.text }) : undefined}
+                        />
+                      ))
+                    )}
+                    {waiting.length > 1 && (
+                      <span className="mt-2 block text-xs text-tertiary">
+                        Several emails are waiting for them (one per reason), so they go as written.
+                      </span>
+                    )}
                     <button
                       type="button"
                       onClick={send}
-                      disabled={busy !== null}
+                      disabled={busy !== null || !draftReady}
                       className="pressable mt-3 inline-flex h-10 items-center gap-2 rounded-sm bg-accent px-5 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
                     >
                       <Mail className="size-4" />
@@ -529,7 +563,163 @@ export function BreachDesk() {
 
         {error && <p className={`mt-3 rounded-md px-3 py-2 text-sm font-semibold ${FLAG_TONE.danger.chip}`}>{error}</p>}
       </section>
+
+      <Everyone
+        // a new market or date starts the list afresh
+        key={`${topics.join(",")}|${sinceDate}`}
+        topics={topics}
+        sinceDate={sinceDate}
+        money={money}
+        busy={busy !== null}
+        onPick={(username) => {
+          setCustomer(username);
+          window.scrollTo({ top: 0, behavior: "smooth" });
+          void check(username);
+        }}
+      />
     </div>
+  );
+}
+
+/** Midnight in Lagos on that day, as the exact moment the API counts from; null = all time. */
+function sinceAtFor(date: string): string | null {
+  return date ? `${date}T00:00:00${LAGOS_OFFSET}` : null;
+}
+
+/**
+ * Everyone with settled bets on these markets from this date, most profit
+ * first: who else did the same thing. Read-only; "Act on them" fills the
+ * card above and checks them.
+ */
+function Everyone({
+  topics,
+  sinceDate,
+  money,
+  busy,
+  onPick,
+}: {
+  topics: string[];
+  sinceDate: string;
+  money: AdminMoney;
+  busy: boolean;
+  onPick: (username: string) => void;
+}) {
+  const [list, setList] = useState<ReversalPreview | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError(null);
+    const sinceAt = sinceAtFor(sinceDate);
+    try {
+      const res = await previewReversal({ topics, sinceDays: null, ...(sinceAt ? { sinceAt } : {}) });
+      if (sinceAt && !res.sinceAt) {
+        throw new Error("The API is older than this page, so it can't count from a date. Deploy the API first.");
+      }
+      setList(res);
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Couldn't load. Try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const rows = list?.customerRows ?? [];
+  const since = sinceDate ? ` from ${dayLabel(sinceAtFor(sinceDate)!)}` : ", all time";
+
+  return (
+    <section className="mt-5 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h2 className="text-base font-semibold">Everyone who bet on these markets</h2>
+          <p className="mt-0.5 text-sm text-secondary">
+            Settled bets on &ldquo;{topics.join(", ")}&rdquo; markets{since}, most profit first. Nothing changes here;
+            press &ldquo;Act on them&rdquo; to fill in the card above.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={() => void load()}
+          disabled={loading || topics.length === 0}
+          className="h-9 shrink-0 rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary disabled:opacity-40"
+        >
+          {loading ? "Loading…" : list ? "Refresh" : "See everyone"}
+        </button>
+      </div>
+
+      {error && <p className={`mt-3 rounded-md px-3 py-2 text-sm font-semibold ${FLAG_TONE.danger.chip}`}>{error}</p>}
+
+      {list && (
+        <>
+          <p className="mt-3 rounded-md bg-element-2 px-3 py-2 text-sm">
+            <b>{list.customers}</b> customer{list.customers === 1 ? "" : "s"} · {list.bets} bet{list.bets === 1 ? "" : "s"} (
+            {list.won} won, {list.lost} lost) · their profit on them{" "}
+            <b>{money.formatSigned(list.netKobo)}</b>
+          </p>
+          {rows.length > 0 && (
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[640px] text-left text-[13px]">
+                <thead>
+                  <tr className="border-b border-border text-xs text-secondary">
+                    <th scope="col" className="py-2 pr-3 font-medium">Customer</th>
+                    <th scope="col" className="py-2 pr-3 text-right font-medium">Bets</th>
+                    <th scope="col" className="py-2 pr-3 text-right font-medium">Their profit</th>
+                    <th scope="col" className="py-2 pr-3 text-right font-medium">Balance</th>
+                    <th scope="col" className="py-2 font-medium"><span className="sr-only">Action</span></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {rows.map((r) => (
+                    <tr key={r.authUserId}>
+                      <td className="py-2 pr-3">
+                        <span className="font-semibold">@{r.username || "unknown"}</span>
+                        {r.suspended && (
+                          <span className={`ml-2 rounded-sm px-1.5 text-xs font-semibold ${FLAG_TONE.danger.chip}`}>Suspended</span>
+                        )}
+                        {!r.suspended && r.withdrawalsLocked && (
+                          <span className={`ml-2 rounded-sm px-1.5 text-xs font-semibold ${FLAG_TONE.caution.chip}`}>
+                            Withdrawals locked
+                          </span>
+                        )}
+                        <span className="block text-xs text-secondary">{r.email}</span>
+                      </td>
+                      <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">
+                        {r.bets}
+                        {r.won !== undefined && (
+                          <span className="block text-xs text-tertiary">
+                            {r.won} won, {r.lost} lost
+                          </span>
+                        )}
+                      </td>
+                      <td className="whitespace-nowrap py-2 pr-3 text-right font-semibold tabular-nums">
+                        {money.formatSigned(-r.changeKobo)}
+                      </td>
+                      <td className="whitespace-nowrap py-2 pr-3 text-right tabular-nums">{money.format(r.balanceKobo)}</td>
+                      <td className="py-2 text-right">
+                        <button
+                          type="button"
+                          onClick={() => onPick(r.username)}
+                          disabled={busy || !r.username}
+                          className="h-8 whitespace-nowrap rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-40"
+                        >
+                          Act on them
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {rows.length < list.customers && (
+                <p className="mt-2 text-xs text-tertiary">
+                  Showing the {rows.length} with the most profit of {list.customers}.
+                </p>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </section>
   );
 }
 
@@ -559,8 +749,8 @@ async function copyText(text: string): Promise<boolean> {
   }
 }
 
-/** One email as it goes out, with a way to copy it whole. */
-function Letter({ letter, onCopy }: { letter: ReversalLetter; onCopy: () => void }) {
+/** One email as it goes out, with a way to copy it whole, and to edit it. */
+function Letter({ letter, onCopy, onEdit }: { letter: ReversalLetter; onCopy: () => void; onEdit?: () => void }) {
   return (
     <div className="mt-2 rounded-md border border-border bg-page">
       <div className="flex flex-wrap items-start justify-between gap-2 border-b border-border px-3 py-2 text-xs">
@@ -572,15 +762,86 @@ function Letter({ letter, onCopy }: { letter: ReversalLetter; onCopy: () => void
             Subject: <span className="font-semibold text-primary">{letter.subject}</span>
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onCopy}
-          className="h-8 shrink-0 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary"
-        >
-          Copy email
-        </button>
+        <div className="flex shrink-0 gap-2">
+          {onEdit && (
+            <button
+              type="button"
+              onClick={onEdit}
+              className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary"
+            >
+              Edit email
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onCopy}
+            className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary"
+          >
+            Copy email
+          </button>
+        </div>
       </div>
       <div className="whitespace-pre-wrap break-words px-3 py-2.5 text-sm leading-6 text-primary">{letter.text}</div>
+    </div>
+  );
+}
+
+/** The waiting email, open for the desk to rewrite: subject and text. */
+function DraftEditor({
+  to,
+  draft,
+  onChange,
+  onCopy,
+  onUndo,
+}: {
+  to: string;
+  draft: { subject: string; text: string };
+  onChange: (d: { subject: string; text: string }) => void;
+  onCopy: () => void;
+  onUndo: () => void;
+}) {
+  return (
+    <div className="mt-2 rounded-md border border-accent/50 bg-page">
+      <div className="flex flex-col gap-2 border-b border-border px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-secondary">
+            To: <span className="text-primary">{to}</span>
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onUndo}
+              className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary"
+            >
+              Undo my changes
+            </button>
+            <button
+              type="button"
+              onClick={onCopy}
+              className="h-8 rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary"
+            >
+              Copy email
+            </button>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 text-secondary">
+          Subject:
+          <input
+            value={draft.subject}
+            onChange={(e) => onChange({ ...draft, subject: e.target.value })}
+            maxLength={200}
+            className="h-8 min-w-0 flex-1 rounded-md border border-border bg-sunken px-2 text-sm font-semibold text-primary outline-none focus:border-accent"
+          />
+        </label>
+      </div>
+      <textarea
+        value={draft.text}
+        onChange={(e) => onChange({ ...draft, text: e.target.value })}
+        rows={20}
+        maxLength={10_000}
+        aria-label="Email text"
+        className="block w-full resize-y bg-transparent px-3 py-2.5 text-sm leading-6 text-primary outline-none"
+      />
     </div>
   );
 }

@@ -134,8 +134,12 @@ export interface ReversalPreview {
     username: string;
     email: string;
     bets: number;
+    won: number;
+    lost: number;
     changeKobo: number;
     balanceKobo: number;
+    suspended: boolean;
+    withdrawalsLocked: boolean;
   }[];
 }
 
@@ -173,7 +177,7 @@ export async function previewReversal(
     openBetsMatching(topics, authUserId),
   ]);
 
-  const byUser = new Map<string, { bets: number; change: number }>();
+  const byUser = new Map<string, { bets: number; won: number; lost: number; change: number }>();
   const events = new Map<string, number>();
   for (const b of bets) {
     const c = change(b);
@@ -184,8 +188,10 @@ export async function previewReversal(
       base.lost += 1;
       base.returnKobo += c;
     }
-    const u = byUser.get(b.authUserId) ?? { bets: 0, change: 0 };
+    const u = byUser.get(b.authUserId) ?? { bets: 0, won: 0, lost: 0, change: 0 };
     u.bets += 1;
+    if (b.status === "won") u.won += 1;
+    else u.lost += 1;
     u.change += c;
     byUser.set(b.authUserId, u);
     events.set(b.eventTitle, (events.get(b.eventTitle) ?? 0) + 1);
@@ -201,7 +207,10 @@ export async function previewReversal(
 
   const ids = [...byUser.keys()];
   const [users, accounts] = await Promise.all([
-    User.find({ authUserId: { $in: ids } }, { authUserId: 1, username: 1, email: 1 }).lean(),
+    User.find(
+      { authUserId: { $in: ids } },
+      { authUserId: 1, username: 1, email: 1, suspendedAt: 1, withdrawalsLockedAt: 1 },
+    ).lean(),
     NairaAccount.find({ authUserId: { $in: ids } }, { authUserId: 1, balanceKobo: 1 }).lean(),
   ]);
   const userById = new Map(users.map((u) => [u.authUserId, u]));
@@ -219,8 +228,12 @@ export async function previewReversal(
         username: userById.get(id)?.username ?? "",
         email: userById.get(id)?.email ?? "",
         bets: c.bets,
+        won: c.won,
+        lost: c.lost,
         changeKobo: c.change,
         balanceKobo: balance,
+        suspended: Boolean(userById.get(id)?.suspendedAt),
+        withdrawalsLocked: Boolean(userById.get(id)?.withdrawalsLockedAt),
       };
     })
     .sort((a, b) => a.changeKobo - b.changeKobo)
@@ -687,6 +700,11 @@ function byMostBets(titles: string[]): string[] {
 export async function notifyReversals(params: {
   dryRun: boolean;
   authUserId?: string;
+  /**
+   * The desk's own wording for the one email waiting for `authUserId`,
+   * edited from the one written here. Refused when more than one waits.
+   */
+  edited?: { subject: string; text: string };
   log: FastifyBaseLogger;
 }): Promise<ReversalNotice> {
   const untold = (await reversedBets(params.authUserId)).filter((b) => !b.reversalNotifiedAt);
@@ -736,6 +754,12 @@ export async function notifyReversals(params: {
       }),
     };
   });
+  if (params.edited) {
+    if (!params.authUserId || mails.length !== 1) {
+      throw new ApiError(409, "An edited email can only replace a single waiting email for one customer", "NOT_ONE_EMAIL");
+    }
+    mails[0] = { ...mails[0]!, subject: params.edited.subject, text: params.edited.text };
+  }
   if (params.dryRun) return { ...base, emailed: 0, dryRun: true, letters: mails };
 
   const results = await sendCustomerEmails(params.log, mails);

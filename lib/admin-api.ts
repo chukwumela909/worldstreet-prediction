@@ -572,7 +572,19 @@ export interface ReversalPreview {
   /** Whether every topic is paused — needed only while bets are open. */
   paused: boolean;
   /** Each customer it touches, with their balance. */
-  customerRows?: { authUserId: string; username: string; email: string; bets: number; changeKobo: number; balanceKobo: number }[];
+  customerRows?: {
+    authUserId: string;
+    username: string;
+    email: string;
+    bets: number;
+    /** Absent on an older API. */
+    won?: number;
+    lost?: number;
+    changeKobo: number;
+    balanceKobo: number;
+    suspended?: boolean;
+    withdrawalsLocked?: boolean;
+  }[];
   /** For one customer, given a reason: the email it will lead to; absent on an older API. */
   letter?: ReversalLetter | null;
 }
@@ -641,9 +653,17 @@ export const runReversalBatch = (params: {
   reason: string;
 }) => adminPost<ReversalBatch>("/v1/admin/recovery/run", { ...params, confirm: "REVERSE" });
 
-/** Everyone with a reversal not yet emailed, or only `customer` (username or email). */
-export const notifyReversals = (dryRun: boolean, customer?: string) =>
-  adminPost<ReversalNotice>("/v1/admin/recovery/notify", { dryRun, ...(customer ? { customer } : {}) });
+/**
+ * Everyone with a reversal not yet emailed, or only `customer` (username or
+ * email). `edited` sends the desk's own wording of that customer's one
+ * waiting email instead of the one written by the API.
+ */
+export const notifyReversals = (dryRun: boolean, customer?: string, edited?: { subject: string; text: string }) =>
+  adminPost<ReversalNotice>("/v1/admin/recovery/notify", {
+    dryRun,
+    ...(customer ? { customer } : {}),
+    ...(edited ?? {}),
+  });
 
 export interface DebtClearing {
   customers: number;
