@@ -604,13 +604,15 @@ export async function fetchRecovery(): Promise<RecoveryReport> {
   }
 }
 
-export const previewReversal = (params: { topics: string[]; sinceDays: number | null }) =>
+export const previewReversal = (params: { topics: string[]; sinceDays: number | null; customer?: string }) =>
   adminPost<ReversalPreview>("/v1/admin/recovery/preview", params);
 
 /** One batch; call again until `remaining` is 0. The reason goes in the customers' email. */
 export const runReversalBatch = (params: {
   topics: string[];
   sinceDays: number | null;
+  /** Only this customer's bets (username or email). */
+  customer?: string;
   shortfall: Shortfall;
   reason: string;
 }) => adminPost<ReversalBatch>("/v1/admin/recovery/run", { ...params, confirm: "REVERSE" });

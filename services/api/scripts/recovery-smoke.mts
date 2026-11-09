@@ -357,6 +357,39 @@ check(
 const incidents = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { incidents: { reason: string }[] } }).data.incidents;
 check("the report now has three incidents, newest first", incidents.length === 3 && incidents[0]!.reason === TV_REASON);
 
+/* ---------------- one customer only ---------------- */
+console.log("one customer only");
+const pop = await ownMarket("Pop Base number of X posts by 1PM today - 20 or more?");
+await bet(pop, "u-win", "up", 1_000_000, 9_500);
+await bet(pop, "u-lose", "up", 1_000_000, 9_500);
+await adminSettleMarket({ eventId: pop.eventId, marketId: pop.marketId, winningOutcomeId: pop.up, actor: "auto", log });
+const POP_REASON = "You placed bets on X post counts that were already decided, which our Terms don't allow.";
+const onePreview = (await admin("POST", "/v1/admin/recovery/preview", { topics: ["pop base"], sinceDays: null, customer: "ADA" })).json() as {
+  data: { bets: number; customers: number; customerRows: { username: string }[] };
+};
+check(
+  "naming a customer previews only their bets",
+  onePreview.data.bets === 1 && onePreview.data.customers === 1 && onePreview.data.customerRows[0]!.username === "ada",
+);
+const tundeBeforeOne = await bal("u-lose");
+const oneRun = (await admin("POST", "/v1/admin/recovery/run", {
+  topics: ["pop base"],
+  sinceDays: null,
+  customer: "ada@example.test",
+  shortfall: "negative",
+  reason: POP_REASON,
+  confirm: "REVERSE",
+})).json() as { data: { reversed: number } };
+check("…reverses only their bets, found by email too", oneRun.data.reversed === 1);
+check(
+  "…and leaves everyone else's bets on those markets alone",
+  (await bal("u-lose")) === tundeBeforeOne && (await Position.countDocuments({ authUserId: "u-lose", marketId: pop.marketId, status: "won" })) === 1,
+);
+check(
+  "an unknown customer is a 404, and nothing moves",
+  (await admin("POST", "/v1/admin/recovery/preview", { topics: ["pop base"], sinceDays: null, customer: "nobody" })).statusCode === 404,
+);
+
 console.log(`\n${passed} passed, ${failed} failed`);
 
 await app.close();

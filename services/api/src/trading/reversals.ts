@@ -1,5 +1,6 @@
 import type { FastifyBaseLogger } from "fastify";
 import mongoose from "mongoose";
+import { ApiError } from "../errors.js";
 import { User } from "../models.js";
 import { isCustomerMailConfigured, sendCustomerEmails } from "../customer-mail.js";
 import { adjustNaira, writeOffDebt } from "./ledger.js";
@@ -57,21 +58,33 @@ function onMarkets(topics: readonly string[]) {
   return pattern ? [{ eventTitle: pattern }, { eventSlug: pattern }, { marketTitle: pattern }] : null;
 }
 
-function scope(topics: readonly string[], sinceDays: number | null) {
+/** The settled bets in scope; `authUserId` narrows it to one customer. */
+function scope(topics: readonly string[], sinceDays: number | null, authUserId?: string) {
   const markets = onMarkets(topics);
   if (!markets) return null;
   return {
     status: { $in: ["won", "lost"] as ("won" | "lost")[] },
     reversedFrom: { $exists: false },
     $or: markets,
+    ...(authUserId ? { authUserId } : {}),
     ...(sinceDays !== null ? { createdAt: { $gte: new Date(Date.now() - sinceDays * 86_400_000) } } : {}),
   };
 }
 
 /** Bets still open on these markets — a reversal waits for them to be paused. */
-export async function openBetsMatching(topics: readonly string[]): Promise<number> {
+export async function openBetsMatching(topics: readonly string[], authUserId?: string): Promise<number> {
   const markets = onMarkets(topics);
-  return markets ? Position.countDocuments({ status: "open", $or: markets }) : 0;
+  return markets ? Position.countDocuments({ status: "open", $or: markets, ...(authUserId ? { authUserId } : {}) }) : 0;
+}
+
+/** One customer by username or email, for a reversal aimed at them alone. */
+export async function findCustomerId(name: string): Promise<string> {
+  const clean = name.trim().replace(/^@/, "");
+  const user = await User.findOne({ $or: [{ username: clean }, { email: clean.toLowerCase() }] }, { authUserId: 1 })
+    .collation({ locale: "en", strength: 2 })
+    .lean();
+  if (!user) throw new ApiError(404, "No customer with that username or email", "USER_NOT_FOUND");
+  return user.authUserId;
 }
 
 /** The balance change reversing a bet makes before any cap. */
@@ -113,6 +126,7 @@ export interface ReversalPreview {
 export async function previewReversal(
   topics: readonly string[],
   sinceDays: number | null,
+  authUserId?: string,
 ): Promise<ReversalPreview> {
   const base: ReversalPreview = {
     topics: [...topics],
@@ -130,13 +144,13 @@ export async function previewReversal(
     events: [],
     customerRows: [],
   };
-  const q = scope(topics, sinceDays);
+  const q = scope(topics, sinceDays, authUserId);
   if (!q) return base;
   const [bets, openBets] = await Promise.all([
     Position.find(q, { authUserId: 1, eventTitle: 1, status: 1, stakeKobo: 1, potentialPayoutKobo: 1 }).lean<
       Candidate[]
     >(),
-    openBetsMatching(topics),
+    openBetsMatching(topics, authUserId),
   ]);
 
   const byUser = new Map<string, { bets: number; change: number }>();
@@ -211,13 +225,15 @@ export interface ReversalBatch {
 export async function runReversalBatch(params: {
   topics: readonly string[];
   sinceDays: number | null;
+  /** Only this customer's bets, when set. */
+  authUserId?: string;
   shortfall: Shortfall;
   /** Why — kept on every bet for the customer's email. */
   reason: string;
   actor: string;
   log: FastifyBaseLogger;
 }): Promise<ReversalBatch> {
-  const q = scope(params.topics, params.sinceDays);
+  const q = scope(params.topics, params.sinceDays, params.authUserId);
   if (!q) return { reversed: 0, remaining: 0, changeKobo: 0, writtenOffKobo: 0 };
   const batch = await Position.find(q, {
     authUserId: 1,

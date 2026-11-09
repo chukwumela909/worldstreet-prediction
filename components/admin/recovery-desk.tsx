@@ -65,6 +65,7 @@ const PERIODS: { key: string; label: string; days: number | null }[] = [
   { key: "98", label: "14 weeks", days: 98 },
   { key: "30", label: "30 days", days: 30 },
   { key: "7", label: "7 days", days: 7 },
+  { key: "since", label: "Since a date", days: null },
 ];
 const CUSTOMERS_PAGE = 20;
 
@@ -169,6 +170,8 @@ export function RecoveryDesk() {
 
 function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void }) {
   const [topicsText, setTopicsText] = useState("");
+  const [customer, setCustomer] = useState("");
+  const [sinceDate, setSinceDate] = useState("");
   const [reason, setReason] = useState("");
   const [period, setPeriod] = useState("all");
   const [shortfall, setShortfall] = useState<Shortfall>("negative");
@@ -180,7 +183,16 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
 
   const topics = parseTopics(topicsText);
   const reasonReady = reason.trim().length >= MIN_REASON;
-  const sinceDays = PERIODS.find((p) => p.key === period)?.days ?? null;
+  // "Since a date" counts whole days back from now, so the chosen day is
+  // included; worked out when the button is pressed, not while rendering
+  const sinceDaysNow = () =>
+    period === "since"
+      ? sinceDate
+        ? Math.max(Math.ceil((Date.now() - new Date(`${sinceDate}T00:00:00`).getTime()) / 86_400_000), 1)
+        : null
+      : (PERIODS.find((p) => p.key === period)?.days ?? null);
+  const who = customer.trim() || undefined;
+  const periodReady = period !== "since" || sinceDate !== "";
   const reset = () => {
     setPreview(null);
     setConfirmText("");
@@ -190,7 +202,7 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
     setBusy("preview");
     setError(null);
     try {
-      setPreview(await previewReversal({ topics, sinceDays }));
+      setPreview(await previewReversal({ topics, sinceDays: sinceDaysNow(), customer: who }));
       setConfirmText("");
     } catch (err) {
       setError(message(err));
@@ -207,7 +219,7 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
       const next = [...new Set([...(state.settings.pausedTopics ?? []), ...topics])];
       await updateBookSettings({ pausedTopics: next });
       showToast("Paused — these markets take no bets and leave the site", "success");
-      setPreview(await previewReversal({ topics, sinceDays }));
+      setPreview(await previewReversal({ topics, sinceDays: sinceDaysNow(), customer: who }));
     } catch (err) {
       setError(message(err));
     } finally {
@@ -220,10 +232,12 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
     setBusy("run");
     setError(null);
     let done = 0;
+    // one window for the whole run, so every batch reverses the same bets
+    const runSinceDays = sinceDaysNow();
     setProgress({ done, total: preview.bets });
     try {
       for (let guard = 0; guard < 1_000; guard++) {
-        const batch = await runReversalBatch({ topics, sinceDays, shortfall, reason: reason.trim() });
+        const batch = await runReversalBatch({ topics, sinceDays: runSinceDays, customer: who, shortfall, reason: reason.trim() });
         done += batch.reversed;
         setProgress({ done, total: Math.max(preview.bets, done + batch.remaining) });
         if (batch.remaining === 0 || batch.reversed === 0) break;
@@ -275,8 +289,35 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
               reset();
             }}
           />
+          {period === "since" && (
+            <input
+              type="date"
+              value={sinceDate}
+              onChange={(e) => {
+                setSinceDate(e.target.value);
+                reset();
+              }}
+              aria-label="Bets placed since"
+              className="mt-2 h-9 rounded-md border border-border bg-sunken px-3 text-sm outline-none focus:border-accent"
+            />
+          )}
         </div>
       </div>
+
+      <label className="mt-3 block">
+        <span className="block text-xs font-medium text-secondary">
+          Only this customer (optional) — leave empty to reverse everyone&rsquo;s bets on these markets
+        </span>
+        <input
+          value={customer}
+          onChange={(e) => {
+            setCustomer(e.target.value);
+            reset();
+          }}
+          placeholder="Username or email, e.g. wisdomlotsu"
+          className="mt-1 h-10 w-full rounded-md border border-border bg-sunken px-3 text-sm outline-none placeholder:text-tertiary focus:border-accent"
+        />
+      </label>
 
       <fieldset className="mt-3">
         <legend className="text-xs font-medium text-secondary">
@@ -332,7 +373,7 @@ function ReverseStep({ money, onDone }: { money: AdminMoney; onDone: () => void 
         <button
           type="button"
           onClick={doPreview}
-          disabled={busy !== null || topics.length === 0}
+          disabled={busy !== null || topics.length === 0 || !periodReady}
           className="pressable mt-4 h-10 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
         >
           {busy === "preview" ? "Checking…" : "Preview"}
