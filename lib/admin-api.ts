@@ -569,6 +569,8 @@ export interface ReversalPreview {
   events: { title: string; bets: number }[];
   /** Whether every topic is paused — needed only while bets are open. */
   paused: boolean;
+  /** Each customer it touches, with their balance. */
+  customerRows?: { authUserId: string; username: string; email: string; bets: number; changeKobo: number; balanceKobo: number }[];
 }
 
 export interface ReversalBatch {
@@ -1459,7 +1461,7 @@ export interface BetReviewMarket extends BetTally {
   lastAt: string;
 }
 
-/** One suspended customer's ₦90+ bets, counted from all their bets. */
+/** One customer's ₦90+ bets, counted from all their bets. */
 export interface BetReviewRow {
   authUserId: string;
   username: string;
@@ -1477,81 +1479,9 @@ export interface BetReviewRow {
   markets: BetReviewMarket[];
 }
 
-export interface BetReview {
-  termsLiveAt: string;
-  rows: BetReviewRow[];
-}
-
-export async function fetchBetReview(): Promise<BetReview> {
+export async function fetchCustomerBetReview(authUserId: string): Promise<BetReviewRow> {
   try {
-    const res = await apiFetch<{ data: BetReview }>("/v1/admin/bet-review");
-    return res.data;
-  } catch (err) {
-    throw unwrapNestedError(err);
-  }
-}
-
-/** One customer whose debt was written off, from the money records. */
-export interface WrittenOffRow {
-  authUserId: string;
-  username: string;
-  displayName: string;
-  email: string;
-  writtenOffKobo: number;
-  times: number;
-  firstAt: string;
-  lastAt: string;
-  by: string;
-  balanceKobo: number;
-  /** Null when the wallet couldn't say. */
-  walletUsdMinor: number | null;
-  walletLockedMinor: number | null;
-  suspendedAt: string | null;
-  addedKobo: number;
-  addedUsdMinor: number;
-  /** Really sent to the dollar wallet: not failed, not still waiting. */
-  sentKobo: number;
-  sentUsdMinor: number;
-  /** The part of that sent before their first write-off. */
-  sentBeforeKobo: number;
-  sentBeforeUsdMinor: number;
-  waitingKobo: number;
-  /** Dollars sent less dollars brought in. */
-  netUsdMinor: number;
-  /** The most of their wallet that could be Predict's money; null when the wallet couldn't say. */
-  fromPredictAtMostUsdMinor: number | null;
-}
-
-/** One step of a customer's money flow, oldest first. */
-export interface FlowStep {
-  kind: "added" | "betting" | "sent" | "failed" | "waiting" | "reversed" | "written_off" | "other";
-  at: string;
-  until: string;
-  count: number;
-  /** Change to the Predict balance. */
-  amountKobo: number;
-  usdMinor: number | null;
-  balanceAfterKobo: number;
-}
-
-export async function fetchMoneyFlow(authUserId: string): Promise<{ steps: FlowStep[] }> {
-  try {
-    const res = await apiFetch<{ data: { steps: FlowStep[] } }>(`/v1/admin/written-off/${encodeURIComponent(authUserId)}/flow`);
-    return res.data;
-  } catch (err) {
-    throw unwrapNestedError(err);
-  }
-}
-
-export interface WrittenOffList {
-  customers: number;
-  totalKobo: number;
-  rows: WrittenOffRow[];
-}
-
-export async function fetchWrittenOff(): Promise<WrittenOffList> {
-  try {
-    const res = await apiFetch<{ data: WrittenOffList }>("/v1/admin/written-off");
+    const res = await apiFetch<{ data: BetReviewRow }>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/high-price-bets`);
     return res.data;
   } catch (err) {
     throw unwrapNestedError(err);

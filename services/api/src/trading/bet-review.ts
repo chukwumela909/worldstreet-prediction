@@ -1,9 +1,10 @@
+import { ApiError } from "../errors.js";
 import { User } from "../models.js";
 import { NairaAccount, Position } from "./models.js";
 
 /**
- * The bets of every suspended customer that need a decision, counted from
- * all their positions rather than the desk's latest 100. The measure is the
+ * A customer's bets that need a decision, counted from all their positions
+ * rather than the desk's latest 100 (shown in the opened trader). The measure is the
  * one the ₦90 ceiling uses: a settled bet at ₦90 or more a share, buying a
  * result that was all but decided. A high price alone doesn't prove the
  * Terms were broken, so this is what to review, not a verdict. Split at the
@@ -79,9 +80,10 @@ function add(t: Tally, b: Bet) {
   }
 }
 
-export async function getBetReview(): Promise<{ termsLiveAt: string; rows: ReviewRow[] }> {
+/** One customer's high-price bets, counted from all their bets. */
+export async function getCustomerBetReview(authUserId: string): Promise<ReviewRow> {
   const users = await User.find(
-    { suspendedAt: { $ne: null } },
+    { authUserId },
     { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1 },
   ).lean();
   const ids = users.map((u) => u.authUserId);
@@ -153,6 +155,7 @@ export async function getBetReview(): Promise<{ termsLiveAt: string; rows: Revie
     row.balanceCoversKobo = Math.max(Math.min(row.high.profitKobo, row.balanceKobo), 0);
     return row;
   });
-  rows.sort((a, b) => b.high.profitKobo - a.high.profitKobo);
-  return { termsLiveAt: TERMS_LIVE_AT.toISOString(), rows };
+  const row = rows[0];
+  if (!row) throw new ApiError(404, "No such customer", "USER_NOT_FOUND");
+  return row;
 }

@@ -40,7 +40,6 @@ const NAV = [
       { href: "/admin/alerts", label: "Alerts" },
       { href: "/admin/withdrawals", label: "Withdrawals" },
       { href: "/admin/abuse", label: "Suspicious customers" },
-      { href: "/admin/bet-review", label: "Suspended bets" },
       { href: "/admin/money-checks", label: "Money checks" },
     ],
   },
@@ -58,7 +57,6 @@ const NAV = [
     pages: [
       { href: "/admin/settled", label: "Settled bets" },
       { href: "/admin/recovery", label: "Recovery" },
-      { href: "/admin/written-off", label: "Written off" },
     ],
   },
   { label: "Support", icon: Support, pages: [{ href: "/admin/support", label: "Support" }] },

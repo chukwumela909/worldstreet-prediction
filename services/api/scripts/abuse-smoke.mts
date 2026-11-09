@@ -206,13 +206,13 @@ check(
   twinAlert !== undefined && twinAlert.people.some((p) => p.username === "twin1") && twinAlert.people.every((p) => p.email.includes("@")),
 );
 
-/* ---------------- the Suspended bets tab ---------------- */
-console.log("the Suspended bets tab");
-await User.create({ authUserId: "u-review", email: "review@example.test", username: "review", displayName: "Review", suspendedAt: new Date() });
+/* ---------------- a customer's high-price bets ---------------- */
+console.log("a customer's high-price bets");
+await User.create({ authUserId: "u-review", email: "review@example.test", username: "review", displayName: "Review" });
 await creditNaira({ authUserId: "u-review", amountKobo: 3_000, type: "conversion_in", refKey: "fund:u-review", description: "funds" });
 const beforeTerms = Date.parse("2026-10-20T12:00:00Z");
 const fromTerms = Date.parse("2026-10-22T12:00:00Z");
-// two wins at ₦95 before the Terms (₦52.63 profit each), one loss at ₦95 after them
+// two wins at ₦95 before the Terms (₦52.63 profit each), one loss at ₦90 after them
 await bet("u-review", { market: "m-review", priceKobo: 9_500, won: true, at: beforeTerms });
 await bet("u-review", { market: "m-review", priceKobo: 9_500, won: true, at: beforeTerms + 60_000 });
 await bet("u-review", { market: "m-review-2", priceKobo: 9_000, won: false, at: fromTerms });
@@ -222,24 +222,18 @@ await bet("u-review", { priceKobo: 9_500, won: null, at: beforeTerms });
 await bet("u-review", { priceKobo: 9_500, won: true, at: beforeTerms, reversed: true });
 await bet("u-review", { market: "m-review-void", priceKobo: 9_500, won: null, at: beforeTerms });
 await Position.updateOne({ authUserId: "u-review", marketId: "m-review-void" }, { $set: { status: "voided" } });
-const reviewBody = (await admin("GET", "/v1/admin/bet-review")).json() as {
+const reviewRes = await admin("GET", "/v1/admin/traders/u-review/high-price-bets");
+const reviewRow = (reviewRes.json() as {
   data: {
-    rows: {
-      username: string;
-      allBets: number;
-      balanceKobo: number;
-      balanceCoversKobo: number;
-      highReversed: number;
-      highRefunded: number;
-      high: { bets: number; won: number; lost: number; stakedKobo: number; profitKobo: number };
-      beforeTerms: { bets: number; profitKobo: number };
-      afterTerms: { bets: number; profitKobo: number };
-      markets: { outcome: string; bets: number; profitKobo: number; firstAt: string; lastAt: string }[];
-    }[];
+    allBets: number;
+    highReversed: number;
+    highRefunded: number;
+    high: { bets: number; won: number; lost: number; stakedKobo: number; profitKobo: number };
+    beforeTerms: { bets: number; profitKobo: number };
+    afterTerms: { bets: number };
+    markets: { bets: number; firstAt: string; lastAt: string }[];
   };
-};
-const reviewRow = reviewBody.data.rows.find((r) => r.username === "review")!;
-check("it only lists suspended customers", !reviewBody.data.rows.some((r) => r.username === "fair"));
+}).data;
 check(
   "it counts settled ₦90+ bets only, from all their bets",
   reviewRow.allBets === 7 && reviewRow.high.bets === 3 && reviewRow.high.won === 2 && reviewRow.high.lost === 1,
@@ -247,73 +241,10 @@ check(
 check("…with the amount staked and the profit, losses taken off", reviewRow.high.stakedKobo === 300_000 && reviewRow.high.profitKobo === 2 * 5_263 - 100_000);
 check("…split at the day the Terms went live", reviewRow.beforeTerms.bets === 2 && reviewRow.beforeTerms.profitKobo === 10_526 && reviewRow.afterTerms.bets === 1);
 check("…reversed and refunded ones shown apart", reviewRow.highReversed === 1 && reviewRow.highRefunded === 1);
-check("a loss overall means nothing to cover", reviewRow.balanceCoversKobo === 0 && reviewRow.balanceKobo === 3_000);
 const reviewMarket = reviewRow.markets.find((m) => m.bets === 2)!;
 check("each market shows its exact first and last bet time", reviewMarket.firstAt === new Date(beforeTerms).toISOString() && reviewMarket.lastAt === new Date(beforeTerms + 60_000).toISOString());
-check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/bet-review" })).statusCode === 401);
-
-/* ---------------- the Written off tab ---------------- */
-console.log("the Written off tab");
-const off = (await admin("GET", "/v1/admin/written-off")).json() as {
-  data: {
-    customers: number;
-    totalKobo: number;
-    rows: { username: string; email: string; writtenOffKobo: number; times: number; balanceKobo: number; walletUsdMinor: number | null }[];
-  };
-};
-check(
-  "it lists only who was written off, with the exact amount from the records",
-  off.data.customers === 1 && off.data.totalKobo === 300_000 && off.data.rows[0]!.username === "waived" && off.data.rows[0]!.writtenOffKobo === 300_000,
-);
-check("…their email, what they hold now, and the wallet as unknown when it can't be asked", off.data.rows[0]!.email.includes("waived") && off.data.rows[0]!.balanceKobo === -100_000 && off.data.rows[0]!.walletUsdMinor === null);
-check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/written-off" })).statusCode === 401);
-
-console.log("a written-off customer's money flow");
-await User.create({ authUserId: "u-flow", email: "flow@example.test", username: "flow", displayName: "Flow" });
-const flowIn = (kobo: number, usd: number, key: string) =>
-  creditNaira({ authUserId: "u-flow", amountKobo: kobo, type: "conversion_in", refKey: `convert:u-flow:${key}`, description: "in", metadata: { amountUsdMinor: usd } });
-const flowOut = (kobo: number, usd: number, key: string) =>
-  debitNaira({ authUserId: "u-flow", amountKobo: kobo, type: "conversion_out", refKey: `convert:u-flow:${key}`, description: "out", metadata: { amountUsdMinor: usd } });
-await flowIn(300_000, 205, "in-1");
-await debitNaira({ authUserId: "u-flow", amountKobo: 100_000, type: "trade_stake", refKey: "flow-stake-1", description: "bet" });
-await debitNaira({ authUserId: "u-flow", amountKobo: 100_000, type: "trade_stake", refKey: "flow-stake-2", description: "bet" });
-await creditNaira({ authUserId: "u-flow", amountKobo: 800_000, type: "payout", refKey: "flow-payout-1", description: "won" });
-await flowOut(500_000, 341, "out-1");
-// a failed withdrawal that came back moves nothing
-await flowOut(200_000, 136, "out-2");
-await creditNaira({ authUserId: "u-flow", amountKobo: 200_000, type: "refund", refKey: "convert:u-flow:out-2:reversal", description: "back" });
-await adjustNaira({ authUserId: "u-flow", amountKobo: -600_000, type: "reversal", refKey: "reverse:flow-1", description: "reversed", metadata: {} });
-await writeOffDebt({ authUserId: "u-flow", refKey: "writeoff:flow-1", description: "waived", metadata: { actor: "key:josh" } });
-await flowIn(100_000, 69, "in-2");
-await flowOut(50_000, 34, "out-3");
-// still waiting: not sent, so it doesn't count as having reached the wallet
-await flowOut(20_000, 13, "out-4");
-await WithdrawalCheck.create({ refKey: "convert:u-flow:out-4", authUserId: "u-flow", amountKobo: 20_000, amountUsdMinor: 13, rate: 1_464.5, status: "review", reason: "big" });
-const flowList = (await admin("GET", "/v1/admin/written-off")).json() as {
-  data: { customers: number; rows: { username: string; writtenOffKobo: number; by: string; addedUsdMinor: number; sentKobo: number; sentUsdMinor: number; sentBeforeUsdMinor: number; waitingKobo: number; netUsdMinor: number; fromPredictAtMostUsdMinor: number | null }[] };
-};
-const flowRow = flowList.data.rows.find((r) => r.username === "flow")!;
-check("the biggest write-off comes first", flowList.data.customers === 2 && flowList.data.rows[0]!.username === "waived" && flowRow.writtenOffKobo === 200_000);
-check("…who wrote it off", flowRow.by === "key:josh");
-check("dollars in and really out: failed and waiting withdrawals don't count", flowRow.addedUsdMinor === 274 && flowRow.sentKobo === 550_000 && flowRow.sentUsdMinor === 375);
-check("…what left before the write-off, and what's still waiting", flowRow.sentBeforeUsdMinor === 341 && flowRow.waitingKobo === 20_000);
-check("…how much more Predict gave their wallet than it took", flowRow.netUsdMinor === 101);
-check("…and no claim about the wallet when it can't be read", flowRow.fromPredictAtMostUsdMinor === null);
-const flow = (await admin("GET", "/v1/admin/written-off/u-flow/flow")).json() as {
-  data: { steps: { kind: string; count: number; amountKobo: number; usdMinor: number | null; balanceAfterKobo: number }[] };
-};
-check(
-  "the flow reads in order, with bets rolled into one step",
-  JSON.stringify(flow.data.steps.map((s) => s.kind)) ===
-    JSON.stringify(["added", "betting", "sent", "failed", "reversed", "written_off", "added", "sent", "waiting"]),
-);
-const flowStep = (kind: string) => flow.data.steps.find((s) => s.kind === kind)!;
-check("…the betting step adds up", flowStep("betting").count === 2 && flowStep("betting").amountKobo === 600_000);
-check("…a failed withdrawal moves nothing, and ends back where it was", flowStep("failed").amountKobo === 0 && flowStep("failed").balanceAfterKobo === 400_000);
-check("…the sent step shows its dollars", flowStep("sent").usdMinor === 341 && flowStep("sent").amountKobo === -500_000);
-check("…the write-off lands on zero", flowStep("written_off").amountKobo === 200_000 && flowStep("written_off").balanceAfterKobo === 0);
-check("an unknown customer is a 404", (await admin("GET", "/v1/admin/written-off/nobody/flow")).statusCode === 404);
-check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/written-off/u-flow/flow" })).statusCode === 401);
+check("an unknown customer is a 404", (await admin("GET", "/v1/admin/traders/nobody/high-price-bets")).statusCode === 404);
+check("…and it needs an admin", (await app.inject({ method: "GET", url: "/v1/admin/traders/u-review/high-price-bets" })).statusCode === 401);
 
 /* ---------------- the Withdrawals tab ---------------- */
 console.log("the Withdrawals tab");

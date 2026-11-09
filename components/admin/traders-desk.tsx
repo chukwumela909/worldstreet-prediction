@@ -26,6 +26,7 @@ import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { localPref, useLocalPref } from "@/lib/admin-prefs";
 import { UsdRateNote } from "@/components/admin/currency-switch";
 import { AccountControl } from "@/components/admin/account-control";
+import { CustomerActions } from "@/components/admin/customer-actions";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
@@ -690,6 +691,15 @@ function TraderDetailPanel({
       <AccountControl
         trader={trader}
         actions={detail?.accountActions}
+        onChanged={() => {
+          load();
+          onChanged();
+        }}
+      />
+
+      <CustomerActions
+        trader={trader}
+        money={money}
         onChanged={() => {
           load();
           onChanged();
