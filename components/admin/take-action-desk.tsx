@@ -478,11 +478,11 @@ export function TakeActionDesk() {
                     ? `${forAll ? "Nobody has" : `${name} has`} nothing to take back on these markets${checked.sinceAt ? ` since ${dayLabel(checked.sinceAt)}` : ""}`
                     : forAll
                       ? checked.mine.netKobo >= 0
-                        ? `Take back winnings from ${checked.mine.customers} customer${checked.mine.customers === 1 ? "" : "s"}: we recover ${money.format(checked.mine.netKobo)}`
-                        : `Reverse ${checked.mine.customers} customers’ bets: this gives them back ${money.format(-checked.mine.netKobo)}, as their losses were bigger than their winnings`
+                        ? `Take back winnings from ${checked.mine.customers} customer${checked.mine.customers === 1 ? "" : "s"}: we recover ${money.formatForConfirm(checked.mine.netKobo)}`
+                        : `Reverse ${checked.mine.customers} customers’ bets: this gives them back ${money.formatForConfirm(-checked.mine.netKobo)}, as their losses were bigger than their winnings`
                       : checked.mine.netKobo >= 0
-                        ? `Take back ${name}’s winnings: we recover ${money.format(checked.mine.netKobo)}`
-                        : `Reverse ${name}’s bets: this gives them back ${money.format(-checked.mine.netKobo)}, as their losses were bigger than their winnings`
+                        ? `Take back ${name}’s winnings: we recover ${money.formatForConfirm(checked.mine.netKobo)}`
+                        : `Reverse ${name}’s bets: this gives them back ${money.formatForConfirm(-checked.mine.netKobo)}, as their losses were bigger than their winnings`
                 }
               >
                 {checked.mine.bets === 0 ? (
@@ -493,14 +493,14 @@ export function TakeActionDesk() {
                     {checked.mine.lost} lost) on {checked.mine.events.length}
                     {checked.mine.events.length === 30 ? "+" : ""} market
                     {checked.mine.events.length === 1 ? "" : "s"}, {placedFrom}.{" "}
-                    {money.format(checked.mine.takeBackKobo)} of winnings come back and{" "}
-                    {money.format(checked.mine.returnKobo)} of stakes on lost bets is returned, as if the bets never
+                    {money.formatForConfirm(checked.mine.takeBackKobo)} of winnings come back and{" "}
+                    {money.formatForConfirm(checked.mine.returnKobo)} of stakes on lost bets is returned, as if the bets never
                     happened.{" "}
                     {forAll
                       ? checked.mine.shortCustomers > 0
-                        ? `${checked.mine.shortCustomers} customer${checked.mine.shortCustomers === 1 ? " can't" : "s can't"} cover ${money.format(checked.mine.shortKobo)} of it.`
+                        ? `${checked.mine.shortCustomers} customer${checked.mine.shortCustomers === 1 ? " can't" : "s can't"} cover ${money.formatForConfirm(checked.mine.shortKobo)} of it.`
                         : "Every customer's balance covers it."
-                      : `Their balance is ${money.format(balanceBefore)}${covers ? ", which covers it." : ", which doesn't cover it."}`}
+                      : `Their balance is ${money.formatForConfirm(balanceBefore)}${covers ? ", which covers it." : ", which doesn't cover it."}`}
                     {blockedByOpenBets && (
                       <span className={`mt-2 block rounded-md px-2 py-1 font-semibold ${FLAG_TONE.caution.chip}`}>
                         {forAll ? "There are" : "They still have"} {checked.mine.openBets} open bet

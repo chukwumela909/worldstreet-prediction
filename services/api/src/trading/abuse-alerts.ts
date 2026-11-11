@@ -1,5 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
-import { lowerStakeLevelAutomatically } from "../accounts.js";
+import { lowerStakeLevelAutomatically, returnAutoStakeLevels } from "../accounts.js";
 import { sendAlert } from "../alerts.js";
 import { getAbuseWatch } from "./abuse.js";
 
@@ -16,10 +16,13 @@ import { getAbuseWatch } from "./abuse.js";
  * are left out: they're already dealt with.
  *
  * It also limits them at once (accounts.ts), so nobody has to notice
- * first: beating the odds or buying near-certain sides puts the customer
- * on the "restricted" stake level, a pair of accounts both on "reduced".
- * It only ever lowers a level, and leaves alone one a person set in the
- * last week. Clearing the alert puts back what the scan set.
+ * first, gently: beating the odds or buying near-certain sides puts the
+ * customer on the "reduced" stake level, and on "restricted" only when
+ * they're flagged again within 30 days of an earlier limit; a pair of
+ * accounts both go on "reduced". It only ever lowers a level, and leaves
+ * alone one a person set in the last week. Clearing the alert puts back
+ * what the scan set, and so does the week being up once they're no longer
+ * flagged (returnAutoStakeLevels, run before each scan).
  */
 
 const EVERY_MS = 60 * 60_000;
@@ -35,6 +38,9 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
   const now = Date.now();
   if (!opts.force && now - lastRun < EVERY_MS) return 0;
   lastRun = now;
+
+  // a week on a scan-set limit, and no longer flagged: back to normal
+  await returnAutoStakeLevels(log).catch((err: unknown) => log.error({ err }, "returning stake levels failed"));
 
   const watch = await getAbuseWatch(SCAN_DAYS, { wallets: false });
   let raised = 0;
@@ -65,7 +71,8 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
     });
     await lowerStakeLevelAutomatically({
       authUserId: r.authUserId,
-      level: "restricted",
+      level: "reduced",
+      repeatLevel: "restricted",
       reason: `Winning more than the odds allow: won ${r.won} of ${r.bets} bets in ${SCAN_DAYS} days, the prices said about ${r.expectedWins}`,
       log,
     });
@@ -81,7 +88,8 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
     });
     await lowerStakeLevelAutomatically({
       authUserId: r.authUserId,
-      level: "restricted",
+      level: "reduced",
+      repeatLevel: "restricted",
       reason: `Buying near-certain sides: ${r.bets} bets at ₦90 or more, won ${r.won}`,
       log,
     });

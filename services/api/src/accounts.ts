@@ -174,8 +174,17 @@ const RANK: Record<StakeLevel, number> = { normal: 0, reduced: 1, restricted: 2 
 const LEVEL_LABEL: Record<StakeLevel, string> = { normal: "Normal", reduced: "Reduced", restricted: "Restricted" };
 /** Who the abuse scan acts as when it lowers a level. */
 export const AUTO_STAKE_ACTOR = "system:abuse";
+/** Who puts a scan-set level back to normal once its week is up. */
+export const STAKE_REVIEW_ACTOR = "system:review";
+const DAY_MS = 86_400_000;
 /** A level a person set stands this long before the scan may lower it again. */
-const PERSON_HOLD_MS = 7 * 86_400_000;
+const PERSON_HOLD_MS = 7 * DAY_MS;
+/** A scan-set level goes back to normal this long after it was set, once the scan no longer flags them. */
+const AUTO_RETURN_MS = 7 * DAY_MS;
+/** Limited by the scan within this long before means a new flag is a repeat, and goes harder. */
+const REPEAT_WINDOW_MS = 30 * DAY_MS;
+/** Still flagged: an abuse alert about them fired this recently (the scan runs every hour). */
+const STILL_FLAGGED_MS = 3 * 3_600_000;
 
 const asLevel = (v: unknown): StakeLevel => (v === "reduced" || v === "restricted" ? v : "normal");
 
@@ -197,6 +206,33 @@ export function stakeShare(
 export function scaledLimit(kobo: number, pct: number, minKobo: number): number {
   if (pct >= 100) return kobo;
   return Math.max(Math.floor((kobo * pct) / 100 / 100) * 100, minKobo);
+}
+
+/**
+ * The most this customer may stake on one bet and on one market, at their
+ * level: what the order route enforces and the bet slip shows them. With
+ * no per-market cap set, a limited customer still gets one (four of their
+ * bets), so many small bets can't add up to a big one; 0 = no cap.
+ */
+export async function stakeLimitsFor(
+  authUserId: string,
+  settings: {
+    minStakeKobo: number;
+    maxStakeKobo: number;
+    maxStakePerMarketKobo: number;
+    reducedStakePct: number;
+    restrictedStakePct: number;
+  },
+): Promise<{ maxStakeKobo: number; maxPerMarketKobo: number }> {
+  const share = stakeShare(await getStakeLevel(authUserId), settings);
+  const maxStakeKobo = scaledLimit(settings.maxStakeKobo, share, settings.minStakeKobo);
+  const maxPerMarketKobo =
+    settings.maxStakePerMarketKobo > 0
+      ? scaledLimit(settings.maxStakePerMarketKobo, share, settings.minStakeKobo)
+      : share < 100
+        ? maxStakeKobo * 4
+        : 0;
+  return { maxStakeKobo, maxPerMarketKobo };
 }
 
 export interface StakeLevelResult {
@@ -252,24 +288,40 @@ export async function setStakeLevel(params: {
 }
 
 /**
- * The abuse scan lowers a flagged customer's level on its own. It only
- * ever lowers (a restricted customer isn't moved up to reduced), and it
- * leaves alone a level a person set in the last week: the desk has looked
- * at them. Returns whether it changed anything.
+ * The abuse scan lowers a flagged customer's level on its own: to `level`
+ * the first time, to `repeatLevel` when the scan already limited them in
+ * the last 30 days and they're flagged again after going back to normal.
+ * It only ever lowers (a restricted customer isn't moved up to reduced),
+ * never escalates within one spell (someone still flagged stays where they
+ * are), and leaves alone a level a person set in the last week: the desk
+ * has looked at them. Returns whether it changed anything.
  */
 export async function lowerStakeLevelAutomatically(params: {
   authUserId: string;
   level: Exclude<StakeLevel, "normal">;
+  /** Where a repeat goes; absent = the same as `level`. */
+  repeatLevel?: Exclude<StakeLevel, "normal">;
   reason: string;
   log: FastifyBaseLogger;
 }): Promise<boolean> {
   const user = await User.findOne(
     { authUserId: params.authUserId },
-    { stakeLevel: 1, stakeLevelBy: 1, stakeLevelAt: 1, suspendedAt: 1 },
+    { stakeLevel: 1, stakeLevelBy: 1, stakeLevelAt: 1, suspendedAt: 1, accountActions: 1 },
   ).lean();
   if (!user || user.suspendedAt) return false;
   const current = asLevel(user.stakeLevel);
-  if (RANK[current] >= RANK[params.level]) return false;
+  const since = Date.now() - REPEAT_WINDOW_MS;
+  const limitedBefore = (user.accountActions ?? []).some(
+    (a) =>
+      a.action === "stake_level" &&
+      a.by === AUTO_STAKE_ACTOR &&
+      !String(a.reason).startsWith("Normal") &&
+      new Date(a.at).getTime() >= since,
+  );
+  const repeat = Boolean(params.repeatLevel) && current === "normal" && limitedBefore;
+  const level = repeat && params.repeatLevel ? params.repeatLevel : params.level;
+  const reason = repeat ? `Flagged again within 30 days. ${params.reason}` : params.reason;
+  if (RANK[current] >= RANK[level]) return false;
   const byPerson = Boolean(user.stakeLevelBy) && !String(user.stakeLevelBy).startsWith("system:");
   if (byPerson && user.stakeLevelAt && Date.now() - new Date(user.stakeLevelAt).getTime() < PERSON_HOLD_MS) {
     return false;
@@ -280,15 +332,15 @@ export async function lowerStakeLevelAutomatically(params: {
     { authUserId: params.authUserId, stakeLevel: user.stakeLevel ?? "normal" },
     {
       $set: {
-        stakeLevel: params.level,
-        stakeLevelReason: params.reason,
+        stakeLevel: level,
+        stakeLevelReason: reason,
         stakeLevelBy: AUTO_STAKE_ACTOR,
         stakeLevelAt: at,
       },
       $push: {
         accountActions: {
           action: "stake_level",
-          reason: `${LEVEL_LABEL[params.level]}: ${params.reason}`,
+          reason: `${LEVEL_LABEL[level]}: ${reason}`,
           by: AUTO_STAKE_ACTOR,
           at,
         },
@@ -296,9 +348,50 @@ export async function lowerStakeLevelAutomatically(params: {
     },
   );
   if (res.modifiedCount > 0) {
-    params.log.warn({ authUserId: params.authUserId, level: params.level }, "stake level lowered by the abuse scan");
+    params.log.warn({ authUserId: params.authUserId, level, repeat }, "stake level lowered by the abuse scan");
   }
   return res.modifiedCount > 0;
+}
+
+/**
+ * The week is up: a level the scan set goes back to normal 7 days after it
+ * was set, once the scan no longer flags them (no abuse alert about them
+ * in the last few hours). Someone still flagged stays where they are until
+ * they stop. A level a person set is never touched. Run before each scan.
+ * Returns how many went back.
+ */
+export async function returnAutoStakeLevels(log: FastifyBaseLogger, now = Date.now()): Promise<number> {
+  const due = await User.find(
+    {
+      stakeLevelBy: AUTO_STAKE_ACTOR,
+      stakeLevel: { $ne: "normal" },
+      stakeLevelAt: { $lte: new Date(now - AUTO_RETURN_MS) },
+    },
+    { authUserId: 1 },
+  ).lean();
+  if (due.length === 0) return 0;
+  const ids = due.map((u) => u.authUserId);
+  const stillFlagged = new Set(
+    (
+      await AlertRecord.find(
+        { kind: "abuse", authUserIds: { $in: ids }, lastAt: { $gte: new Date(now - STILL_FLAGGED_MS) } },
+        { authUserIds: 1 },
+      ).lean()
+    ).flatMap((a) => a.authUserIds ?? []),
+  );
+  const back = ids.filter((id) => !stillFlagged.has(id));
+  if (back.length === 0) return 0;
+  const at = new Date(now);
+  const why = "7 days on a limit, and no longer flagged";
+  const res = await User.updateMany(
+    { authUserId: { $in: back }, stakeLevelBy: AUTO_STAKE_ACTOR, stakeLevel: { $ne: "normal" } },
+    {
+      $set: { stakeLevel: "normal", stakeLevelReason: why, stakeLevelBy: STAKE_REVIEW_ACTOR, stakeLevelAt: at },
+      $push: { accountActions: { action: "stake_level", reason: `Normal: ${why}`, by: STAKE_REVIEW_ACTOR, at } },
+    },
+  );
+  if (res.modifiedCount > 0) log.warn({ ids: back }, "scan-set stake levels back to normal after a week");
+  return res.modifiedCount;
 }
 
 /**

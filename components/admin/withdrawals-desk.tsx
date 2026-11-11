@@ -133,7 +133,8 @@ export function WithdrawalsDesk() {
                 {desk.settled.map((r) => (
                   <li key={r.refKey} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
                     <span className="min-w-0">
-                      @{r.username || r.authUserId} · {money.format(r.amountKobo)} → ${(r.amountUsdMinor / 100).toFixed(2)}
+                      @{r.username || r.authUserId} · {money.format(r.amountKobo)} →{" "}
+                      {money.hide(`$${(r.amountUsdMinor / 100).toFixed(2)}`)}
                     </span>
                     <span className="text-xs text-tertiary">
                       <span className={r.status === "paid" ? "font-semibold text-yes" : "font-semibold text-secondary"}>
@@ -209,7 +210,7 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
       <VerdictNote person={p} />
 
       <dl className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <Figure label="Wants to withdraw" value={money.format(p.heldKobo)} sub={`$${usd}`} strong />
+        <Figure label="Wants to withdraw" value={money.format(p.heldKobo)} sub={money.hide(`$${usd}`)} strong />
         <Figure label="Had in balance" value={money.format(p.balanceKobo + p.heldKobo)} />
         <Figure label="Left after this" value={money.format(p.balanceKobo)} />
       </dl>
@@ -381,7 +382,7 @@ function Request({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="font-semibold">
-            {money.format(r.amountKobo)} → {usd}
+            {money.format(r.amountKobo)} → {money.hide(usd)}
           </p>
           <p className="text-xs text-tertiary">{r.createdAt ? `Asked ${when(r.createdAt)}` : ""}</p>
         </div>
@@ -403,7 +404,7 @@ function Request({
           <p className="font-semibold">
             {confirm === "send"
               ? `Send ${usd} to @${p.username}'s wallet? This can't be undone.`
-              : `Return ${money.format(r.amountKobo)} to @${p.username}'s Predict balance?`}
+              : `Return ${money.formatForConfirm(r.amountKobo)} to @${p.username}'s Predict balance?`}
             {confirm === "send" && p.verdict !== "clear" && " This customer has an open alert."}
           </p>
           <div className="mt-2 flex flex-wrap gap-2">

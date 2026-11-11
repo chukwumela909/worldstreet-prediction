@@ -6,6 +6,7 @@ import {
 } from "@heroicons/react/24/outline";
 import { formatNaira } from "@/lib/format";
 import { fetchPausedRefunds, useAdminResource } from "@/lib/admin-api";
+import { useHideAmount } from "@/lib/admin-money";
 
 /**
  * What the paused topics have refunded over the last three days: every
@@ -18,6 +19,7 @@ import { fetchPausedRefunds, useAdminResource } from "@/lib/admin-api";
  */
 export function PausedRefundsReport() {
   const resource = useAdminResource(fetchPausedRefunds, true);
+  const hide = useHideAmount();
   const report = resource.data;
 
   // an API without the report: nothing to show yet
@@ -55,7 +57,7 @@ export function PausedRefundsReport() {
           <dl className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <Stat label="Customers refunded" value={String(report.totals.customers)} />
             <Stat label="Bets refunded" value={String(report.totals.bets)} />
-            <Stat label="Total refunded" value={formatNaira(report.totals.refundKobo)} />
+            <Stat label="Total refunded" value={hide(formatNaira(report.totals.refundKobo))} />
             <Stat
               label="Apology email"
               value={`${report.totals.emailed} of ${report.totals.customers}`}
@@ -93,7 +95,7 @@ export function PausedRefundsReport() {
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{c.bets}</td>
                     <td className="py-2 pr-3 text-right font-semibold tabular-nums">
-                      {formatNaira(c.refundKobo)}
+                      {hide(formatNaira(c.refundKobo))}
                     </td>
                     <td className="whitespace-nowrap py-2 pr-3 text-secondary">
                       {c.refundedAt ? fmtDateTime(c.refundedAt) : "—"}
@@ -137,7 +139,7 @@ export function PausedRefundsReport() {
                     </td>
                     <td className="py-2 pr-3 text-right tabular-nums">{m.bets}</td>
                     <td className="py-2 pr-3 text-right font-semibold tabular-nums">
-                      {formatNaira(m.refundKobo)}
+                      {hide(formatNaira(m.refundKobo))}
                     </td>
                     <td className="whitespace-nowrap py-2 pr-3 text-secondary">
                       {m.voidedAt ? fmtDateTime(m.voidedAt) : "—"}

@@ -19,6 +19,14 @@ import { localPref, useLocalPref } from "@/lib/admin-prefs";
  * The rate is read once from `GET /v1/admin/fx` into a module-level
  * store every consumer shares, and re-read when the FX card sets a new
  * one (`publishAdminFx` + `refreshAdminFx`).
+ *
+ * Amounts start hidden: every figure reads "₦••••" until the viewer
+ * presses the eye by the ₦/$ switch, so a desk opened where others can
+ * see the screen gives nothing away. Showing them lasts for this tab
+ * (reloads included); a new visit starts hidden again. The one place
+ * a figure shows while hidden is `formatForConfirm` — the amount in an
+ * irreversible action's own wording, so money never moves on a button
+ * nobody could read.
  */
 
 export type AdminCurrency = "ngn" | "usd";
@@ -33,6 +41,45 @@ const currencyPref = localPref<AdminCurrency>("ws-admin-currency", "ngn", (v) =>
 
 export function setAdminCurrency(next: AdminCurrency): void {
   currencyPref.set(next);
+}
+
+/** false (the default, and the server render): amounts are hidden. */
+const shownPref = localPref<boolean>(
+  "ws-admin-amounts-shown",
+  false,
+  (v) => (typeof v === "boolean" ? v : null),
+  "session",
+);
+
+export function setAdminAmountsHidden(hidden: boolean): void {
+  shownPref.set(!hidden);
+}
+
+/** Whether the desk's amounts are hidden right now. */
+export function useAdminAmountsHidden(): boolean {
+  return !useLocalPref(shownPref);
+}
+
+const MASK = "••••";
+
+/**
+ * "₦12,500" → "₦••••", "−$8.62" → "$••••", "₩3.2M" → "₩••••". The
+ * currency mark stays so a column still reads as money; the sign and
+ * the length go, so neither a loss nor the size of a figure shows.
+ */
+export function maskAmount(text: string): string {
+  const mark = /[₦$₩]/.exec(text)?.[0] ?? "";
+  return `${mark}${MASK}`;
+}
+
+/**
+ * For amounts formatted outside useAdminMoney (a hand-built "$12.40",
+ * a ₩ figure from lib/format.ts): hands back a function that masks
+ * them while the desk's amounts are hidden.
+ */
+export function useHideAmount(): (text: string) => string {
+  const hidden = useAdminAmountsHidden();
+  return useMemo(() => (hidden ? maskAmount : (text: string) => text), [hidden]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -261,17 +308,30 @@ export interface AdminMoney {
    * from there ("₦1,250,000" would overflow a phone-width tile).
    */
   formatHeadline: (kobo: number, opts?: { signed?: boolean }) => string;
+  /** Every format above reads "₦••••" while this is true (the default). */
+  hidden: boolean;
+  setHidden: (hidden: boolean) => void;
+  /** Masks an amount formatted by hand ("$12.40") while hidden. */
+  hide: (text: string) => string;
+  /**
+   * Exact, and never hidden: only for the amount in an irreversible
+   * action's own wording ("Send $40.00?", "Reverse their bets: we
+   * recover ₦12,000") — nobody should confirm money moving blind.
+   */
+  formatForConfirm: (kobo: number) => string;
 }
 
 export function useAdminMoney(): AdminMoney {
   const preferred = useLocalPref(currencyPref);
+  const hidden = useAdminAmountsHidden();
   const { fx, status } = useAdminFx();
   const rate = fx && Number.isFinite(fx.mid) && fx.mid > 0 ? fx.mid : null;
   const currency: AdminCurrency = preferred === "usd" && rate !== null ? "usd" : "ngn";
 
   return useMemo<AdminMoney>(() => {
-    const format = (kobo: number) => formatAdminMoney(kobo, currency, rate);
-    const formatSigned = (kobo: number) => formatAdminMoneySigned(kobo, currency, rate);
+    const exact = (kobo: number) => formatAdminMoney(kobo, currency, rate);
+    const hide = hidden ? maskAmount : (text: string) => text;
+    const signed = (kobo: number) => formatAdminMoneySigned(kobo, currency, rate);
     return {
       currency,
       preferred,
@@ -279,15 +339,19 @@ export function useAdminMoney(): AdminMoney {
       rate,
       fx,
       fxStatus: status,
-      format,
-      formatSigned,
-      formatCompact: (kobo) => formatAdminMoneyCompact(kobo, currency, rate),
+      format: (kobo) => hide(exact(kobo)),
+      formatSigned: (kobo) => hide(signed(kobo)),
+      formatCompact: (kobo) => hide(formatAdminMoneyCompact(kobo, currency, rate)),
       formatHeadline: (kobo, opts) => {
         const big = Math.abs(toUnits(kobo, currency, rate)) >= 1e6;
-        if (!big) return opts?.signed ? formatSigned(kobo) : format(kobo);
+        if (!big) return hide(opts?.signed ? signed(kobo) : exact(kobo));
         const compact = formatAdminMoneyCompact(kobo, currency, rate, 1e6);
-        return opts?.signed && kobo > 0 ? `+${compact}` : compact;
+        return hide(opts?.signed && kobo > 0 ? `+${compact}` : compact);
       },
+      hidden,
+      setHidden: setAdminAmountsHidden,
+      hide,
+      formatForConfirm: exact,
     };
-  }, [currency, preferred, rate, fx, status]);
+  }, [currency, preferred, rate, fx, status, hidden]);
 }

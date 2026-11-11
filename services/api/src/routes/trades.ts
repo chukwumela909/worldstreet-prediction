@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { assertNotSuspended, getStakeLevel, scaledLimit, stakeShare } from "../accounts.js";
+import { assertNotSuspended, stakeLimitsFor } from "../accounts.js";
 import { sendAlert } from "../alerts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
@@ -149,16 +149,7 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
   }
   // the customer's stake level scales both limits (accounts.ts): a
   // customer the abuse scan or the desk limited gets a share of them
-  const share = stakeShare(await getStakeLevel(authUserId), settings);
-  const maxStakeKobo = scaledLimit(settings.maxStakeKobo, share, settings.minStakeKobo);
-  // with no per-market cap set, a limited customer still gets one: four
-  // of their bets, so many small ones can't add up to a big one
-  const maxPerMarketKobo =
-    settings.maxStakePerMarketKobo > 0
-      ? scaledLimit(settings.maxStakePerMarketKobo, share, settings.minStakeKobo)
-      : share < 100
-        ? maxStakeKobo * 4
-        : 0;
+  const { maxStakeKobo, maxPerMarketKobo } = await stakeLimitsFor(authUserId, settings);
   if (body.stakeKobo > maxStakeKobo) {
     throw new ApiError(
       400,

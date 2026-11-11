@@ -378,7 +378,7 @@ export function MarketControlsCard({
                 ) : (
                   <p className="font-semibold text-primary">
                     {refund.positions} open bet{refund.positions === 1 ? "" : "s"} on {refund.markets} closed market
-                    {refund.markets === 1 ? "" : "s"}: {money.format(refund.refundKobo)} to refund, each customer
+                    {refund.markets === 1 ? "" : "s"}: {money.formatForConfirm(refund.refundKobo)} to refund, each customer
                     emailed. This can&rsquo;t be undone.
                   </p>
                 )}

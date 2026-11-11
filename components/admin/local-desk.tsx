@@ -599,7 +599,7 @@ export function MarketRow({
 
   const run = async (action: "settle" | "void") => {
     if (pending) return;
-    const stake = money.format(market.openStakeKobo);
+    const stake = money.formatForConfirm(market.openStakeKobo);
     const confirmed = window.confirm(
       action === "settle"
         ? `Settle "${market.marketTitle}" as ${

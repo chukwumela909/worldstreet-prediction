@@ -3,6 +3,7 @@
 import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type { MarketEvent } from "@/types/market";
 import type { BookPricing } from "@/lib/book-pricing";
+import { useMyMaxStakeKobo } from "@/lib/naira-wallet";
 import {
   DEFAULT_MAX_STAKE_KOBO,
   DEFAULT_MIN_STAKE_KOBO,
@@ -45,10 +46,13 @@ export function BookPricingProvider({
  * Polymarket's own. `autoAdjusting` is true while the API publishes an
  * auto-adjusting spread — the only time rises are worth fetching. The
  * stake limits are the API's, or its defaults (₦100–₦50,000) when it
- * published none.
+ * published none; the maximum is the signed-in customer's own when their
+ * stake level gives them less (GET /v1/wallet/ngn), so the slip shows and
+ * clamps to it up front instead of the bet being refused.
  */
 export function useQuote() {
   const pricing = useContext(PricingContext);
+  const myMaxStakeKobo = useMyMaxStakeKobo();
   return useMemo(
     () => ({
       quoteKobo: (event: Pick<MarketEvent, "source">, price: string, riseBps = 0) =>
@@ -61,8 +65,11 @@ export function useQuote() {
       international: pricing?.internationalTrading === true,
       autoAdjusting: (pricing?.autoSpreadStepKobo ?? 0) > 0,
       minStakeKobo: pricing?.minStakeKobo ?? DEFAULT_MIN_STAKE_KOBO,
-      maxStakeKobo: pricing?.maxStakeKobo ?? DEFAULT_MAX_STAKE_KOBO,
+      maxStakeKobo: Math.min(
+        pricing?.maxStakeKobo ?? DEFAULT_MAX_STAKE_KOBO,
+        myMaxStakeKobo ?? Number.POSITIVE_INFINITY,
+      ),
     }),
-    [pricing],
+    [pricing, myMaxStakeKobo],
   );
 }

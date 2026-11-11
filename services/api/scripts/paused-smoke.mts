@@ -344,6 +344,12 @@ check(
   refusedMessage === `STAKE_TOO_LARGE: Maximum stake is ₦${(perBet / 100).toLocaleString("en-US")}`,
 );
 check("…and one within it goes through", (await sharpBet(perBet, ethMarket)) === "ok");
+const { stakeLimitsFor } = await import("../src/accounts.js");
+const shown = await stakeLimitsFor("u-sharp", await settings.getBookSettings());
+check(
+  "the limits the bet slip shows them are the ones the order route enforces",
+  shown.maxStakeKobo === perBet && shown.maxPerMarketKobo === Math.floor((s5.maxStakePerMarketKobo * 5) / 100 / 100) * 100,
+);
 const perMarket = Math.floor((s5.maxStakePerMarketKobo * 5) / 100 / 100) * 100;
 const newMarket = await ownMarket("Will ADA close above $2 on Friday?");
 let placedOnNew = 0;

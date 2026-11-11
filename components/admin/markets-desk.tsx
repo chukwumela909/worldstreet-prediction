@@ -14,6 +14,7 @@ import {
 import { CATEGORIES } from "@/types/market";
 import { CREDIT, formatNaira, formatNairaSigned } from "@/lib/format";
 import { isApiConfigured } from "@/lib/api-client";
+import { useHideAmount } from "@/lib/admin-money";
 import { BookRiskStrip } from "@/components/admin/book-risk";
 import { PAYOUT_PER_SHARE_KOBO } from "@/lib/local-trades";
 import {
@@ -173,6 +174,7 @@ function EventCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const hide = useHideAmount();
 
   const settled = event.status === "resolved" || event.status === "cancelled";
   const traded = event.markets.some((m) => m.exposure.totalPositions > 0);
@@ -245,7 +247,7 @@ function EventCard({
           <p className="mt-1 pl-5 text-[13px] font-medium text-tertiary">
             {event.category} · {event.markets.length} market
             {event.markets.length === 1 ? "" : "s"} · {event.trades} trade
-            {event.trades === 1 ? "" : "s"} · {formatNaira(event.stakedKobo)} staked
+            {event.trades === 1 ? "" : "s"} · {hide(formatNaira(event.stakedKobo))} staked
             {event.closesAt && ` · closes ${fmtDateTime(event.closesAt)}`}
           </p>
         </div>
@@ -495,6 +497,7 @@ function MarketRow({
   onSaved: (event: WsEvent) => void;
   onChanged: () => void;
 }) {
+  const hide = useHideAmount();
   const [title, setTitle] = useState(market.title);
   const [rules, setRules] = useState(market.rules);
   const [prices, setPrices] = useState(() =>
@@ -535,8 +538,8 @@ function MarketRow({
         <span className="text-[13px] font-medium text-tertiary">
           {market.status}
           {market.exposure.openPositions > 0 &&
-            ` · ${market.exposure.openPositions} open · ${formatNaira(
-              market.exposure.openStakeKobo,
+            ` · ${market.exposure.openPositions} open · ${hide(
+              formatNaira(market.exposure.openStakeKobo),
             )} staked`}
         </span>
       </div>
@@ -625,6 +628,7 @@ function MarketRow({
  * other.
  */
 function SideBook({ market }: { market: WsMarket }) {
+  const hide = useHideAmount();
   const { openPositions, openStakeKobo, outcomes, worstOutcomeId } = market.exposure;
   if (openPositions === 0) return null;
 
@@ -670,7 +674,7 @@ function SideBook({ market }: { market: WsMarket }) {
                 <td className="py-1.5 text-right">
                   {side ? (
                     <>
-                      {formatNaira(side.stakeKobo)}{" "}
+                      {hide(formatNaira(side.stakeKobo))}{" "}
                       <span className="font-medium text-tertiary">
                         ({side.positions})
                       </span>
@@ -679,13 +683,13 @@ function SideBook({ market }: { market: WsMarket }) {
                     <span className="text-tertiary">—</span>
                   )}
                 </td>
-                <td className="py-1.5 text-right">{formatNaira(payoutKobo)}</td>
+                <td className="py-1.5 text-right">{hide(formatNaira(payoutKobo))}</td>
                 <td
                   className={`py-1.5 text-right font-semibold ${
                     short ? "text-no" : "text-yes"
                   }`}
                 >
-                  {formatNairaSigned(resultKobo)}
+                  {hide(formatNairaSigned(resultKobo))}
                 </td>
               </tr>
             );

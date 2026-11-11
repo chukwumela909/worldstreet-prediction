@@ -28,6 +28,12 @@ export interface FxQuote {
 export interface NairaWalletState {
   balanceKobo: number | null;
   fx: FxQuote | null;
+  /**
+   * The most this customer may stake on one bet at their stake level, kobo;
+   * null until loaded, signed out, or on an API older than stake levels.
+   * The bet slip reads it through useQuote (components/book-pricing.tsx).
+   */
+  maxStakeKobo: number | null;
   loading: boolean;
   /** Last load failure — kept so the funding modal can explain itself. */
   error: string | null;
@@ -35,12 +41,13 @@ export interface NairaWalletState {
 
 interface WalletResponse {
   success: boolean;
-  data: { balanceKobo: number; currency: string; fx: FxQuote | null };
+  data: { balanceKobo: number; currency: string; fx: FxQuote | null; maxStakeKobo?: number };
 }
 
 const EMPTY: NairaWalletState = {
   balanceKobo: null,
   fx: null,
+  maxStakeKobo: null,
   loading: false,
   error: null,
 };
@@ -77,6 +84,8 @@ export function refreshNairaWallet(): Promise<void> {
       commit({
         balanceKobo: res.data.balanceKobo,
         fx: res.data.fx,
+        maxStakeKobo:
+          typeof res.data.maxStakeKobo === "number" && res.data.maxStakeKobo > 0 ? res.data.maxStakeKobo : null,
         loading: false,
         error: null,
       });
@@ -96,6 +105,18 @@ export function refreshNairaWallet(): Promise<void> {
 /** Apply a balance the API just handed back (trade, conversion). */
 export function setNairaBalance(balanceKobo: number) {
   commit({ balanceKobo, error: null });
+}
+
+/**
+ * The signed-in customer's own most-per-bet, read from the store without
+ * fetching (the bet slip's wallet load fills it); null when unknown.
+ */
+export function useMyMaxStakeKobo(): number | null {
+  return useSyncExternalStore(
+    subscribe,
+    () => state.maxStakeKobo,
+    () => null,
+  );
 }
 
 /** Drop everything on sign-out so the next user never sees a stale balance. */

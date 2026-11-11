@@ -190,7 +190,7 @@ export function FlaggedDesk() {
                 <PersonRow key={r.authUserId} person={r} money={money} onChanged={reload}>
                   <b className="text-no">Owes {money.format(r.owedKobo)}</b> · dollar wallet{" "}
                   <b className="text-primary">
-                    {r.walletUsdMinor === null ? "unknown" : `$${(r.walletUsdMinor / 100).toFixed(2)}`}
+                    {r.walletUsdMinor === null ? "unknown" : money.hide(`$${(r.walletUsdMinor / 100).toFixed(2)}`)}
                   </b>{" "}
                   · from {r.reversedBets} reversed bet{r.reversedBets === 1 ? "" : "s"}.
                   {r.waivedKobo > 0 && (

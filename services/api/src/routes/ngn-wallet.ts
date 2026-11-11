@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { assertCanWithdraw, assertNotSuspended } from "../accounts.js";
+import { assertCanWithdraw, assertNotSuspended, stakeLimitsFor } from "../accounts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { getBookSettings } from "../trading/settings.js";
@@ -47,16 +47,27 @@ const convertBody = z.object({
 export const ngnWalletRoutes: FastifyPluginAsync = async (rawApp) => {
   const app = rawApp.withTypeProvider<ZodTypeProvider>();
 
-  /** Balance + the current conversion rates (null until an admin sets one). */
+  /**
+   * Balance + the current conversion rates (null until an admin sets one),
+   * and the most this customer may stake on one bet and one market at their
+   * stake level (accounts.ts), so the bet slip shows their own limit up
+   * front instead of refusing the bet.
+   */
   app.get("/wallet/ngn", async (request) => {
     const { authUserId } = await authenticate(request);
-    const balanceKobo = await getNairaBalanceKobo(authUserId);
-    const fx = await getFxQuote().catch(() => null);
+    const [balanceKobo, fx, limits] = await Promise.all([
+      getNairaBalanceKobo(authUserId),
+      getFxQuote().catch(() => null),
+      getBookSettings()
+        .then((settings) => stakeLimitsFor(authUserId, settings))
+        .catch(() => null),
+    ]);
     return {
       success: true,
       data: {
         balanceKobo,
         currency: "NGN",
+        ...(limits ? { maxStakeKobo: limits.maxStakeKobo, maxStakePerMarketKobo: limits.maxPerMarketKobo } : {}),
         fx: fx
           ? {
               mid: fx.mid,

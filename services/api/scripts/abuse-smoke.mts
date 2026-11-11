@@ -188,12 +188,14 @@ check(
 );
 const levelOf = async (id: string) => (await User.findOne({ authUserId: id }).lean())?.stakeLevel ?? "none";
 check(
-  "the scan limits who it flags at once: beating the odds and near-certain buying → restricted, the pair → reduced",
-  (await levelOf("u-near")) === "restricted" &&
-    (await levelOf("u-lucky")) === "restricted" &&
+  "the scan limits who it flags at once, gently: a first flag → reduced, the pair → reduced",
+  (await levelOf("u-near")) === "reduced" &&
+    (await levelOf("u-lucky")) === "reduced" &&
     (await levelOf("u-twin1")) === "reduced" &&
     (await levelOf("u-twin2")) === "reduced",
 );
+await checkAbuseAlerts(log, { force: true });
+check("…and still flagged an hour later, they stay on reduced (no climbing within one spell)", (await levelOf("u-near")) === "reduced");
 check(
   "…and leaves everyone else, and a ledger gap (our fault), alone",
   (await levelOf("u-fair")) === "normal" && (await levelOf("u-gap")) === "normal",
@@ -326,6 +328,78 @@ check(
 );
 const paid = await admin("POST", "/v1/admin/withdrawal-checks/resolve", { refKey: "convert:u-fair:out-8", action: "paid" });
 check("marking one paid moves no money", paid.statusCode === 200 && (await getNairaBalanceKobo("u-fair")) === fairBefore + 300_000);
+
+/* ---------------- a repeat goes harder; the week brings them back ---------------- */
+console.log("repeats and the week's return");
+const { lowerStakeLevelAutomatically, returnAutoStakeLevels } = await import("../src/accounts.js");
+const DAY = 86_400_000;
+const lvl = async (id: string) => (await User.findOne({ authUserId: id }).lean())?.stakeLevel;
+for (const name of ["first", "repeat", "still", "old", "desk"]) {
+  await User.create({ authUserId: `u-${name}`, email: `${name}@example.test`, username: name, displayName: name });
+}
+await lowerStakeLevelAutomatically({ authUserId: "u-first", level: "reduced", repeatLevel: "restricted", reason: "test", log });
+check("a first flag puts them on reduced", (await lvl("u-first")) === "reduced");
+// limited by the scan 10 days ago, and back on normal since
+await User.updateOne(
+  { authUserId: "u-repeat" },
+  {
+    $set: { stakeLevel: "normal", stakeLevelBy: "system:review", stakeLevelAt: new Date(Date.now() - 3 * DAY) },
+    $push: {
+      accountActions: {
+        $each: [
+          { action: "stake_level", reason: "Reduced: test", by: "system:abuse", at: new Date(Date.now() - 10 * DAY) },
+          { action: "stake_level", reason: "Normal: back", by: "system:review", at: new Date(Date.now() - 3 * DAY) },
+        ],
+      },
+    },
+  },
+);
+await lowerStakeLevelAutomatically({ authUserId: "u-repeat", level: "reduced", repeatLevel: "restricted", reason: "test", log });
+const repeatUser = await User.findOne({ authUserId: "u-repeat" }).lean();
+check(
+  "flagged again within 30 days of an earlier limit → restricted, saying so",
+  repeatUser?.stakeLevel === "restricted" && Boolean(repeatUser.stakeLevelReason?.startsWith("Flagged again within 30 days")),
+);
+// limited 40 days ago: long enough ago that it's a first flag again
+await User.updateOne(
+  { authUserId: "u-old" },
+  { $push: { accountActions: { action: "stake_level", reason: "Reduced: test", by: "system:abuse", at: new Date(Date.now() - 40 * DAY) } } },
+);
+await lowerStakeLevelAutomatically({ authUserId: "u-old", level: "reduced", repeatLevel: "restricted", reason: "test", log });
+check("…but an earlier limit over 30 days ago doesn't count", (await lvl("u-old")) === "reduced");
+
+// eight days on the scan's limit: u-first is no longer flagged, u-still is
+for (const id of ["u-first", "u-still"]) {
+  await User.updateOne(
+    { authUserId: id },
+    { $set: { stakeLevel: "reduced", stakeLevelBy: "system:abuse", stakeLevelAt: new Date(Date.now() - 8 * DAY) } },
+  );
+}
+await AlertRecord.create({
+  key: "abuse:near:u-still",
+  kind: "abuse",
+  subject: "Buying near-certain sides: @still",
+  authUserIds: ["u-still"],
+  firstAt: new Date(Date.now() - 8 * DAY),
+  lastAt: new Date(),
+  status: "open",
+});
+// the desk limited u-desk by hand 8 days ago
+await User.updateOne(
+  { authUserId: "u-desk" },
+  { $set: { stakeLevel: "restricted", stakeLevelBy: "key:josh", stakeLevelAt: new Date(Date.now() - 8 * DAY) } },
+);
+const returned = await returnAutoStakeLevels(log);
+const firstUser = await User.findOne({ authUserId: "u-first" }).lean();
+check(
+  `after 7 days, no longer flagged → back to normal on its own, on their history (${returned} back)`,
+  firstUser?.stakeLevel === "normal" &&
+    firstUser.stakeLevelBy === "system:review" &&
+    (firstUser.accountActions ?? []).some((a) => a.reason === "Normal: 7 days on a limit, and no longer flagged"),
+);
+check("…someone still flagged stays where they are", (await lvl("u-still")) === "reduced");
+check("…and a level the desk set by hand is never touched", (await lvl("u-desk")) === "restricted");
+check("…nor one the scan set under 7 days ago", (await lvl("u-old")) === "reduced");
 
 console.log(`\n${passed} passed, ${failed} failed`);
 await app.close();

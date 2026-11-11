@@ -2,14 +2,18 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { EyeIcon as Eye, EyeSlashIcon as EyeSlash } from "@heroicons/react/24/outline";
 import { describeRate, useAdminMoney } from "@/lib/admin-money";
 
 /**
- * The desk's "₦ | $" switch, in the admin chrome. Dollars need a
- * conversion rate; until one is set the $ side stays greyed out, and
- * pressing it says why (a title alone never shows on a phone).
- * `explainMissingRate` keeps "Set a conversion rate first" on show
- * whenever the API says there is no rate — the sidebar has the room.
+ * The desk's "₦ | $" switch, in the admin chrome, with the eye that
+ * shows or hides every amount beside it. Amounts start hidden ("₦••••")
+ * — see lib/admin-money.ts.
+ *
+ * Dollars need a conversion rate; until one is set the $ side stays
+ * greyed out, and pressing it says why (a title alone never shows on a
+ * phone). `explainMissingRate` keeps "Set a conversion rate first" on
+ * show whenever the API says there is no rate — the sidebar has the room.
  */
 export function CurrencySwitch({
   align = "start",
@@ -42,35 +46,46 @@ export function CurrencySwitch({
 
   return (
     <div className={`flex flex-col gap-1 ${align === "end" ? "items-end" : "items-start"}`}>
-      <div
-        role="group"
-        aria-label="Show amounts in"
-        className="inline-flex shrink-0 rounded-md bg-element-2 p-0.5"
-      >
+      <div className="flex items-center gap-1.5">
+        <div
+          role="group"
+          aria-label="Show amounts in"
+          className="inline-flex shrink-0 rounded-md bg-element-2 p-0.5"
+        >
+          <button
+            type="button"
+            aria-pressed={money.currency === "ngn"}
+            title="Show amounts in naira"
+            onClick={() => {
+              money.setCurrency("ngn");
+              setPressed(false);
+            }}
+            className={segment(money.currency === "ngn")}
+          >
+            ₦
+          </button>
+          <button
+            type="button"
+            aria-pressed={money.currency === "usd"}
+            aria-disabled={!usdReady}
+            title={usdReady && money.fx ? `Show amounts in dollars — ${describeRate(money.fx)}` : reason}
+            onClick={() => {
+              if (usdReady) money.setCurrency("usd");
+              else setPressed(true);
+            }}
+            className={segment(money.currency === "usd", !usdReady)}
+          >
+            $
+          </button>
+        </div>
         <button
           type="button"
-          aria-pressed={money.currency === "ngn"}
-          title="Show amounts in naira"
-          onClick={() => {
-            money.setCurrency("ngn");
-            setPressed(false);
-          }}
-          className={segment(money.currency === "ngn")}
+          aria-label={money.hidden ? "Show amounts" : "Hide amounts"}
+          title={money.hidden ? "Show amounts" : "Hide amounts"}
+          onClick={() => money.setHidden(!money.hidden)}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md bg-element-2 text-secondary transition-colors hover:text-primary"
         >
-          ₦
-        </button>
-        <button
-          type="button"
-          aria-pressed={money.currency === "usd"}
-          aria-disabled={!usdReady}
-          title={usdReady && money.fx ? `Show amounts in dollars — ${describeRate(money.fx)}` : reason}
-          onClick={() => {
-            if (usdReady) money.setCurrency("usd");
-            else setPressed(true);
-          }}
-          className={segment(money.currency === "usd", !usdReady)}
-        >
-          $
+          {money.hidden ? <EyeSlash className="size-4" /> : <Eye className="size-4" />}
         </button>
       </div>
       {hint && !usdReady && (

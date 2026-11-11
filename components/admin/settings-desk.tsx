@@ -167,14 +167,14 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     label: "Reduced customers can stake",
     unit: "share",
     step: 5,
-    info: "A customer on the Reduced stake level gets this share of the stake limits above: the most per bet, and the most per market. At 25%, a ₦50,000 limit becomes ₦12,500. Customers flagged as moving in a pair with another account go on Reduced on their own; set anyone's level from their panel in Customers.",
+    info: "A customer on the Reduced stake level gets this share of the stake limits above: the most per bet, and the most per market. At 25%, a ₦50,000 limit becomes ₦12,500. Customers the abuse checks flag go on Reduced on their own, and come back to Normal 7 days later once they're no longer flagged. Their bet slip shows their own limit. Set anyone's level from their panel in Customers.",
   },
   restrictedStakePct: {
     key: "restrictedStakePct",
     label: "Restricted customers can stake",
     unit: "share",
     step: 1,
-    info: "A customer on the Restricted stake level gets this share of the stake limits. At 5%, a ₦50,000 limit becomes ₦2,500. Customers the abuse checks flag for winning more than the odds allow or buying near-certain sides go on Restricted on their own, at once; clearing their alert on Today puts them back. It can't be more than Reduced.",
+    info: "A customer on the Restricted stake level gets this share of the stake limits. At 5%, a ₦50,000 limit becomes ₦2,500. Customers the abuse checks flag again within 30 days of an earlier limit go on Restricted on their own; like Reduced, it lifts 7 days later once they're no longer flagged, or when you clear their alert on Today. It can't be more than Reduced.",
   },
   maxBookLossKobo: {
     key: "maxBookLossKobo",

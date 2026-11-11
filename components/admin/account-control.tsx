@@ -319,7 +319,9 @@ export function StakeLevelControl({ trader, onChanged }: { trader: TraderRow; on
       pct < 100 ? ` (${pct}% of the limits)` : ""
     }`;
   };
-  const auto = trader.stakeLevelBy?.startsWith("system:");
+  const auto = trader.stakeLevelBy === "system:abuse";
+  const returnsOn =
+    auto && trader.stakeLevelAt ? new Date(new Date(trader.stakeLevelAt).getTime() + 7 * 86_400_000).toISOString() : null;
 
   const save = async () => {
     if (!picked) return;
@@ -370,7 +372,8 @@ export function StakeLevelControl({ trader, onChanged }: { trader: TraderRow; on
         <p className="mt-1 text-xs text-secondary">
           {auto ? "Set automatically by the abuse checks" : `Set by ${trader.stakeLevelBy}`} on {when(trader.stakeLevelAt)}
           {trader.stakeLevelReason && <>: &ldquo;{trader.stakeLevelReason}&rdquo;</>}
-          {auto && ". Clearing their alert on Today puts them back on Normal."}
+          {returnsOn &&
+            `. Back to Normal on its own from ${when(returnsOn)} once the checks stop flagging them, or when you clear their alert on Today.`}
         </p>
       )}
       {picked && (
