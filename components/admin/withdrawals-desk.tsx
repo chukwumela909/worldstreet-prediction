@@ -16,6 +16,7 @@ import {
 } from "@/lib/admin-api";
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { showToast } from "@/lib/toast-store";
+import { LinkedGone, useLinkedItem } from "@/components/admin/linked-item";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 import { blockedNotice, when } from "@/components/admin/watch-parts";
 
@@ -41,6 +42,8 @@ const isReview = (r: WithdrawalCheckRow) => r.status === "review";
 
 export function WithdrawalsDesk() {
   const money = useAdminMoney();
+  // a withdrawal alert's link: ?customer=<authUserId> rings their card
+  const linked = useLinkedItem("customer");
   const [reloads, setReloads] = useState(0);
   const [loaded, setLoaded] = useState<{
     key: number;
@@ -100,6 +103,12 @@ export function WithdrawalsDesk() {
       </div>
 
       {fresh?.error && <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {fresh.error}</p>}
+      {linked.target && desk && !people.some((p) => p.authUserId === linked.target) && (
+        <LinkedGone>
+          The withdrawal you followed isn&rsquo;t waiting any more — someone has already approved or returned it.
+          {desk.settled.some((r) => r.authUserId === linked.target) && " It's under Recently settled below."}
+        </LinkedGone>
+      )}
       {!desk ? (
         <div className="mt-4 flex flex-col gap-3" aria-busy="true" aria-label="Loading withdrawals">
           {[0, 1].map((i) => (
@@ -164,6 +173,8 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
   const canApprove = p.verdict !== "suspended" && p.verdict !== "locked";
   const outKobo = p.paidOutKobo + p.heldKobo;
   const usd = (p.heldUsdMinor / 100).toFixed(2);
+  const linked = useLinkedItem("customer");
+  const isLinked = p.authUserId === linked.target;
 
   const approveAll = async () => {
     setBusy(true);
@@ -190,9 +201,10 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
 
   return (
     <li
+      {...linked.mark(isLinked)}
       className={`rounded-xl border p-4 shadow-card sm:p-5 ${
         p.verdict === "clear" ? "border-border bg-surface" : FLAG_TONE.danger.banner
-      }`}
+      } ${linked.ring(isLinked)}`}
     >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">

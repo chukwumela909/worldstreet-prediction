@@ -69,8 +69,11 @@ export default async function RootLayout({
               <SuspendedNotice />
             </SiteChrome>
             {children}
-            <SiteFooter />
-            <MobileDock />
+            {/* the admin desk is a full-height app with its own sidebar */}
+            <SiteChrome>
+              <SiteFooter />
+              <MobileDock />
+            </SiteChrome>
             <Toaster />
           </BookPricingProvider>
         </AuthProvider>

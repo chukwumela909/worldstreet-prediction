@@ -106,15 +106,40 @@ export interface AlertTestResult {
   emailError?: string;
   webhook: "sent" | "failed" | "not_configured";
   recipients: number;
+  /** Absent on an older API. */
+  urgent?: boolean;
   from: string | null;
 }
 
-/** Fire one alert through the real path to prove the config works. */
-export async function sendTestAlert(): Promise<AlertTestResult> {
-  const res = await apiFetch<{ data: AlertTestResult }>("/v1/admin/test-alert", {
-    method: "POST",
-  });
-  return res.data;
+/** The ways an alert travels: urgent pages someone, regular goes to the inbox, support to the support list. */
+export type AlertRoute = "urgent" | "regular" | "support";
+
+/** Fire one alert through the real path to prove that route works. */
+export async function sendTestAlert(as: AlertRoute = "regular"): Promise<AlertTestResult> {
+  return adminPost<AlertTestResult>("/v1/admin/test-alert", { as });
+}
+
+/** Where each route goes — counts, not addresses — and what's set up. */
+export interface AlertRoutes {
+  emailConfigured: boolean;
+  webhookConfigured: boolean;
+  linksConfigured: boolean;
+  /** e.g. "https://predict…/admin", or null without SITE_URL. */
+  exampleLink: string | null;
+  routes: {
+    regular: { recipients: number };
+    urgent: { recipients: number; pagingList: number };
+    support: { recipients: number; ownList: boolean };
+  };
+}
+
+export async function fetchAlertRoutes(): Promise<AlertRoutes> {
+  try {
+    const res = await apiFetch<{ data: AlertRoutes }>("/v1/admin/alert-routes");
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
 }
 
 /**
@@ -621,13 +646,21 @@ export interface ReversalNotice {
   letters?: ReversalLetter[];
 }
 
-async function adminPost<T>(path: string, body: unknown): Promise<T> {
+/** A desk write; the API's `data`, or its error unwrapped. */
+async function adminSend<T>(method: "POST" | "PUT" | "DELETE", path: string, body?: unknown): Promise<T> {
   try {
-    const res = await apiFetch<{ data: T }>(path, { method: "POST", body: JSON.stringify(body) });
+    const res = await apiFetch<{ data: T }>(path, {
+      method,
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+    });
     return res.data;
   } catch (err) {
     throw unwrapNestedError(err);
   }
+}
+
+function adminPost<T>(path: string, body: unknown): Promise<T> {
+  return adminSend<T>("POST", path, body);
 }
 
 /** Module-level, for useAdminResource. */
@@ -1313,6 +1346,10 @@ export interface SupportTicketRow {
   category: SupportCategory;
   subject: string;
   status: SupportStatus;
+  /** Who on the desk has it (their admin label); "" for nobody. Absent on an older API. */
+  assignee?: string;
+  /** When it should be answered by, while it waits on us; null otherwise. */
+  dueAt?: string | null;
   createdAt: string | null;
   lastMessageAt: string;
   messageCount: number;
@@ -1321,11 +1358,26 @@ export interface SupportTicketRow {
   preview: string;
 }
 
+export type SupportOwner = "anyone" | "mine" | "unassigned";
+
 export interface SupportInbox {
   tickets: SupportTicketRow[];
   total: number;
   counts: Record<SupportStatus, number>;
+  /** Of the requests waiting on us: the asker's, nobody's, and past their reply-by time. */
+  waiting?: { mine: number; unassigned: number; overdue: number };
+  /** The asking admin's label — `assignee === me` is "You". */
+  me?: string;
   mailConfigured: boolean;
+}
+
+/** A shared answer to a question that keeps coming; `{name}` and `{ref}` are filled in on use. */
+export interface SavedReply {
+  id: string;
+  title: string;
+  body: string;
+  updatedBy: string;
+  updatedAt: string | null;
 }
 
 export interface SupportMessage {
@@ -1349,10 +1401,12 @@ export interface SupportTicketDetail {
 
 export async function fetchSupportInbox(params: {
   status: SupportStatus | "all";
+  owner?: SupportOwner;
   search?: string;
   offset?: number;
 }): Promise<SupportInbox> {
   const qs = new URLSearchParams({ status: params.status });
+  if (params.owner && params.owner !== "anyone") qs.set("owner", params.owner);
   if (params.search) qs.set("search", params.search);
   if (params.offset) qs.set("offset", String(params.offset));
   try {
@@ -1383,6 +1437,30 @@ export const setSupportStatus = (ref: string, status: "open" | "closed") =>
   adminPost<{ ticket: SupportTicketDetail["ticket"] }>(`/v1/admin/support/${encodeURIComponent(ref)}/status`, {
     status,
   });
+
+/** Take a request (from anyone), or put it back for someone else. */
+export const assignSupport = (ref: string, to: "me" | "nobody") =>
+  adminPost<{ ticket: SupportTicketDetail["ticket"] }>(`/v1/admin/support/${encodeURIComponent(ref)}/assign`, { to });
+
+const SAVED_REPLIES = "/v1/admin/support/replies";
+
+export async function fetchSavedReplies(): Promise<SavedReply[]> {
+  try {
+    const res = await apiFetch<{ data: { replies: SavedReply[] } }>(SAVED_REPLIES);
+    return res.data.replies;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
+}
+
+export const createSavedReply = (reply: { title: string; body: string }) =>
+  adminSend<{ reply: SavedReply }>("POST", SAVED_REPLIES, reply);
+
+export const updateSavedReply = (id: string, reply: { title: string; body: string }) =>
+  adminSend<{ reply: SavedReply }>("PUT", `${SAVED_REPLIES}/${encodeURIComponent(id)}`, reply);
+
+export const deleteSavedReply = (id: string) =>
+  adminSend<{ deleted: boolean }>("DELETE", `${SAVED_REPLIES}/${encodeURIComponent(id)}`);
 
 /* ------------------------------------------------------------------ */
 /* Abuse watch                                                         */

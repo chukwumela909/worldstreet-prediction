@@ -18,6 +18,8 @@ process.env.ADMIN_ACCESS_KEYS = `josh:${KEY}`;
 process.env.RESEND_API_KEY = "re_test";
 process.env.ALERT_EMAIL_FROM = "WorldStreet <alerts@worldstreetgold.test>";
 process.env.ALERT_EMAIL_TO = "desk@worldstreetgold.test";
+process.env.SUPPORT_EMAIL_TO = "support@worldstreetgold.test";
+process.env.SITE_URL = "https://predict.worldstreetgold.test";
 
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
@@ -74,7 +76,7 @@ globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) =>
   return realFetch(input, init);
 }) as typeof fetch;
 
-const admin = (method: "GET" | "POST", url: string, payload?: unknown) =>
+const admin = (method: "GET" | "POST" | "PUT" | "DELETE", url: string, payload?: unknown) =>
   app.inject({ method, url, headers: { "x-admin-key": KEY }, ...(payload !== undefined && { payload: payload as object }) });
 
 async function ownMarket(title: string) {
@@ -235,13 +237,28 @@ const adaTicket = await openTicket(ada, { category: "bets", subject: "Bet not se
 check("each customer sees only their own", (await listMyTickets("u-ada")).length === 1 && (await listMyTickets("u-bola")).length === 5);
 
 /* ---------------- support: the desk ---------------- */
-const inbox = (await admin("GET", "/v1/admin/support")).json() as {
-  data: { tickets: { ref: string; preview: string; lastFrom: string }[]; counts: Record<string, number>; total: number };
+type Row = { ref: string; preview: string; lastFrom: string; assignee: string; dueAt: string | null };
+type Inbox = {
+  data: {
+    tickets: Row[];
+    counts: Record<string, number>;
+    total: number;
+    waiting: { mine: number; unassigned: number; overdue: number };
+    me: string;
+  };
 };
+const inbox = (await admin("GET", "/v1/admin/support")).json() as Inbox;
+const hoursDue = (row: Row) => (Date.parse(row.dueAt!) - Date.now()) / 3_600_000;
 check(
-  "the desk's inbox lists every waiting request, newest first",
-  inbox.data.total === 6 && inbox.data.counts.open === 6 && inbox.data.tickets[0]!.ref === adaTicket.ref &&
-    inbox.data.tickets[0]!.preview.includes("election"),
+  "the desk's inbox lists every waiting request, soonest reply-by first: money (1h), then a bet (4h)",
+  inbox.data.total === 6 && inbox.data.counts.open === 6 &&
+    inbox.data.tickets[0]!.ref === first.ref && hoursDue(inbox.data.tickets[0]!) > 0.9 && hoursDue(inbox.data.tickets[0]!) <= 1 &&
+    inbox.data.tickets[1]!.ref === adaTicket.ref && inbox.data.tickets[1]!.preview.includes("election"),
+);
+check(
+  "nobody owns them yet, and the desk knows who's asking",
+  inbox.data.waiting.unassigned === 6 && inbox.data.waiting.mine === 0 && inbox.data.waiting.overdue === 0 &&
+    inbox.data.me === "key:josh" && inbox.data.tickets.every((t) => t.assignee === ""),
 );
 const one = (await admin("GET", `/v1/admin/support/${first.ref}`)).json() as {
   data: { ticket: { messages: unknown[]; email: string }; account: { suspendedAt: string | null; balanceKobo: number; bets: number } };
@@ -269,10 +286,51 @@ check(
   replied.data.emailed && replyMail.to[0] === "bola@example.test" && replyMail.subject === `Re: Withdrawal stuck [${first.ref}]` &&
     replyMail.text.includes("wallet team"),
 );
+check(
+  "…with a link back to their Support page",
+  replyMail.text.includes("https://predict.worldstreetgold.test/support"),
+);
 const mine = (await listMyTickets("u-bola")).find((t) => t.ref === first.ref)!;
 check(
-  "the customer sees the reply, but not who on the desk wrote it",
-  mine.messages.length === 2 && mine.status === "answered" && !("by" in mine.messages[1]!),
+  "the customer sees the reply, but not who on the desk wrote it (nor who owns it)",
+  mine.messages.length === 2 && mine.status === "answered" && !("by" in mine.messages[1]!) && !("assignee" in mine),
+);
+const owned = ((await admin("GET", `/v1/admin/support/${first.ref}`)).json() as { data: { ticket: { assignee: string; dueAt: string | null } } }).data.ticket;
+check("whoever replies first owns it, and it's no longer due", owned.assignee === "key:josh" && owned.dueAt === null);
+
+/* ---------------- support: owners ---------------- */
+const putBack = (await admin("POST", `/v1/admin/support/${first.ref}/assign`, { to: "nobody" })).json() as { data: { ticket: { assignee: string } } };
+check("a request can be put back for someone else", putBack.data.ticket.assignee === "");
+const taken = (await admin("POST", `/v1/admin/support/${adaTicket.ref}/assign`, { to: "me" })).json() as { data: { ticket: { assignee: string } } };
+check("…or taken with a click", taken.data.ticket.assignee === "key:josh");
+const mineView = (await admin("GET", "/v1/admin/support?owner=mine")).json() as Inbox;
+const nobodysView = (await admin("GET", "/v1/admin/support?owner=unassigned")).json() as Inbox;
+check(
+  "Mine and Unassigned filter the waiting inbox",
+  mineView.data.total === 1 && mineView.data.tickets[0]!.ref === adaTicket.ref &&
+    nobodysView.data.total === 4 && mineView.data.waiting.mine === 1 && mineView.data.waiting.unassigned === 4,
+);
+
+/* ---------------- support: saved replies ---------------- */
+type Saved = { id: string; title: string; body: string; updatedBy: string };
+const made = (await admin("POST", "/v1/admin/support/replies", {
+  title: "Withdrawal delays",
+  body: "Hi {name}, your withdrawal ({ref}) is on its way.",
+})).json() as { data: { reply: Saved } };
+check("a saved reply can be added", made.data.reply.title === "Withdrawal delays" && made.data.reply.updatedBy === "key:josh");
+const edited = (await admin("PUT", `/v1/admin/support/replies/${made.data.reply.id}`, {
+  title: "Withdrawal delays",
+  body: "Hi {name}, your withdrawal ({ref}) is on its way — usually within the hour.",
+})).json() as { data: { reply: Saved } };
+check("…edited", edited.data.reply.body.includes("within the hour"));
+const savedList = (await admin("GET", "/v1/admin/support/replies")).json() as { data: { replies: Saved[] } };
+check("…and listed for the whole desk", savedList.data.replies.length === 1 && savedList.data.replies[0]!.id === made.data.reply.id);
+await admin("DELETE", `/v1/admin/support/replies/${made.data.reply.id}`);
+const afterDelete = (await admin("GET", "/v1/admin/support/replies")).json() as { data: { replies: Saved[] } };
+check("…and deleted", afterDelete.data.replies.length === 0);
+check(
+  "a saved reply needs a name and a body (400)",
+  (await admin("POST", "/v1/admin/support/replies", { title: "", body: "" })).statusCode === 400,
 );
 
 const closed = (await admin("POST", `/v1/admin/support/${adaTicket.ref}/reply`, { message: "Settled now — sorry for the wait.", close: true })).json() as {
@@ -282,6 +340,9 @@ check("replying can close it at the same time", closed.data.ticket.status === "c
 const reopened = await writeAgain("u-ada", adaTicket.ref, "Thanks! One more question about the payout.");
 check("the customer writing again reopens it", reopened.status === "open" && reopened.messages.length === 3);
 check("nobody can write into someone else's request", (await codeOf(() => writeAgain("u-bola", adaTicket.ref, "hello"))) === "TICKET_NOT_FOUND");
+
+const reopenedDue = ((await admin("GET", `/v1/admin/support/${adaTicket.ref}`)).json() as { data: { ticket: { dueAt: string | null } } }).data.ticket.dueAt;
+check("…with a fresh reply-by time (a bet: 4 hours)", reopenedDue !== null && Math.abs(Date.parse(reopenedDue) - Date.now() - 4 * 3_600_000) < 60_000);
 
 const shut = await admin("POST", `/v1/admin/support/${adaTicket.ref}/status`, { status: "closed" });
 check("the desk can close a request", (shut.json() as { data: { ticket: { status: string } } }).data.ticket.status === "closed");
@@ -295,8 +356,11 @@ check("a closed request frees a slot for a new one", (await codeOf(() => openTic
 
 /* ---------------- the desk is emailed ---------------- */
 console.log("support alerts");
-const deskMail = () => sent.filter((m) => m.to.includes("desk@worldstreetgold.test"));
+const deskMail = () => sent.filter((m) => m.to.includes("support@worldstreetgold.test"));
+const alertListMail = () => sent.filter((m) => m.to.includes("desk@worldstreetgold.test"));
 const beforeAlerts = deskMail().length;
+const beforeAlertList = alertListMail().length;
+const beforeAll = sent.length;
 const fresh = await openTicket(
   ada,
   { category: "money", subject: "Withdrawal keeps failing", message: "I can't convert my credit to dollars since morning." },
@@ -304,11 +368,22 @@ const fresh = await openTicket(
 );
 const newAlert = deskMail()[beforeAlerts];
 check(
-  "a new request emails the admins, with who, what and the message",
+  "a new request emails the support list, with who, what, the message and when to reply by",
   deskMail().length === beforeAlerts + 1 &&
-    newAlert!.subject === `[Worldstreet Local] New support request ${fresh.ref}: Withdrawal keeps failing` &&
+    newAlert!.subject === `[Worldstreet Local · Support] New support request ${fresh.ref}: Withdrawal keeps failing` &&
     newAlert!.text.includes("@ada (ada@example.test)") && newAlert!.text.includes("Deposits & withdrawals") &&
-    newAlert!.text.includes("since morning") && newAlert!.text.includes("Admin → Support"),
+    newAlert!.text.includes("since morning") && newAlert!.text.includes("within an hour"),
+);
+check(
+  "…with a link that opens that request on the desk",
+  newAlert!.text.includes(`Reply: https://predict.worldstreetgold.test/admin/customers/support?ref=${fresh.ref}`),
+);
+check("…and not the alert list, so a question never pages anyone", alertListMail().length === beforeAlertList);
+const ack = sent.slice(beforeAll).find((m) => m.to.includes("ada@example.test"));
+check(
+  "the customer gets a \"we've got it\" email with their number, when to expect a reply, and their Support page",
+  ack !== undefined && ack.subject === `We've got your request [${fresh.ref}]` && ack.text.includes("within an hour") &&
+    ack.text.includes("https://predict.worldstreetgold.test/support"),
 );
 await writeAgain("u-ada", fresh.ref, "Still failing, please help.", log);
 check("more messages while it's still waiting don't email again", deskMail().length === beforeAlerts + 1);
@@ -316,9 +391,9 @@ await admin("POST", `/v1/admin/support/${fresh.ref}/reply`, { message: "We're on
 await writeAgain("u-ada", fresh.ref, "Thanks — any update?", log);
 const backAlert = deskMail()[beforeAlerts + 1];
 check(
-  "a reply on an answered request emails them again",
+  "a reply on an answered request emails them again, naming who has it",
   deskMail().length === beforeAlerts + 2 && backAlert!.subject.includes(`Customer wrote again on ${fresh.ref}`) &&
-    backAlert!.text.includes("any update?"),
+    backAlert!.text.includes("any update?") && backAlert!.text.includes("owner: key:josh"),
 );
 check("customers never get these", !deskMail().some((m) => m.to.includes("ada@example.test")));
 

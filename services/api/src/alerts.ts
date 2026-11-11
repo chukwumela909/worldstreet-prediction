@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { FastifyBaseLogger } from "fastify";
 import { config } from "./config.js";
 import { ApiError } from "./errors.js";
+import { deskLine, deskLink, siteUrl, type DeskLink } from "./links.js";
 import { AlertRecord, AlertState, User, type AlertKind } from "./models.js";
 
 /**
@@ -25,6 +26,21 @@ import { AlertRecord, AlertState, User, type AlertKind } from "./models.js";
  * row per condition counting each firing — emailed or not — so the desk
  * can see what's still happening and mark it settled. Support requests
  * aren't kept here: the Support inbox is their record.
+ *
+ * Who hears about what:
+ *  - every system alert → ALERT_EMAIL_TO;
+ *  - urgent ones (a fault — always — and whatever a caller marks urgent:
+ *    a market at its loss limit, bets being refused, a withdrawal the
+ *    wallet never confirmed) → ALERT_URGENT_EMAIL_TO as well, which is
+ *    where a PagerDuty address goes so they call or text the person on
+ *    duty;
+ *  - support requests → SUPPORT_EMAIL_TO only, so they never page;
+ *  - the desk's test alerts (Admin → Alert test) go where the real thing
+ *    would — urgent, regular or support — so each route can be proved.
+ *
+ * Every email and webhook carries a link to the exact thing on the
+ * desk (links.ts): the support request, the customer's withdrawals, or
+ * the alert's own card on Today with the fix on it.
  */
 
 const DELIVERY_TIMEOUT_MS = 5_000;
@@ -42,6 +58,9 @@ export interface AlertDelivery {
   email: "sent" | "failed" | "not_configured";
   emailError?: string;
   webhook: "sent" | "failed" | "not_configured";
+  /** How many addresses the email went to (0 when throttled). */
+  recipients: number;
+  urgent: boolean;
 }
 
 export interface AlertOptions {
@@ -50,10 +69,17 @@ export interface AlertOptions {
    * `overdue:<eventId>`. Omit to deliver unconditionally.
    */
   throttleKey?: string;
-  /** The email's last line: where on the desk to deal with it. */
-  footer?: string;
   /** What it's about, for the Alerts tab; "support" isn't kept there. */
   kind?: AlertKind | "support";
+  /**
+   * Page whoever is on duty (ALERT_URGENT_EMAIL_TO) as well as the inbox.
+   * A fault always does; everything else only when the caller says so.
+   */
+  urgent?: boolean;
+  /** Where the desk deals with it. Default: the alert's own card on Today. */
+  link?: DeskLink;
+  /** The verb before the link — "Reply", "Approve or reject it". Default "Open it". */
+  action?: string;
   /** The market it's about, when there's one — what the desk's fix acts on. */
   eventId?: string;
   marketId?: string;
@@ -67,15 +93,17 @@ export async function sendAlert(
   detail: Record<string, unknown>,
   opts: AlertOptions = {},
 ): Promise<AlertDelivery> {
-  const { throttleKey, footer = "Open the settlement queue to clear it: /admin" } = opts;
-  log.warn({ alert: subject, ...detail }, "settlement alert");
-  await recordAlert(log, subject, detail, opts);
+  const { throttleKey } = opts;
+  const kind = opts.kind ?? "other";
+  const urgent = kind === "fault" || opts.urgent === true;
+  log.warn({ alert: subject, urgent, ...detail }, "settlement alert");
+  const recordId = await recordAlert(log, subject, detail, opts);
 
   const decision = throttleKey
     ? await claimAlert(log, throttleKey, subject)
     : { send: true, suppressedSinceLast: 0 };
   if (!decision.send) {
-    return { throttled: true, email: "not_configured", webhook: "not_configured" };
+    return { throttled: true, email: "not_configured", webhook: "not_configured", recipients: 0, urgent };
   }
 
   const body =
@@ -85,12 +113,25 @@ export async function sendAlert(
           alsoSeen: `${decision.suppressedSinceLast} more times since the last alert`,
         }
       : detail;
+  const link = opts.link ?? (recordId ? deskLink.alert(recordId) : deskLink.today());
+  const to = recipientsFor(kind, urgent);
 
   const [email, webhook] = await Promise.all([
-    emailAlert(log, subject, body, footer, opts.kind ?? "other"),
-    webhookAlert(log, subject, body),
+    emailAlert(log, subject, body, { kind, urgent, to, line: deskLine(opts.action ?? "Open it", link) }),
+    webhookAlert(log, subject, body, { kind, urgent, link: siteUrl(link.path) }),
   ]);
-  return { throttled: false, ...email, webhook };
+  return { throttled: false, ...email, webhook, recipients: to.length, urgent };
+}
+
+/** Each list once, even when an address is on two of them. A test goes where the real thing would. */
+export function recipientsFor(kind: AlertKind | "support", urgent: boolean): string[] {
+  const lists =
+    kind === "support"
+      ? [config.supportEmailTo]
+      : urgent
+        ? [config.alertEmailTo, config.alertUrgentEmailTo]
+        : [config.alertEmailTo];
+  return [...new Set(lists.flat())];
 }
 
 /**
@@ -138,20 +179,30 @@ async function claimAlert(
   }
 }
 
-function isEmailConfigured(): boolean {
-  return Boolean(
-    config.RESEND_API_KEY && config.ALERT_EMAIL_FROM && config.alertEmailTo.length,
-  );
+interface EmailRoute {
+  kind: AlertKind | "support";
+  urgent: boolean;
+  to: string[];
+  /** "Open it: https://…" — where on the desk to deal with it. */
+  line: string;
+}
+
+/** "[Worldstreet Local · URGENT] Market at its loss limit" — a phone's mail rules can sort on it. */
+function subjectTag(route: EmailRoute): string {
+  if (route.kind === "support") return "[Worldstreet Local · Support]";
+  const tags = [route.urgent && "URGENT", route.kind === "test" && "Test"].filter(Boolean);
+  return `[Worldstreet Local${tags.map((t) => ` · ${t}`).join("")}]`;
 }
 
 async function emailAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
-  footer: string,
-  kind: AlertKind | "support",
+  route: EmailRoute,
 ): Promise<{ email: AlertDelivery["email"]; emailError?: string }> {
-  if (!isEmailConfigured()) return { email: "not_configured" };
+  if (!config.RESEND_API_KEY || !config.ALERT_EMAIL_FROM || route.to.length === 0) {
+    return { email: "not_configured" };
+  }
   try {
     const res = await fetch(RESEND_ENDPOINT, {
       method: "POST",
@@ -161,9 +212,9 @@ async function emailAlert(
       },
       body: JSON.stringify({
         from: config.ALERT_EMAIL_FROM,
-        to: config.alertEmailTo,
-        subject: `[Worldstreet Local] ${subject}`,
-        text: emailBody(subject, detail, footer, kind),
+        to: route.to,
+        subject: `${subjectTag(route)} ${subject}`,
+        text: emailBody(subject, detail, route),
       }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
     });
@@ -210,17 +261,16 @@ const KIND_NOTE: Record<AlertKind | "support", string> = {
   support: "Support request. A customer is waiting for a reply.",
 };
 
-/** Plain text — these are read on a phone at an awkward hour. */
-function emailBody(
-  subject: string,
-  detail: Record<string, unknown>,
-  footer: string,
-  kind: AlertKind | "support",
-): string {
+/**
+ * Plain text — these are read on a phone at an awkward hour, so the
+ * link to the thing itself comes straight after what it is, above the
+ * details.
+ */
+function emailBody(subject: string, detail: Record<string, unknown>, route: EmailRoute): string {
   const lines = Object.entries(detail).map(
     ([key, value]) => `${key}: ${format(value)}`,
   );
-  return [subject, `Type: ${KIND_NOTE[kind]}`, "", ...lines, "", footer].join("\n");
+  return [subject, `Type: ${KIND_NOTE[route.kind]}`, route.line, "", ...lines].join("\n");
 }
 
 function format(value: unknown): string {
@@ -233,6 +283,7 @@ async function webhookAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
+  extra: { kind: AlertKind | "support"; urgent: boolean; link: string | null },
 ): Promise<AlertDelivery["webhook"]> {
   if (!config.ALERT_WEBHOOK_URL) return "not_configured";
   try {
@@ -242,6 +293,7 @@ async function webhookAlert(
       body: JSON.stringify({
         subject,
         detail,
+        ...extra,
         service: "worldstreet-prediction-api",
       }),
       signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
@@ -256,18 +308,22 @@ async function webhookAlert(
 
 /* ---------------- the desk's record ---------------- */
 
-/** Keep this firing on its condition's row, reopening it if it had been settled. */
+/**
+ * Keep this firing on its condition's row, reopening it if it had been
+ * settled; the row's id, which the email links to (null for support,
+ * or when the write failed).
+ */
 async function recordAlert(
   log: FastifyBaseLogger,
   subject: string,
   detail: Record<string, unknown>,
   opts: AlertOptions,
-): Promise<void> {
-  if (opts.kind === "support") return;
+): Promise<string | null> {
+  if (opts.kind === "support") return null;
   const kind = opts.kind ?? "other";
   const now = new Date();
   try {
-    await AlertRecord.updateOne(
+    const row = await AlertRecord.findOneAndUpdate(
       // an unkeyed alert is a one-off: a row of its own
       { key: opts.throttleKey ?? `${kind}:${randomUUID()}` },
       {
@@ -284,11 +340,13 @@ async function recordAlert(
         $setOnInsert: { firstAt: now },
         $inc: { count: 1 },
       },
-      { upsert: true },
-    );
+      { upsert: true, returnDocument: "after", projection: { _id: 1 } },
+    ).lean();
+    return row ? String(row._id) : null;
   } catch (err) {
     // the record is for the desk; never let it stop the alert itself
     log.error({ err, subject }, "could not record alert");
+    return null;
   }
 }
 

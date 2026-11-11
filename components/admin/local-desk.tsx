@@ -13,11 +13,9 @@ import {
 import { bookHref } from "@/lib/book";
 import { ApiError } from "@/lib/api-client";
 import {
-  sendTestAlert,
   setFxRate,
   settleMarket,
   voidMarket,
-  type AlertTestResult,
   type Attention,
   type QueueEvent,
   type QueueMarket,
@@ -278,67 +276,21 @@ export function RecentSettlements({ items }: { items: SettlementRecord[] | null 
 /* ---------- alert delivery check ---------- */
 
 /**
- * Alerts only fire when a market is stuck, so the mail configuration
- * would otherwise go untested until the moment it's needed. This sends
- * one through the real path and says exactly what came back — including
- * Resend's own reason when it refuses.
+ * Alerts only fire when something goes wrong, so the mail set-up would
+ * otherwise go untested until the moment it's needed. Testing lives on
+ * its own page now — one card per route (urgent, regular, support), each
+ * sent through the real path (alert-test-desk.tsx); this is the way there.
  */
 export function TestAlertButton() {
-  const [pending, setPending] = useState(false);
-  const [result, setResult] = useState<AlertTestResult | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const run = async () => {
-    if (pending) return;
-    setPending(true);
-    setError(null);
-    setResult(null);
-    try {
-      setResult(await sendTestAlert());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send");
-    } finally {
-      setPending(false);
-    }
-  };
-
   return (
-    <div className="flex items-center gap-2">
-      {result && (
-        <p
-          className={`max-w-[420px] text-[13px] font-semibold ${
-            result.email === "sent" ? "text-yes" : "text-no"
-          }`}
-        >
-          {describeAlertResult(result)}
-        </p>
-      )}
-      {error && <p className="text-[13px] font-semibold text-no">{error}</p>}
-      <button
-        onClick={() => void run()}
-        disabled={pending}
-        title="Send a test alert to the configured recipients"
-        className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary disabled:opacity-40"
-      >
-        {pending ? (
-          <Loader2 className="size-3.5 animate-spin" />
-        ) : (
-          <Mail className="size-3.5" />
-        )}
-        Test alert
-      </button>
-    </div>
+    <Link
+      href="/admin/alert-test"
+      className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
+    >
+      <Mail className="size-3.5" />
+      Test alerts
+    </Link>
   );
-}
-
-function describeAlertResult(r: AlertTestResult): string {
-  if (r.email === "sent") {
-    return `Sent to ${r.recipients} recipient${r.recipients === 1 ? "" : "s"} — check the inbox.`;
-  }
-  if (r.email === "not_configured") {
-    return "No email configured on the API (RESEND_API_KEY, ALERT_EMAIL_FROM, ALERT_EMAIL_TO).";
-  }
-  return `Resend refused it — ${r.emailError ?? "see the API logs"}`;
 }
 
 /* ---------- FX rate ---------- */

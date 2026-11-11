@@ -37,7 +37,15 @@ export async function checkRiskAlerts(log: FastifyBaseLogger): Promise<number> {
           ? "New bets that push it past the limit are already being refused. Reprice the market (our own markets) or raise Maximum loss per market in admin Settings."
           : "Reprice the market toward the side with less money on it (our own markets), or raise Maximum loss per market in admin Settings.",
       },
-      { throttleKey: `risk:limit:${flag.level}:${flag.marketId}`, kind: "risk", eventId: flag.eventId, marketId: flag.marketId, footer: "Deal with it in the admin desk: Admin → Alerts." },
+      {
+        throttleKey: `risk:limit:${flag.level}:${flag.marketId}`,
+        kind: "risk",
+        // at the limit, bets are already being refused: page; nearing it can wait for the inbox
+        urgent: critical,
+        eventId: flag.eventId,
+        marketId: flag.marketId,
+        action: "Deal with it",
+      },
     );
     raised += 1;
   }
@@ -62,9 +70,10 @@ export async function checkRiskAlerts(log: FastifyBaseLogger): Promise<number> {
       {
         throttleKey: "risk:book-worst",
         kind: "risk",
+        urgent: true,
         // the fix starts with the market carrying the most downside
         ...(risk.worstMarket ? { eventId: risk.worstMarket.eventId, marketId: risk.worstMarket.marketId } : {}),
-        footer: "Deal with it in the admin desk: Admin → Alerts.",
+        action: "Deal with it",
       },
     );
     raised += 1;

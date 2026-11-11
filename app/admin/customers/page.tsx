@@ -1,5 +1,5 @@
 import { Suspense } from "react";
-import { TradersDesk } from "@/components/admin/traders-desk";
+import { PeopleDesk } from "@/components/admin/traders-desk";
 
 /**
  * The people: "Active traders" (everyone who has placed a bet) and "All
@@ -9,7 +9,7 @@ import { TradersDesk } from "@/components/admin/traders-desk";
 export default function AdminCustomersPage() {
   return (
     <Suspense fallback={null}>
-      <TradersDesk />
+      <PeopleDesk />
     </Suspense>
   );
 }

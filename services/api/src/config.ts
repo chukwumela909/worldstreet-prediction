@@ -62,8 +62,27 @@ const envSchema = z.object({
   // go out; the sender's domain has to be verified in Resend first.
   RESEND_API_KEY: z.string().default(""),
   ALERT_EMAIL_FROM: z.string().default(""),
-  /** Comma-separated recipients. */
+  /** Comma-separated recipients of every system alert. */
   ALERT_EMAIL_TO: z.string().default(""),
+  /**
+   * Who else gets the urgent alerts (money at risk now, a fault, a
+   * withdrawal the wallet never confirmed), comma-separated — e.g. a
+   * PagerDuty service's email address, so those call or text whoever is
+   * on duty. Everything else stays in the inbox. Empty: no paging.
+   */
+  ALERT_URGENT_EMAIL_TO: z.string().default(""),
+  /**
+   * Who hears about customers' support requests, comma-separated. Kept
+   * apart from the alerts so a routine question never pages anyone.
+   * Empty: ALERT_EMAIL_TO.
+   */
+  SUPPORT_EMAIL_TO: z.string().default(""),
+  /**
+   * The web app's address, e.g. "https://predict.worldstreetgold.com".
+   * Alert and support emails link straight to the request, withdrawal
+   * or alert on the admin desk; without it they name the page instead.
+   */
+  SITE_URL: z.string().default(""),
   /**
    * Sender for notices to customers (a refunded bet), e.g.
    * "WorldStreet <support@worldstreetgold.com>". Falls back to
@@ -138,6 +157,8 @@ export const config = {
   clerkAuthorizedParties: splitList(parsed.data.CLERK_AUTHORIZED_PARTIES),
   corsOrigins: splitList(parsed.data.CORS_ORIGINS),
   alertEmailTo: splitList(parsed.data.ALERT_EMAIL_TO),
+  alertUrgentEmailTo: splitList(parsed.data.ALERT_URGENT_EMAIL_TO),
+  supportEmailTo: splitList(parsed.data.SUPPORT_EMAIL_TO || parsed.data.ALERT_EMAIL_TO),
   adminAccessKeys: parseAdminKeys(parsed.data.ADMIN_ACCESS_KEYS),
 };
 

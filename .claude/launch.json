@@ -20,6 +20,12 @@
       "port": 3004
     },
     {
+      "name": "admin-preview-3006",
+      "runtimeExecutable": "cmd",
+      "runtimeArgs": ["/c", "set NEXT_PUBLIC_API_URL=http://127.0.0.1:4100&& npx next dev -p 3006"],
+      "port": 3006
+    },
+    {
       "name": "prod-3005",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "start", "--", "-p", "3005"],

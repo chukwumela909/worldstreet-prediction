@@ -55,7 +55,7 @@ export function AdminUnlock({
           <span className="mx-auto grid size-11 place-items-center rounded-full bg-element-2">
             <Key className="size-5 text-accent-ink" />
           </span>
-          <h1 className="mt-4 text-xl font-semibold">Worldstreet Admin</h1>
+          <h1 className="mt-4 text-xl font-semibold">WS Predict Admin</h1>
           <p className="mt-2 text-sm text-secondary">
             Enter your admin access key to open the desk.
           </p>

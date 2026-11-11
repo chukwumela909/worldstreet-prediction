@@ -146,6 +146,18 @@ export const SUPPORT_CATEGORIES = ["money", "bets", "account", "other"] as const
 export type SupportCategory = (typeof SUPPORT_CATEGORIES)[number];
 
 /**
+ * How soon the desk aims to answer, by what it's about — money first.
+ * A request's `dueAt` is set from this whenever it starts waiting on us;
+ * the customer's "we've got it" email quotes the same figure.
+ */
+export const SUPPORT_REPLY_HOURS: Record<SupportCategory, number> = {
+  money: 1,
+  bets: 4,
+  account: 24,
+  other: 24,
+};
+
+/**
  * open     — waiting on us (new, or the customer wrote again)
  * answered — we replied, waiting on the customer
  * closed   — done; the customer writing again reopens it
@@ -182,6 +194,17 @@ const supportTicketSchema = new Schema(
     messages: { type: [supportMessageSchema], default: [] },
     /** Last message either way — both inboxes sort on it. */
     lastMessageAt: { type: Date, required: true, index: true },
+    /**
+     * Who on the desk has it (their admin label), so two people never
+     * answer the same customer. Taken with a click, or by replying first.
+     */
+    assignee: { type: String, default: "", index: true },
+    /**
+     * When it should be answered by: set as it starts waiting on us
+     * (opened, or the customer writing again after an answer), from
+     * SUPPORT_REPLY_HOURS. The waiting inbox sorts on it, soonest first.
+     */
+    dueAt: { type: Date, default: null, index: true },
   },
   { timestamps: true },
 );
@@ -193,3 +216,25 @@ export type ISupportTicket = InferSchemaType<typeof supportTicketSchema> & {
 export const SupportTicket: Model<ISupportTicket> =
   (mongoose.models.SupportTicket as Model<ISupportTicket>) ??
   mongoose.model<ISupportTicket>("SupportTicket", supportTicketSchema);
+
+/**
+ * A saved reply the whole desk shares — the answer to a question that
+ * keeps coming. `{name}` and `{ref}` in the body are filled in with the
+ * customer's name and the request number when it's used.
+ */
+const supportReplySchema = new Schema(
+  {
+    title: { type: String, required: true },
+    body: { type: String, required: true },
+    updatedBy: { type: String, default: "" },
+  },
+  { timestamps: true },
+);
+
+export type ISupportReply = InferSchemaType<typeof supportReplySchema> & {
+  _id: mongoose.Types.ObjectId;
+};
+
+export const SupportReply: Model<ISupportReply> =
+  (mongoose.models.SupportReply as Model<ISupportReply>) ??
+  mongoose.model<ISupportReply>("SupportReply", supportReplySchema);

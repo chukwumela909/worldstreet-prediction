@@ -25,6 +25,7 @@ import { AccountControl } from "@/components/admin/account-control";
 import { BookOverview } from "@/components/admin/book-overview";
 import { BookRiskStrip } from "@/components/admin/book-risk";
 import { ATTENTION, MarketRow } from "@/components/admin/local-desk";
+import { LinkedGone, useLinkedItem } from "@/components/admin/linked-item";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
@@ -63,6 +64,8 @@ const KIND_LABEL: Record<AlertKind, string> = {
 };
 
 export function TodayDesk() {
+  // an alert email's link: /admin?alert=<id> rings that alert's card
+  const linked = useLinkedItem("alert");
   const [showCleared, setShowCleared] = useState(false);
   const [reloads, setReloads] = useState(0);
   const [loaded, setLoaded] = useState<{
@@ -146,6 +149,14 @@ export function TodayDesk() {
       <BookOverview reloadKey={reloads} />
 
       {fresh?.error && <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {fresh.error}</p>}
+      {linked.target && data && !showCleared && !data.alerts.some((a) => a.id === linked.target) && (
+        <LinkedGone>
+          The alert you followed has already been cleared — nothing left to do on it.{" "}
+          <button type="button" onClick={() => setShowCleared(true)} className="font-semibold text-primary underline">
+            See cleared alerts
+          </button>
+        </LinkedGone>
+      )}
       {!data ? (
         <div className="mt-4 flex flex-col gap-2" aria-busy="true" aria-label="Loading alerts">
           {[0, 1, 2].map((i) => (
@@ -297,6 +308,8 @@ function MarketCard({ task, onChanged }: { task: MarketTask; onChanged: () => vo
   const sourceSaid = unmatched ? text(unmatched.detail.resolvedOutcome) : "";
   // the queue's own reason, on every flagged event (the only one when no alert came)
   const flag = q?.attention ? ATTENTION[q.attention] : null;
+  const linked = useLinkedItem("alert");
+  const isLinked = task.alerts.some((a) => a.id === linked.target);
 
   const closeAlerts = async () => {
     await Promise.all(task.alerts.map((a) => settleAlert(a.id, "Market settled").catch(() => undefined)));
@@ -304,7 +317,10 @@ function MarketCard({ task, onChanged }: { task: MarketTask; onChanged: () => vo
   };
 
   return (
-    <li className="rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
+    <li
+      {...linked.mark(isLinked)}
+      className={`rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5 ${linked.ring(isLinked)}`}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <h3 className="text-base font-semibold">{task.title}</h3>
         {flag && (
@@ -369,9 +385,13 @@ function CustomerCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: ()
   const profit = text(a.detail.theirProfit);
   const mostlyOn = text(a.detail.mostlyOn);
   const target: AlertPerson | undefined = people.find((p) => p.authUserId === suspending);
+  const linked = useLinkedItem("alert");
 
   return (
-    <li className={`rounded-xl border p-4 shadow-card sm:p-5 ${fault ? "border-border bg-surface" : FLAG_TONE.danger.banner}`}>
+    <li
+      {...linked.mark(a.id === linked.target)}
+      className={`rounded-xl border p-4 shadow-card sm:p-5 ${fault ? "border-border bg-surface" : FLAG_TONE.danger.banner} ${linked.ring(a.id === linked.target)}`}
+    >
       <div className="flex flex-wrap items-start justify-between gap-2">
         <h3 className="text-base font-semibold">
           {people.length > 0 ? people.map((p) => p.displayName || p.username).join(" and ") : a.subject}
@@ -456,6 +476,7 @@ function RiskCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => 
   const [busy, setBusy] = useState(false);
   const fields = Object.entries(a.detail).filter(([k]) => !HIDDEN.has(k));
   const canVoid = a.eventId !== "" && a.marketId !== "";
+  const linked = useLinkedItem("alert");
 
   const voidIt = async () => {
     setBusy(true);
@@ -472,7 +493,10 @@ function RiskCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => 
   };
 
   return (
-    <li className={`rounded-xl border p-4 shadow-card sm:p-5 ${FLAG_TONE.danger.banner}`}>
+    <li
+      {...linked.mark(a.id === linked.target)}
+      className={`rounded-xl border p-4 shadow-card sm:p-5 ${FLAG_TONE.danger.banner} ${linked.ring(a.id === linked.target)}`}
+    >
       <h3 className="text-base font-semibold">{a.subject}</h3>
       {fields.length > 0 && (
         <dl className="mt-2 grid gap-x-4 gap-y-1 text-[13px] sm:grid-cols-[max-content_1fr]">
@@ -544,6 +568,7 @@ function RiskCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => 
 function OldAlerts({ alerts, onChanged }: { alerts: AlertItem[]; onChanged: () => void }) {
   const [busy, setBusy] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const linked = useLinkedItem("alert");
 
   const clearAll = async () => {
     setBusy(true);
@@ -600,7 +625,11 @@ function OldAlerts({ alerts, onChanged }: { alerts: AlertItem[]; onChanged: () =
       </div>
       <ul className="mt-3 flex flex-col divide-y divide-border">
         {alerts.map((a) => (
-          <li key={a.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+          <li
+            key={a.id}
+            {...linked.mark(a.id === linked.target)}
+            className={`flex flex-wrap items-center justify-between gap-2 rounded-sm py-2 text-sm ${linked.ring(a.id === linked.target)}`}
+          >
             <span className="min-w-0">
               <span className="text-xs font-semibold uppercase tracking-wide text-tertiary">{KIND_LABEL[a.kind] ?? "Other"}</span>
               <span className="block">{text(a.detail.eventTitle) || a.subject}</span>

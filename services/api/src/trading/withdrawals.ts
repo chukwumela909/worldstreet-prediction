@@ -2,6 +2,7 @@ import type { FastifyBaseLogger } from "fastify";
 import { sendAlert } from "../alerts.js";
 import { sendCustomerEmails } from "../customer-mail.js";
 import { ApiError } from "../errors.js";
+import { deskLink } from "../links.js";
 import { AlertRecord, User } from "../models.js";
 import { creditWallet, type WalletResult } from "../wallet.js";
 import { creditNaira } from "./ledger.js";
@@ -121,7 +122,7 @@ export async function holdWithdrawal(p: {
     p.log,
     "Withdrawal not confirmed by the wallet",
     {
-      note: "The credit is held, not returned. Settle it in Admin → Watch → Withdrawals.",
+      note: "The credit is held, not returned: the dollars may have arrived. Ask the wallet again before returning it.",
       account: p.authUserId,
       amount: `₦${(p.amountKobo / 100).toFixed(2)} → $${(p.amountUsdMinor / 100).toFixed(2)}`,
       wallet: `${p.code}: ${p.message}`,
@@ -129,7 +130,10 @@ export async function holdWithdrawal(p: {
     {
       throttleKey: "withdrawal-unconfirmed",
       kind: "withdrawal",
-      footer: "Settle it in Admin → Watch → Withdrawals.",
+      // a customer's money is in limbo until someone checks the wallet
+      urgent: true,
+      link: deskLink.withdrawals(p.authUserId),
+      action: "Settle it",
     },
   ).catch((err: unknown) => p.log.error({ err }, "unconfirmed-withdrawal alert failed"));
 }
@@ -211,7 +215,8 @@ export async function holdForReview(p: {
     {
       throttleKey: `withdrawal-review:${p.refKey}`,
       kind: "withdrawal",
-      footer: "Approve or reject it in the admin desk: Admin → Watch → Withdrawals.",
+      link: deskLink.withdrawals(p.authUserId),
+      action: "Approve or reject it",
     },
   ).catch((err: unknown) => p.log.error({ err }, "withdrawal-review alert failed"));
 }

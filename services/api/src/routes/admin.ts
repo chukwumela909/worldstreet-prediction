@@ -49,7 +49,8 @@ import { getAbuseWatch } from "../trading/abuse.js";
 import { getCustomerBetReview } from "../trading/bet-review.js";
 import { getWithdrawalDesk, resolveWithdrawalCheck } from "../trading/withdrawals.js";
 import { listWalletChecks, readTestAccount, runWalletCheck } from "../trading/wallet-check.js";
-import { listAlerts, resolveAlert, sendAlert } from "../alerts.js";
+import { listAlerts, recipientsFor, resolveAlert, sendAlert } from "../alerts.js";
+import { deskLink, siteUrl } from "../links.js";
 import { WithdrawalCheck } from "../trading/models.js";
 import { config } from "../config.js";
 
@@ -325,31 +326,75 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
    * the first test of the mail configuration is an incident — and a
    * wrong key or an unverified sender fails silently into the logs.
    * Unthrottled deliberately: this is someone asking, not the poller.
+   *
+   * `as` picks the route to prove, the way the real thing travels:
+   * "regular" (the alert inbox), "urgent" (the inbox and the paging list
+   * — PagerDuty should call or text), or "support" (the support list).
+   * A bodyless POST is a regular one, as before.
    */
+  const testRoute = z.enum(["regular", "urgent", "support"]);
   app.post(
     "/admin/test-alert",
     { config: { rateLimit: { max: 5, timeWindow: "1 minute" } } },
     async (request) => {
       const user = await requireAdmin(request);
-      const result = await sendAlert(
-        request.log,
-        "Test alert",
-        {
-          note: "Triggered from the admin desk to check alert delivery.",
-          triggeredBy: user.label,
-        },
-        { kind: "test" },
-      );
+      const parsed = testRoute.safeParse((request.body as { as?: unknown } | undefined)?.as ?? "regular");
+      if (!parsed.success) throw new ApiError(400, "Pick urgent, regular or support", "VALIDATION_ERROR");
+      const as = parsed.data;
+      const detail = {
+        note: "Triggered from the admin desk to check alert delivery. Nothing to fix.",
+        triggeredBy: user.label,
+      };
+      const result =
+        as === "support"
+          ? await sendAlert(request.log, "Test support notice", detail, {
+              kind: "support",
+              link: deskLink.supportInbox(),
+              action: "Open the inbox",
+            })
+          : await sendAlert(request.log, as === "urgent" ? "Test urgent alert" : "Test alert", detail, {
+              kind: "test",
+              urgent: as === "urgent",
+            });
       return {
         success: true,
         data: {
           ...result,
-          recipients: config.alertEmailTo.length,
           from: config.ALERT_EMAIL_FROM || null,
         },
       };
     },
   );
+
+  /**
+   * Where each kind of alert would go, for the Alert test cards: how
+   * many addresses on each list (not the addresses), whether email,
+   * the webhook and links are set up. Nothing secret leaves.
+   */
+  app.get("/admin/alert-routes", async (request) => {
+    await requireAdmin(request);
+    const mail = Boolean(config.RESEND_API_KEY && config.ALERT_EMAIL_FROM);
+    return {
+      success: true,
+      data: {
+        emailConfigured: mail,
+        webhookConfigured: Boolean(config.ALERT_WEBHOOK_URL),
+        linksConfigured: siteUrl("/admin") !== null,
+        exampleLink: siteUrl(deskLink.today().path),
+        routes: {
+          regular: { recipients: recipientsFor("other", false).length },
+          urgent: {
+            recipients: recipientsFor("other", true).length,
+            pagingList: config.alertUrgentEmailTo.length,
+          },
+          support: {
+            recipients: recipientsFor("support", false).length,
+            ownList: config.SUPPORT_EMAIL_TO.trim() !== "",
+          },
+        },
+      },
+    };
+  });
 
   /** The settlement queue — see trading/exposure.ts. */
   app.get("/admin/exposure", async (request) => {

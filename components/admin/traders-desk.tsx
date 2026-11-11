@@ -122,6 +122,16 @@ const viewPref = localPref<TradersView>("ws-admin-traders-view", DEFAULT_VIEW, (
 
 const PAGE = 50;
 
+/**
+ * The People page. A new ?search= — the sidebar's search box, or a link
+ * from another desk — starts the list afresh on it, even when the page
+ * is already open.
+ */
+export function PeopleDesk() {
+  const search = useSearchParams().get("search") ?? "";
+  return <TradersDesk key={search} />;
+}
+
 export function TradersDesk() {
   const money = useAdminMoney();
   const view = useLocalPref(viewPref);

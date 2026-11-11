@@ -335,9 +335,11 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
           {
             throttleKey: "risk:book-cap",
             kind: "risk",
+            // customers are being turned away right now
+            urgent: true,
             eventId: event.id,
             marketId: market.id,
-            footer: "Deal with it in the admin desk: Admin → Watch → Alerts.",
+            action: "Deal with it",
           },
         ).catch((err: unknown) => log.error({ err }, "book-limit alert failed"));
         const fits = limit.maxStakeKobo >= settings.minStakeKobo;
