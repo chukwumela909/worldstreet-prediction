@@ -1,7 +1,15 @@
 import type { FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { lockWithdrawals, reinstateAccount, suspendAccount, unlockWithdrawals } from "../accounts.js";
+import {
+  STAKE_LEVELS,
+  lockWithdrawals,
+  reinstateAccount,
+  restoreAutoStakeLevels,
+  setStakeLevel,
+  suspendAccount,
+  unlockWithdrawals,
+} from "../accounts.js";
 import { requireAdmin } from "../admin-auth.js";
 import { ApiError } from "../errors.js";
 import { SupportTicket, User } from "../models.js";
@@ -83,6 +91,11 @@ const tradersQuery = z.object({
     .enum(["true", "false", "1", "0"])
     .transform((v) => v === "true" || v === "1")
     .optional(),
+  /** Only customers on a reduced or restricted stake level. */
+  limitedOnly: z
+    .enum(["true", "false", "1", "0"])
+    .transform((v) => v === "true" || v === "1")
+    .optional(),
 });
 
 const alertsQuery = z.object({
@@ -121,6 +134,11 @@ const suspendBody = z.object({
 const withdrawalLockBody = z.object({
   note: z.string().trim().max(500).default(""),
 });
+/** A stake level, and the desk's reason for it (never shown to the customer). */
+const stakeLevelBody = z.object({
+  level: z.enum(STAKE_LEVELS),
+  reason: z.string().trim().min(5, "Say why, for the account's history").max(500),
+});
 const reinstateBody = z.object({
   reason: z.string().trim().max(500).default(""),
   notify: z.boolean(),
@@ -144,6 +162,8 @@ const settingsBody = z
     pausedTopics: z.array(z.string().max(80)).max(50),
     stoppedTopics: z.array(z.string().max(80)).max(50),
     maxStakePerMarketKobo: z.number().int(),
+    reducedStakePct: z.number().int(),
+    restrictedStakePct: z.number().int(),
     earlyCloseHours: z.number().int(),
     earlyCloseTopics: z.array(z.string().max(80)).max(50),
     withdrawalReviewKobo: z.number().int(),
@@ -621,7 +641,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     { schema: { querystring: tradersQuery } },
     async (request) => {
       await requireAdmin(request);
-      const { search, sort, limit, offset, activeOnly, suspendedOnly } = request.query;
+      const { search, sort, limit, offset, activeOnly, suspendedOnly, limitedOnly } = request.query;
       return {
         success: true,
         data: await listTraders({
@@ -631,6 +651,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
           offset,
           activeOnly,
           suspendedOnly,
+          limitedOnly,
         }),
       };
     },
@@ -747,6 +768,29 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     },
   );
 
+  /**
+   * Set a customer's stake level: normal, reduced or restricted, with the
+   * desk's reason, kept on the account's history (accounts.ts).
+   */
+  app.post(
+    "/admin/traders/:authUserId/stake-level",
+    { schema: { body: stakeLevelBody }, config: { rateLimit: { max: 30, timeWindow: "1 minute" } } },
+    async (request) => {
+      const actor = await requireAdmin(request);
+      const { authUserId } = request.params as { authUserId: string };
+      return {
+        success: true,
+        data: await setStakeLevel({
+          authUserId,
+          level: request.body.level,
+          reason: request.body.reason,
+          actor: actor.label,
+          log: request.log,
+        }),
+      };
+    },
+  );
+
   /** Let the account withdraw again. */
   app.post(
     "/admin/traders/:authUserId/unlock-withdrawals",
@@ -796,11 +840,25 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
     return { success: true, data: { ...list, waiting: { support, withdrawals } } };
   });
 
-  /** Mark an alert settled, with an optional note; it reopens if it fires again. */
+  /**
+   * Mark an alert settled, with an optional note; it reopens if it fires
+   * again. Settling an abuse alert puts back the stake levels the scan
+   * lowered for it (accounts.ts).
+   */
   app.post("/admin/alerts/resolve", { schema: { body: resolveAlertBody } }, async (request) => {
     const actor = await requireAdmin(request);
-    await resolveAlert(request.body.id, actor.label, request.body.note);
-    return { success: true, data: { id: request.body.id } };
+    const alert = await resolveAlert(request.body.id, actor.label, request.body.note);
+    const restored =
+      alert.kind === "abuse"
+        ? await restoreAutoStakeLevels({
+            authUserIds: alert.authUserIds,
+            alertId: request.body.id,
+            actor: actor.label,
+            why: `Cleared with the alert "${alert.subject}"`,
+            log: request.log,
+          })
+        : 0;
+    return { success: true, data: { id: request.body.id, restored } };
   });
 
   /**

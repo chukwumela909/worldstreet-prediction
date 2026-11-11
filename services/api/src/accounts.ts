@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger } from "fastify";
 import { sendCustomerEmails } from "./customer-mail.js";
 import { ApiError } from "./errors.js";
-import { User } from "./models.js";
+import { AlertRecord, User } from "./models.js";
 
 /**
  * Suspending an account — the desk's stop for one person, where a paused
@@ -164,6 +164,179 @@ export interface WithdrawalLockResult {
   authUserId: string;
   locked: boolean;
   lockedAt: string | null;
+}
+
+/* ---------------- stake levels ---------------- */
+
+export const STAKE_LEVELS = ["normal", "reduced", "restricted"] as const;
+export type StakeLevel = (typeof STAKE_LEVELS)[number];
+const RANK: Record<StakeLevel, number> = { normal: 0, reduced: 1, restricted: 2 };
+const LEVEL_LABEL: Record<StakeLevel, string> = { normal: "Normal", reduced: "Reduced", restricted: "Restricted" };
+/** Who the abuse scan acts as when it lowers a level. */
+export const AUTO_STAKE_ACTOR = "system:abuse";
+/** A level a person set stands this long before the scan may lower it again. */
+const PERSON_HOLD_MS = 7 * 86_400_000;
+
+const asLevel = (v: unknown): StakeLevel => (v === "reduced" || v === "restricted" ? v : "normal");
+
+/** The customer's stake level; normal for anyone without one. */
+export async function getStakeLevel(authUserId: string): Promise<StakeLevel> {
+  const user = await User.findOne({ authUserId }, { stakeLevel: 1 }).lean();
+  return asLevel(user?.stakeLevel);
+}
+
+/** The share of the book's stake limits a level gets, as a whole percent. */
+export function stakeShare(
+  level: StakeLevel,
+  settings: { reducedStakePct: number; restrictedStakePct: number },
+): number {
+  return level === "restricted" ? settings.restrictedStakePct : level === "reduced" ? settings.reducedStakePct : 100;
+}
+
+/** A limit scaled to that share, rounded down to whole naira, never below the minimum stake. */
+export function scaledLimit(kobo: number, pct: number, minKobo: number): number {
+  if (pct >= 100) return kobo;
+  return Math.max(Math.floor((kobo * pct) / 100 / 100) * 100, minKobo);
+}
+
+export interface StakeLevelResult {
+  authUserId: string;
+  stakeLevel: StakeLevel;
+  stakeLevelReason: string;
+  stakeLevelBy: string;
+  stakeLevelAt: string;
+}
+
+/** The desk sets a customer's level, either way, with its reason; kept on the account's history. */
+export async function setStakeLevel(params: {
+  authUserId: string;
+  level: StakeLevel;
+  reason: string;
+  actor: string;
+  log: FastifyBaseLogger;
+}): Promise<StakeLevelResult> {
+  const at = new Date();
+  const user = await User.findOneAndUpdate(
+    { authUserId: params.authUserId, stakeLevel: { $ne: params.level } },
+    {
+      $set: {
+        stakeLevel: params.level,
+        stakeLevelReason: params.reason,
+        stakeLevelBy: params.actor,
+        stakeLevelAt: at,
+      },
+      $push: {
+        accountActions: {
+          action: "stake_level",
+          reason: `${LEVEL_LABEL[params.level]}: ${params.reason}`,
+          by: params.actor,
+          at,
+        },
+      },
+    },
+    { new: true },
+  ).lean();
+  if (!user) {
+    const exists = await User.exists({ authUserId: params.authUserId });
+    if (!exists) throw new ApiError(404, "No such account", "USER_NOT_FOUND");
+    throw new ApiError(409, `This account is already on ${LEVEL_LABEL[params.level]}`, "SAME_LEVEL");
+  }
+  params.log.warn({ authUserId: params.authUserId, level: params.level, actor: params.actor }, "stake level set");
+  return {
+    authUserId: params.authUserId,
+    stakeLevel: params.level,
+    stakeLevelReason: params.reason,
+    stakeLevelBy: params.actor,
+    stakeLevelAt: at.toISOString(),
+  };
+}
+
+/**
+ * The abuse scan lowers a flagged customer's level on its own. It only
+ * ever lowers (a restricted customer isn't moved up to reduced), and it
+ * leaves alone a level a person set in the last week: the desk has looked
+ * at them. Returns whether it changed anything.
+ */
+export async function lowerStakeLevelAutomatically(params: {
+  authUserId: string;
+  level: Exclude<StakeLevel, "normal">;
+  reason: string;
+  log: FastifyBaseLogger;
+}): Promise<boolean> {
+  const user = await User.findOne(
+    { authUserId: params.authUserId },
+    { stakeLevel: 1, stakeLevelBy: 1, stakeLevelAt: 1, suspendedAt: 1 },
+  ).lean();
+  if (!user || user.suspendedAt) return false;
+  const current = asLevel(user.stakeLevel);
+  if (RANK[current] >= RANK[params.level]) return false;
+  const byPerson = Boolean(user.stakeLevelBy) && !String(user.stakeLevelBy).startsWith("system:");
+  if (byPerson && user.stakeLevelAt && Date.now() - new Date(user.stakeLevelAt).getTime() < PERSON_HOLD_MS) {
+    return false;
+  }
+  const at = new Date();
+  const res = await User.updateOne(
+    // only from what was read, so a desk change in between wins
+    { authUserId: params.authUserId, stakeLevel: user.stakeLevel ?? "normal" },
+    {
+      $set: {
+        stakeLevel: params.level,
+        stakeLevelReason: params.reason,
+        stakeLevelBy: AUTO_STAKE_ACTOR,
+        stakeLevelAt: at,
+      },
+      $push: {
+        accountActions: {
+          action: "stake_level",
+          reason: `${LEVEL_LABEL[params.level]}: ${params.reason}`,
+          by: AUTO_STAKE_ACTOR,
+          at,
+        },
+      },
+    },
+  );
+  if (res.modifiedCount > 0) {
+    params.log.warn({ authUserId: params.authUserId, level: params.level }, "stake level lowered by the abuse scan");
+  }
+  return res.modifiedCount > 0;
+}
+
+/**
+ * Clearing an abuse alert: each of its customers the scan limited goes
+ * back to normal, unless another abuse alert about them is still open.
+ * A level a person set stays as it is. Returns how many were restored.
+ */
+export async function restoreAutoStakeLevels(params: {
+  authUserIds: string[];
+  /** The alert just cleared, so it doesn't count as still open. */
+  alertId: string;
+  actor: string;
+  why: string;
+  log: FastifyBaseLogger;
+}): Promise<number> {
+  if (params.authUserIds.length === 0) return 0;
+  const stillFlagged = new Set(
+    (
+      await AlertRecord.find(
+        { _id: { $ne: params.alertId }, kind: "abuse", status: "open", authUserIds: { $in: params.authUserIds } },
+        { authUserIds: 1 },
+      ).lean()
+    ).flatMap((a) => a.authUserIds ?? []),
+  );
+  const ids = params.authUserIds.filter((id) => !stillFlagged.has(id));
+  if (ids.length === 0) return 0;
+  const at = new Date();
+  const res = await User.updateMany(
+    { authUserId: { $in: ids }, stakeLevelBy: AUTO_STAKE_ACTOR, stakeLevel: { $ne: "normal" } },
+    {
+      $set: { stakeLevel: "normal", stakeLevelReason: params.why, stakeLevelBy: params.actor, stakeLevelAt: at },
+      $push: { accountActions: { action: "stake_level", reason: `Normal: ${params.why}`, by: params.actor, at } },
+    },
+  );
+  if (res.modifiedCount > 0) {
+    params.log.warn({ ids, actor: params.actor }, "stake levels restored with a cleared alert");
+  }
+  return res.modifiedCount;
 }
 
 export async function lockWithdrawals(params: {

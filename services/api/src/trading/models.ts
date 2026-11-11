@@ -223,6 +223,8 @@ const bookSettingsSchema = new Schema(
     pausedTopics: { type: [String], default: undefined },
     stoppedTopics: { type: [String], default: undefined },
     maxStakePerMarketKobo: { type: Number },
+    reducedStakePct: { type: Number },
+    restrictedStakePct: { type: Number },
     earlyCloseHours: { type: Number },
     earlyCloseTopics: { type: [String], default: undefined },
     withdrawalReviewKobo: { type: Number },

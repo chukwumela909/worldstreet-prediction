@@ -5,7 +5,7 @@ import { CheckCircleIcon as Check } from "@heroicons/react/24/outline";
 import { ApiError, isApiConfigured } from "@/lib/api-client";
 import { fetchAbuseWatch, type AbusePerson, type AbuseWatch } from "@/lib/admin-api";
 import type { AdminMoney } from "@/lib/admin-money";
-import { AccountControl } from "@/components/admin/account-control";
+import { AccountControl, StakeLevelChip } from "@/components/admin/account-control";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /** The pieces of the Flagged customers view (flagged-desk.tsx). */
@@ -165,6 +165,7 @@ export function PersonRow({
                 Suspended
               </span>
             )}
+            {!person.suspendedAt && <StakeLevelChip level={person.stakeLevel} />}
           </p>
           <p className="truncate text-xs text-tertiary">
             @{person.username}

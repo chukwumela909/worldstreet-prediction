@@ -186,14 +186,67 @@ check(
   "a flagged person's withdrawals now wait for approval — both twins included",
   (await isFlagged("u-near")) && (await isFlagged("u-twin2")) && !(await isFlagged("u-fair")),
 );
-await AlertRecord.updateOne({ key: "abuse:near:u-near" }, { $set: { status: "resolved" } });
-check("settling the alert lifts it", !(await isFlagged("u-near")));
+const levelOf = async (id: string) => (await User.findOne({ authUserId: id }).lean())?.stakeLevel ?? "none";
+check(
+  "the scan limits who it flags at once: beating the odds and near-certain buying → restricted, the pair → reduced",
+  (await levelOf("u-near")) === "restricted" &&
+    (await levelOf("u-lucky")) === "restricted" &&
+    (await levelOf("u-twin1")) === "reduced" &&
+    (await levelOf("u-twin2")) === "reduced",
+);
+check(
+  "…and leaves everyone else, and a ledger gap (our fault), alone",
+  (await levelOf("u-fair")) === "normal" && (await levelOf("u-gap")) === "normal",
+);
+const nearUser = await User.findOne({ authUserId: "u-near" }).lean();
+check(
+  "…kept on their history, by the scan, with why",
+  nearUser?.stakeLevelBy === "system:abuse" &&
+    Boolean(nearUser.stakeLevelReason?.startsWith("Buying near-certain sides")) &&
+    (nearUser.accountActions ?? []).some((a) => a.action === "stake_level" && a.by === "system:abuse"),
+);
+const nearAlert = await AlertRecord.findOne({ key: "abuse:near:u-near" }).lean();
+const cleared = await admin("POST", "/v1/admin/alerts/resolve", { id: String(nearAlert!._id), note: "checked" });
+check("settling the alert lifts the hold", cleared.statusCode === 200 && !(await isFlagged("u-near")));
+check(
+  "…and puts back the level the scan set",
+  (cleared.json() as { data: { restored: number } }).data.restored === 1 && (await levelOf("u-near")) === "normal",
+);
+const pairAlert = await AlertRecord.findOne({ key: "abuse:twins:u-twin1|u-twin2" }).lean();
+await admin("POST", "/v1/admin/alerts/resolve", { id: String(pairAlert!._id), note: "" });
+check("settling the pair's alert puts both back", (await levelOf("u-twin1")) === "normal" && (await levelOf("u-twin2")) === "normal");
+
+const set = await admin("POST", "/v1/admin/traders/u-fair/stake-level", { level: "reduced", reason: "Watching their late bets" });
+const fair = await User.findOne({ authUserId: "u-fair" }).lean();
+check(
+  "the desk sets a level, with its reason, on the account's history",
+  set.statusCode === 200 &&
+    fair?.stakeLevel === "reduced" &&
+    fair.stakeLevelBy === "key:josh" &&
+    (fair.accountActions ?? []).some((a) => a.action === "stake_level" && a.reason === "Reduced: Watching their late bets"),
+);
+const again = await admin("POST", "/v1/admin/traders/u-fair/stake-level", { level: "reduced", reason: "Again, same" });
+check("setting the level it's already on is refused", again.statusCode === 409);
+const noWhy = await admin("POST", "/v1/admin/traders/u-fair/stake-level", { level: "normal", reason: "" });
+check("…and a level needs a reason", noWhy.statusCode === 400);
+const limited = (await admin("GET", "/v1/admin/traders?limitedOnly=true")).json() as {
+  data: { traders: { username: string; stakeLevel: string }[] };
+};
+check(
+  "the Limited view lists who's on a reduced or restricted level, with it",
+  limited.data.traders.some((t) => t.username === "fair" && t.stakeLevel === "reduced") &&
+    limited.data.traders.every((t) => t.stakeLevel !== "normal"),
+);
 await User.updateOne({ authUserId: "u-lucky" }, { $set: { suspendedAt: new Date() } });
 await AlertRecord.deleteMany({ kind: { $in: ["abuse", "fault"] } });
 await checkAbuseAlerts(log, { force: true });
 check(
   "someone already suspended isn't alerted on",
   !(await AlertRecord.exists({ key: "abuse:odds:u-lucky" })) && Boolean(await AlertRecord.exists({ key: "abuse:near:u-near" })),
+);
+check(
+  "a level a person set this week isn't lowered again by the next scan",
+  (await levelOf("u-near")) === "normal",
 );
 
 console.log("alerts name who they're about");

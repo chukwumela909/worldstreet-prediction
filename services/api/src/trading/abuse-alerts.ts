@@ -1,4 +1,5 @@
 import type { FastifyBaseLogger } from "fastify";
+import { lowerStakeLevelAutomatically } from "../accounts.js";
 import { sendAlert } from "../alerts.js";
 import { getAbuseWatch } from "./abuse.js";
 
@@ -13,13 +14,19 @@ import { getAbuseWatch } from "./abuse.js";
  * (isFlagged, trading/withdrawals.ts). Settling the alert lifts the hold; someone
  * still matching fires it again on the next scan. Suspended accounts
  * are left out: they're already dealt with.
+ *
+ * It also limits them at once (accounts.ts), so nobody has to notice
+ * first: beating the odds or buying near-certain sides puts the customer
+ * on the "restricted" stake level, a pair of accounts both on "reduced".
+ * It only ever lowers a level, and leaves alone one a person set in the
+ * last week. Clearing the alert puts back what the scan set.
  */
 
 const EVERY_MS = 60 * 60_000;
 const SCAN_DAYS = 7;
 let lastRun = 0;
 
-const FOOTER = "Review them in the admin desk: Admin → Watch → Suspicious customers.";
+const FOOTER = "Review them in the admin desk: Admin → Customers → Flagged.";
 const naira = (kobo: number) =>
   `${kobo < 0 ? "−" : ""}₦${Math.round(Math.abs(kobo) / 100).toLocaleString("en-US")}`;
 
@@ -54,7 +61,13 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
       record: `Won ${r.won} of ${r.bets} bets in the last ${SCAN_DAYS} days — the prices said about ${r.expectedWins}`,
       theirProfit: naira(r.profitKobo),
       mostlyOn: r.markets.join(" · "),
-      whatToDo: "Their withdrawals wait for approval while this is open. Check their bets; suspend them if they're betting on results already known, or mark this settled if they're fine.",
+      whatToDo: "Their stakes are limited and their withdrawals wait for approval while this is open. Check their bets; suspend them if they're betting on results already known, or mark this settled if they're fine.",
+    });
+    await lowerStakeLevelAutomatically({
+      authUserId: r.authUserId,
+      level: "restricted",
+      reason: `Winning more than the odds allow: won ${r.won} of ${r.bets} bets in ${SCAN_DAYS} days, the prices said about ${r.expectedWins}`,
+      log,
     });
   }
   for (const r of watch.nearCertain) {
@@ -64,7 +77,13 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
       record: `${r.bets} bets at ₦90+ (avg ₦${(r.avgPriceKobo / 100).toFixed(2)}), won ${r.won}`,
       theirProfit: naira(r.profitKobo),
       mostlyOn: r.markets.join(" · "),
-      whatToDo: "Their withdrawals wait for approval while this is open. Suspend them, or reverse those markets from Recovery, or mark this settled if they're fine.",
+      whatToDo: "Their stakes are limited and their withdrawals wait for approval while this is open. Suspend them, or reverse those markets from Take action, or mark this settled if they're fine.",
+    });
+    await lowerStakeLevelAutomatically({
+      authUserId: r.authUserId,
+      level: "restricted",
+      reason: `Buying near-certain sides: ${r.bets} bets at ₦90 or more, won ${r.won}`,
+      log,
     });
   }
   for (const t of watch.twins) {
@@ -77,9 +96,18 @@ export async function checkAbuseAlerts(log: FastifyBaseLogger, opts: { force?: b
         accounts: `@${t.a.username} (${t.a.email}) · @${t.b.username} (${t.b.email})`,
         record: `Backed the same side of ${t.sharedMarkets} markets within two minutes`,
         mostlyOn: t.examples.join(" · "),
-        whatToDo: "Both accounts' withdrawals wait for approval while this is open. Check whether it's one person; suspend both if so.",
+        whatToDo: "Both accounts' stakes are reduced and their withdrawals wait for approval while this is open. Check whether it's one person; suspend both if so.",
       },
     );
+    for (const p of [t.a, t.b]) {
+      if (p.suspendedAt) continue;
+      await lowerStakeLevelAutomatically({
+        authUserId: p.authUserId,
+        level: "reduced",
+        reason: `Moving in a pair with @${p === t.a ? t.b.username : t.a.username}: the same side of ${t.sharedMarkets} markets within two minutes`,
+        log,
+      });
+    }
   }
   // our fault, not the customer's — filed apart from abuse, but it still
   // holds their withdrawals until someone has looked

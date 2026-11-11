@@ -59,6 +59,11 @@ export interface TraderRow {
   suspendedReason: string;
   /** Set while its withdrawals are locked (accounts.ts). */
   withdrawalsLockedAt: string | null;
+  /** The share of the stake limits they get (accounts.ts), and who set it, when and why. */
+  stakeLevel: "normal" | "reduced" | "restricted";
+  stakeLevelReason: string;
+  stakeLevelBy: string;
+  stakeLevelAt: string | null;
 }
 
 export interface TraderSummary {
@@ -97,6 +102,10 @@ interface ProfileDoc {
   suspendedAt?: Date | null;
   suspendedReason?: string | null;
   withdrawalsLockedAt?: Date | null;
+  stakeLevel?: string | null;
+  stakeLevelReason?: string | null;
+  stakeLevelBy?: string | null;
+  stakeLevelAt?: Date | null;
 }
 
 interface PositionStats {
@@ -131,6 +140,7 @@ export interface TraderQuery {
   activeOnly?: boolean | undefined;
   /** Only accounts the desk has suspended, staked or not. */
   suspendedOnly?: boolean | undefined;
+  limitedOnly?: boolean | undefined;
 }
 
 export async function listTraders(params: TraderQuery): Promise<TraderList> {
@@ -151,6 +161,7 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
         }
       : {}),
     ...(params.suspendedOnly ? { suspendedAt: { $ne: null } } : {}),
+    ...(params.limitedOnly ? { stakeLevel: { $in: ["reduced" as const, "restricted" as const] } } : {}),
   };
 
   const projection = {
@@ -163,6 +174,10 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
     suspendedAt: 1,
     suspendedReason: 1,
     withdrawalsLockedAt: 1,
+    stakeLevel: 1,
+    stakeLevelReason: 1,
+    stakeLevelBy: 1,
+    stakeLevelAt: 1,
   };
 
   // Everyone who has ever staked — the list must never lose one of
@@ -172,7 +187,7 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
 
   let truncated = false;
   let scanned: ProfileDoc[];
-  if (params.suspendedOnly) {
+  if (params.suspendedOnly || params.limitedOnly) {
     // few enough to read whole, bettors or not
     scanned = await User.find(filter, projection).lean<ProfileDoc[]>();
   } else if (params.activeOnly) {
@@ -206,7 +221,7 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
   // creates one on the first request), but money is never hidden: list
   // them under their id rather than drop them.
   const profiled = new Set(scanned.map((u) => u.authUserId));
-  for (const id of params.suspendedOnly ? [] : bettorIds) {
+  for (const id of params.suspendedOnly || params.limitedOnly ? [] : bettorIds) {
     if (profiled.has(id)) continue;
     if (search && search !== id) continue;
     scanned.push({
@@ -314,6 +329,10 @@ export async function listTraders(params: TraderQuery): Promise<TraderList> {
       suspendedAt: u.suspendedAt ? new Date(u.suspendedAt).toISOString() : null,
       suspendedReason: u.suspendedReason ?? "",
       withdrawalsLockedAt: u.withdrawalsLockedAt ? new Date(u.withdrawalsLockedAt).toISOString() : null,
+      stakeLevel: u.stakeLevel === "reduced" || u.stakeLevel === "restricted" ? u.stakeLevel : "normal",
+      stakeLevelReason: u.stakeLevelReason ?? "",
+      stakeLevelBy: u.stakeLevelBy ?? "",
+      stakeLevelAt: u.stakeLevelAt ? new Date(u.stakeLevelAt).toISOString() : null,
     };
   });
 

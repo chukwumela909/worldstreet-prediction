@@ -25,7 +25,7 @@ import {
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { localPref, useLocalPref } from "@/lib/admin-prefs";
 import { UsdRateNote } from "@/components/admin/currency-switch";
-import { AccountControl } from "@/components/admin/account-control";
+import { AccountControl, StakeLevelChip, StakeLevelControl } from "@/components/admin/account-control";
 import { CustomerActions } from "@/components/admin/customer-actions";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
@@ -52,7 +52,7 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  * (useAdminMoney).
  */
 
-type TraderTab = "active" | "all" | "suspended";
+type TraderTab = "active" | "all" | "limited" | "suspended";
 
 const TABS: { key: TraderTab; label: string; blurb: string }[] = [
   {
@@ -64,6 +64,11 @@ const TABS: { key: TraderTab; label: string; blurb: string }[] = [
     key: "all",
     label: "All accounts",
     blurb: "Everyone who has signed up, whether they have placed a bet or not.",
+  },
+  {
+    key: "limited",
+    label: "Limited",
+    blurb: "Customers on a Reduced or Restricted stake level: they can bet, but only a share of the stake limits.",
   },
   {
     key: "suspended",
@@ -108,7 +113,7 @@ const viewPref = localPref<TradersView>("ws-admin-traders-view", DEFAULT_VIEW, (
   if (!raw || typeof raw !== "object") return null;
   const { tab, sort } = raw as { tab?: unknown; sort?: unknown };
   return {
-    tab: tab === "all" || tab === "suspended" ? tab : "active",
+    tab: tab === "all" || tab === "limited" || tab === "suspended" ? tab : "active",
     sort: (TRADER_SORTS as readonly unknown[]).includes(sort)
       ? (sort as TraderSort)
       : DEFAULT_VIEW.sort,
@@ -171,6 +176,7 @@ export function TradersDesk() {
       limit: PAGE,
       activeOnly: tab === "active",
       suspendedOnly: tab === "suspended",
+      limitedOnly: tab === "limited",
     })
       .then((data) => {
         if (!cancelled) {
@@ -358,7 +364,9 @@ export function TradersDesk() {
                 ? "Nobody has staked yet."
                 : tab === "suspended"
                   ? "No accounts are suspended."
-                  : "No accounts yet."}
+                  : tab === "limited"
+                    ? "Nobody is on a Reduced or Restricted stake level."
+                    : "No accounts yet."}
           </p>
         ) : (
           <>
@@ -515,6 +523,7 @@ function TraderTableRow({
                 <span className="truncate">{name}</span>
                 {trader.suspendedAt && <SuspendedChip />}
                 {!trader.suspendedAt && trader.withdrawalsLockedAt && <LockedChip />}
+                {!trader.suspendedAt && <StakeLevelChip level={trader.stakeLevel} />}
               </p>
               <p className="truncate text-xs font-medium text-tertiary">
                 {[trader.username && `@${trader.username}`, trader.email]
@@ -598,6 +607,7 @@ function TraderCard({
             <span className="truncate">{name}</span>
             {trader.suspendedAt && <SuspendedChip />}
                 {!trader.suspendedAt && trader.withdrawalsLockedAt && <LockedChip />}
+                {!trader.suspendedAt && <StakeLevelChip level={trader.stakeLevel} />}
           </p>
           {trader.username && (
             <p className="truncate text-xs font-medium text-tertiary">
@@ -691,6 +701,14 @@ function TraderDetailPanel({
       <AccountControl
         trader={trader}
         actions={detail?.accountActions}
+        onChanged={() => {
+          load();
+          onChanged();
+        }}
+      />
+
+      <StakeLevelControl
+        trader={trader}
         onChanged={() => {
           load();
           onChanged();

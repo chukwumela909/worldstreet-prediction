@@ -305,6 +305,69 @@ check(
 await settings.updateBookSettings({ stoppedTopics: [] }, "smoke");
 check("allowed again, it takes bets", (await order(xMarket, "stopped-key-3")) === "ok");
 
+/* ---------------- stake levels ---------------- */
+console.log("stake levels");
+const { setStakeLevel } = await import("../src/accounts.js");
+await User.create({ authUserId: "u-sharp", email: "sharp@example.test", username: "sharp", displayName: "sharp" });
+await creditNaira({ authUserId: "u-sharp", amountKobo: 30_000_000, type: "conversion_in", refKey: "fund:u-sharp", description: "t" });
+const sharpMarket = await ownMarket("Will SOL close above $300 on Friday?");
+let sharpKey = 0;
+const sharpBet = (stakeKobo: number, m = sharpMarket) =>
+  outcomeOf(() =>
+    placeOrder(
+      "u-sharp",
+      { eventId: m.eventId, marketId: m.marketId, outcomeId: m.yes, stakeKobo, expectedPriceKobo: 5_500, idempotencyKey: `sharp-${++sharpKey}` },
+      log,
+    ),
+  );
+const s5 = await settings.getBookSettings();
+check(
+  `ships with reduced at 25% and restricted at 5% (got ${s5.reducedStakePct}/${s5.restrictedStakePct})`,
+  s5.reducedStakePct === 25 && s5.restrictedStakePct === 5,
+);
+const fullLimit = await sharpBet(s5.maxStakeKobo);
+check(`a normal customer can stake the full limit (${fullLimit})`, fullLimit === "ok");
+await setStakeLevel({ authUserId: "u-sharp", level: "restricted", reason: "smoke", actor: "smoke", log });
+const perBet = Math.floor((s5.maxStakeKobo * 5) / 100 / 100) * 100;
+let refusedMessage = "";
+try {
+  await placeOrder(
+    "u-sharp",
+    { eventId: ethMarket.eventId, marketId: ethMarket.marketId, outcomeId: ethMarket.yes, stakeKobo: perBet + 100, expectedPriceKobo: 5_500, idempotencyKey: "sharp-over" },
+    log,
+  );
+} catch (err) {
+  refusedMessage = err instanceof ApiError ? `${err.code}: ${err.message}` : String(err);
+}
+check(
+  `restricted: a bet over 5% of the limit is refused, saying their limit (${refusedMessage})`,
+  refusedMessage === `STAKE_TOO_LARGE: Maximum stake is ₦${(perBet / 100).toLocaleString("en-US")}`,
+);
+check("…and one within it goes through", (await sharpBet(perBet, ethMarket)) === "ok");
+const perMarket = Math.floor((s5.maxStakePerMarketKobo * 5) / 100 / 100) * 100;
+const newMarket = await ownMarket("Will ADA close above $2 on Friday?");
+let placedOnNew = 0;
+while (placedOnNew + perBet <= perMarket) {
+  if ((await sharpBet(perBet, newMarket)) !== "ok") break;
+  placedOnNew += perBet;
+}
+check(
+  `…up to 5% of the per-market cap on one market (${placedOnNew} of ${perMarket}), then no more`,
+  placedOnNew > 0 && placedOnNew + perBet > perMarket && (await sharpBet(perBet, newMarket)) === "MARKET_STAKE_LIMIT",
+);
+await setStakeLevel({ authUserId: "u-sharp", level: "reduced", reason: "smoke", actor: "smoke", log });
+const reducedBet = Math.floor((s5.maxStakeKobo * 25) / 100 / 100) * 100;
+check(
+  "reduced: 25% of the limit goes through, a naira more doesn't",
+  (await sharpBet(reducedBet, await ownMarket("Will DOT close above $20 on Friday?"))) === "ok" &&
+    (await sharpBet(reducedBet + 100, await ownMarket("Will LINK close above $50 on Friday?"))) === "STAKE_TOO_LARGE",
+);
+await settings.updateBookSettings({ restrictedStakePct: 30 }, "smoke").catch(() => null);
+check(
+  "restricted can't be set above reduced",
+  (await settings.getBookSettings()).restrictedStakePct === 5,
+);
+
 /* ---------------- what the public sees ---------------- */
 console.log("public");
 const listing = await app.inject({ method: "GET", url: "/v1/markets" });

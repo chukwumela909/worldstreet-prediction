@@ -989,6 +989,9 @@ export interface BookSettings {
   stoppedTopics?: string[];
   /** The most one customer may stake on one market, all bets together, kobo; 0 = no cap. */
   maxStakePerMarketKobo: number;
+  /** The share of the stake limits a reduced / restricted customer gets, whole percent. */
+  reducedStakePct: number;
+  restrictedStakePct: number;
   /** Markets matching earlyCloseTopics stop taking bets this many hours before their close; 0 = off. */
   earlyCloseHours: number;
   /** Which markets close early — counts anyone can watch. Edited on its own card. */
@@ -1139,7 +1142,19 @@ export interface TraderRow {
   suspendedReason?: string;
   /** Set while its withdrawals are locked; absent on an older API. */
   withdrawalsLockedAt?: string | null;
+  /** The share of the stake limits they get, who set it, when and why; absent on an older API. */
+  stakeLevel?: StakeLevel;
+  stakeLevelReason?: string;
+  stakeLevelBy?: string;
+  stakeLevelAt?: string | null;
 }
+
+/**
+ * How much of the book's stake limits a customer gets: normal (all of
+ * them), reduced or restricted (the shares set in Settings). The abuse
+ * scan restricts who it flags; the desk sets it either way.
+ */
+export type StakeLevel = "normal" | "reduced" | "restricted";
 
 export interface TraderSummary {
   users: number;
@@ -1185,7 +1200,7 @@ export interface TraderLedgerEntry {
 }
 
 export interface AccountAction {
-  action: "suspend" | "reinstate" | "lock_withdrawals" | "unlock_withdrawals";
+  action: "suspend" | "reinstate" | "lock_withdrawals" | "unlock_withdrawals" | "stake_level";
   reason: string;
   by: string;
   at: string;
@@ -1218,6 +1233,8 @@ export async function fetchTraders(params: {
   offset?: number;
   activeOnly?: boolean;
   suspendedOnly?: boolean;
+  /** Only customers on a reduced or restricted stake level. */
+  limitedOnly?: boolean;
 }): Promise<TraderList> {
   const qs = new URLSearchParams();
   if (params.search) qs.set("search", params.search);
@@ -1226,6 +1243,7 @@ export async function fetchTraders(params: {
   if (params.offset) qs.set("offset", String(params.offset));
   if (params.activeOnly) qs.set("activeOnly", "true");
   if (params.suspendedOnly) qs.set("suspendedOnly", "true");
+  if (params.limitedOnly) qs.set("limitedOnly", "true");
   const res = await apiFetch<{ data: TraderList }>(
     `/v1/admin/traders?${qs.toString()}`,
   );
@@ -1265,6 +1283,13 @@ export const lockWithdrawals = (authUserId: string, note: string) =>
 
 export const unlockWithdrawals = (authUserId: string, note: string) =>
   adminPost<{ locked: boolean }>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/unlock-withdrawals`, { note });
+
+/** Set a customer's stake level, with the desk's reason (never shown to them). */
+export const setStakeLevel = (authUserId: string, level: StakeLevel, reason: string) =>
+  adminPost<{ stakeLevel: StakeLevel }>(`/v1/admin/traders/${encodeURIComponent(authUserId)}/stake-level`, {
+    level,
+    reason,
+  });
 
 /* ------------------------------------------------------------------ */
 /* Support desk                                                        */
@@ -1372,6 +1397,8 @@ export interface AbusePerson {
   balanceKobo: number;
   suspendedAt: string | null;
   suspendedReason: string;
+  /** Absent on an older API. */
+  stakeLevel?: StakeLevel;
 }
 
 export interface OddsRow extends AbusePerson {

@@ -1,7 +1,7 @@
 import type { FastifyBaseLogger, FastifyPluginAsync } from "fastify";
 import type { ZodTypeProvider } from "fastify-type-provider-zod";
 import { z } from "zod";
-import { assertNotSuspended } from "../accounts.js";
+import { assertNotSuspended, getStakeLevel, scaledLimit, stakeShare } from "../accounts.js";
 import { sendAlert } from "../alerts.js";
 import { authenticate } from "../auth.js";
 import { ApiError } from "../errors.js";
@@ -147,10 +147,22 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
       "STAKE_TOO_SMALL",
     );
   }
-  if (body.stakeKobo > settings.maxStakeKobo) {
+  // the customer's stake level scales both limits (accounts.ts): a
+  // customer the abuse scan or the desk limited gets a share of them
+  const share = stakeShare(await getStakeLevel(authUserId), settings);
+  const maxStakeKobo = scaledLimit(settings.maxStakeKobo, share, settings.minStakeKobo);
+  // with no per-market cap set, a limited customer still gets one: four
+  // of their bets, so many small ones can't add up to a big one
+  const maxPerMarketKobo =
+    settings.maxStakePerMarketKobo > 0
+      ? scaledLimit(settings.maxStakePerMarketKobo, share, settings.minStakeKobo)
+      : share < 100
+        ? maxStakeKobo * 4
+        : 0;
+  if (body.stakeKobo > maxStakeKobo) {
     throw new ApiError(
       400,
-      `Maximum stake is ${naira(settings.maxStakeKobo)}`,
+      `Maximum stake is ${naira(maxStakeKobo)}`,
       "STAKE_TOO_LARGE",
     );
   }
@@ -268,21 +280,21 @@ export async function placeOrder(authUserId: string, body: TradeBody, log: Fasti
 
     // the most one customer may stake on one market, all their bets on it
     // together — checked under the lock, so quick repeats can't slip past
-    if (settings.maxStakePerMarketKobo > 0) {
+    if (maxPerMarketKobo > 0) {
       const [mine] = await Position.aggregate<{ staked: number }>([
         { $match: { authUserId, marketId: market.id, status: { $ne: "voided" } } },
         { $group: { _id: null, staked: { $sum: "$stakeKobo" } } },
       ]);
       const stakedKobo = mine?.staked ?? 0;
-      if (stakedKobo + body.stakeKobo > settings.maxStakePerMarketKobo) {
-        const left = Math.max(settings.maxStakePerMarketKobo - stakedKobo, 0);
+      if (stakedKobo + body.stakeKobo > maxPerMarketKobo) {
+        const left = Math.max(maxPerMarketKobo - stakedKobo, 0);
         throw new ApiError(
           409,
           left >= settings.minStakeKobo
-            ? `You can stake up to ${naira(settings.maxStakePerMarketKobo)} on one market — ${naira(left)} more on this one`
-            : `You've reached the most you can stake on this market (${naira(settings.maxStakePerMarketKobo)})`,
+            ? `You can stake up to ${naira(maxPerMarketKobo)} on one market — ${naira(left)} more on this one`
+            : `You've reached the most you can stake on this market (${naira(maxPerMarketKobo)})`,
           "MARKET_STAKE_LIMIT",
-          { stakedKobo, maxKobo: settings.maxStakePerMarketKobo },
+          { stakedKobo, maxKobo: maxPerMarketKobo },
         );
       }
     }

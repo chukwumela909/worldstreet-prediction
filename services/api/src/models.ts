@@ -1,9 +1,13 @@
 import mongoose, { Schema, type InferSchemaType, type Model } from "mongoose";
 
-/** One suspend, reinstate, withdrawal lock or unlock on an account, by whom and why (accounts.ts). */
+/** One suspend, reinstate, withdrawal lock or unlock, or stake level change on an account, by whom and why (accounts.ts). */
 const accountActionSchema = new Schema(
   {
-    action: { type: String, enum: ["suspend", "reinstate", "lock_withdrawals", "unlock_withdrawals"], required: true },
+    action: {
+      type: String,
+      enum: ["suspend", "reinstate", "lock_withdrawals", "unlock_withdrawals", "stake_level"],
+      required: true,
+    },
     reason: { type: String, default: "" },
     by: { type: String, required: true },
     at: { type: Date, required: true },
@@ -41,7 +45,18 @@ const userSchema = new Schema(
     withdrawalsLockedAt: { type: Date, default: null },
     withdrawalsLockedBy: { type: String, default: "" },
     withdrawalsLockNote: { type: String, default: "" },
-    /** Every suspend, reinstate, lock and unlock, oldest first. */
+    /**
+     * How much of the book's stake limits this customer gets (accounts.ts):
+     * "normal" all of them; "reduced" and "restricted" a share of them, set
+     * in Settings. The abuse scan lowers it on its own (stakeLevelBy
+     * "system:abuse"); the desk sets it either way from the customer's
+     * panel. The reason is the desk's own, never shown to the customer.
+     */
+    stakeLevel: { type: String, enum: ["normal", "reduced", "restricted"], default: "normal" },
+    stakeLevelReason: { type: String, default: "" },
+    stakeLevelBy: { type: String, default: "" },
+    stakeLevelAt: { type: Date, default: null },
+    /** Every suspend, reinstate, lock and unlock, and stake level change, oldest first. */
     accountActions: { type: [accountActionSchema], default: [] },
   },
   { timestamps: true },

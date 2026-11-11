@@ -47,6 +47,8 @@ export interface Person {
   balanceKobo: number;
   suspendedAt: string | null;
   suspendedReason: string;
+  /** Their stake level (accounts.ts): the scan restricts who it flags. */
+  stakeLevel: "normal" | "reduced" | "restricted";
 }
 
 export interface OddsRow extends Person {
@@ -365,7 +367,7 @@ export async function getAbuseWatch(
   ]);
   const users = await User.find(
     { authUserId: { $in: [...ids] } },
-    { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1, suspendedReason: 1 },
+    { authUserId: 1, username: 1, displayName: 1, email: 1, suspendedAt: 1, suspendedReason: 1, stakeLevel: 1 },
   ).lean();
   const userById = new Map(users.map((u) => [u.authUserId, u]));
   const person = (id: string): Person => {
@@ -378,6 +380,7 @@ export async function getAbuseWatch(
       balanceKobo: balanceById.get(id) ?? 0,
       suspendedAt: u?.suspendedAt?.toISOString() ?? null,
       suspendedReason: u?.suspendedReason ?? "",
+      stakeLevel: u?.stakeLevel === "reduced" || u?.stakeLevel === "restricted" ? u.stakeLevel : "normal",
     };
   };
 

@@ -83,6 +83,13 @@ export interface BookSettings {
    */
   maxStakePerMarketKobo: number;
   /**
+   * The share of the stake limits (per bet and per market) a customer on
+   * the "reduced" or "restricted" stake level gets, as a whole percent
+   * (accounts.ts). The abuse scan puts flagged customers on restricted.
+   */
+  reducedStakePct: number;
+  restrictedStakePct: number;
+  /**
    * Markets whose result shows itself before they close — a count of
    * posts or likes anyone can watch — stop taking bets this many hours
    * before their closing time; 0 = off. Which markets: earlyCloseTopics,
@@ -139,6 +146,8 @@ export const SETTING_LIMITS: Record<NumericKey, { min: number; max: number }> = 
   countdownCutoffSeconds: { min: 0, max: 3_600 },
   lossAlertKobo: { min: 0, max: 100_000_000_000 }, // ₦0 (off) – ₦1B
   maxStakePerMarketKobo: { min: 0, max: 10_000_000_000 }, // ₦0 (off) – ₦100M
+  reducedStakePct: { min: 1, max: 100 },
+  restrictedStakePct: { min: 1, max: 100 },
   earlyCloseHours: { min: 0, max: 72 },
   withdrawalReviewKobo: { min: 0, max: 10_000_000_000 }, // ₦0 (off) – ₦100M
   maxBookLossKobo: { min: 0, max: 100_000_000_000 }, // ₦0 (off) – ₦1B
@@ -164,6 +173,8 @@ export const SETTING_KEYS: readonly SettingKey[] = [
   "withdrawalReviewKobo",
   "maxBookLossKobo",
   "stoppedTopics",
+  "reducedStakePct",
+  "restrictedStakePct",
 ];
 
 /**
@@ -195,6 +206,8 @@ export function defaultSettings(): BookSettings {
     pausedTopics: ["bitcoin", "btc"],
     stoppedTopics: [],
     maxStakePerMarketKobo: 20_000_000, // ₦200,000: four full bets on one market
+    reducedStakePct: 25,
+    restrictedStakePct: 5,
     earlyCloseHours: 3,
     // "Pop Base's Number of X Posts by 1PM Today?", "How many likes for…"
     earlyCloseTopics: ["x posts", "likes"],
@@ -339,6 +352,9 @@ export async function updateBookSettings(
   }
   if (next.maxBookLossKobo > 0 && next.maxBookLossKobo < 1_000_000) {
     invalid("The maximum total loss must be 0 (no limit) or at least ₦10,000");
+  }
+  if (next.restrictedStakePct > next.reducedStakePct) {
+    invalid("Restricted customers can't get more of the limits than reduced ones");
   }
   if (next.maxStakePerMarketKobo > 0 && next.maxStakePerMarketKobo < next.minStakeKobo) {
     invalid("The most per customer per market must be 0 (no cap) or at least the minimum stake");

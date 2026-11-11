@@ -392,14 +392,24 @@ export async function listAlerts(status: "open" | "resolved" | "all"): Promise<{
   };
 }
 
-/** Mark an alert settled; it opens again on its own if the condition fires again. */
-export async function resolveAlert(id: string, actor: string, note: string): Promise<void> {
-  const res = await AlertRecord.updateOne(
+/**
+ * Mark an alert settled; it opens again on its own if the condition fires
+ * again. Returns what it was about, so the caller can undo what the alert
+ * did while open (an abuse alert's stake limits, accounts.ts).
+ */
+export async function resolveAlert(
+  id: string,
+  actor: string,
+  note: string,
+): Promise<{ kind: string; subject: string; authUserIds: string[] }> {
+  const res = await AlertRecord.findOneAndUpdate(
     { _id: id, status: "open" },
     { $set: { status: "resolved", resolvedBy: actor, resolvedAt: new Date(), note } },
-  );
-  if (res.matchedCount === 0) {
+    { new: true, projection: { kind: 1, subject: 1, authUserIds: 1 } },
+  ).lean();
+  if (!res) {
     if (!(await AlertRecord.exists({ _id: id }))) throw new ApiError(404, "No such alert", "NOT_FOUND");
     throw new ApiError(409, "This alert is already settled", "ALREADY_SETTLED");
   }
+  return { kind: res.kind, subject: res.subject, authUserIds: res.authUserIds ?? [] };
 }

@@ -3,13 +3,18 @@
 import { useState } from "react";
 import { LockClosedIcon as Lock, NoSymbolIcon as Ban } from "@heroicons/react/24/outline";
 import {
+  fetchBookSettings,
   lockWithdrawals,
   reinstateAccount,
+  setStakeLevel,
   suspendAccount,
   unlockWithdrawals,
+  useAdminResource,
   type AccountAction,
+  type StakeLevel,
   type TraderRow,
 } from "@/lib/admin-api";
+import { formatNaira } from "@/lib/format";
 import { showToast } from "@/lib/toast-store";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
@@ -231,7 +236,13 @@ export function AccountControl({
             {actions.map((a) => (
               <li key={`${a.action}-${a.at}`}>
                 <span
-                  className={`font-semibold ${a.action === "suspend" || a.action === "lock_withdrawals" ? "text-no" : "text-yes"}`}
+                  className={`font-semibold ${
+                    a.action === "suspend" || a.action === "lock_withdrawals"
+                      ? "text-no"
+                      : a.action === "stake_level" && !a.reason.startsWith("Normal")
+                        ? "text-warning"
+                        : "text-yes"
+                  }`}
                 >
                   {ACTION_LABEL[a.action] ?? a.action}
                 </span>{" "}
@@ -251,7 +262,165 @@ const ACTION_LABEL: Record<string, string> = {
   reinstate: "Lifted",
   lock_withdrawals: "Withdrawals locked",
   unlock_withdrawals: "Withdrawals unlocked",
+  stake_level: "Stake level",
 };
+
+/* ---------------- stake level ---------------- */
+
+export const STAKE_LEVEL: Record<StakeLevel, { label: string; chip: string }> = {
+  normal: { label: "Normal", chip: "bg-element-2 text-secondary" },
+  reduced: { label: "Reduced", chip: FLAG_TONE.caution.chip },
+  restricted: { label: "Restricted", chip: FLAG_TONE.danger.chip },
+};
+
+/** A small chip naming a limited customer's level; nothing for normal. */
+export function StakeLevelChip({ level }: { level: StakeLevel | undefined }) {
+  if (!level || level === "normal") return null;
+  return (
+    <span
+      className={`shrink-0 rounded-sm px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide ${STAKE_LEVEL[level].chip}`}
+    >
+      {STAKE_LEVEL[level].label}
+    </span>
+  );
+}
+
+const LEVELS: StakeLevel[] = ["normal", "reduced", "restricted"];
+
+/**
+ * How much of the stake limits this customer gets, and changing it: pick a
+ * level, say why (for the account's history, never shown to them), save.
+ * The abuse checks restrict a flagged customer on their own; clearing the
+ * alert on Today puts them back. Shows what each level means in naira,
+ * from the limits in Settings.
+ */
+export function StakeLevelControl({ trader, onChanged }: { trader: TraderRow; onChanged: () => void }) {
+  const current: StakeLevel = trader.stakeLevel ?? "normal";
+  const name = trader.displayName || trader.username || "this account";
+  const book = useAdminResource(fetchBookSettings, true);
+  const [picked, setPicked] = useState<StakeLevel | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // an API older than stake levels sends no level: nothing to show
+  if (trader.stakeLevel === undefined) return null;
+
+  const s = book.data?.settings;
+  /** What a level allows, in naira, as the API works it out; null until Settings load. */
+  const limits = (level: StakeLevel) => {
+    if (!s || s.reducedStakePct === undefined) return null;
+    const pct = level === "restricted" ? s.restrictedStakePct : level === "reduced" ? s.reducedStakePct : 100;
+    const scale = (kobo: number) =>
+      pct >= 100 ? kobo : Math.max(Math.floor((kobo * pct) / 100 / 100) * 100, s.minStakeKobo);
+    const perBet = scale(s.maxStakeKobo);
+    const perMarket = s.maxStakePerMarketKobo > 0 ? scale(s.maxStakePerMarketKobo) : pct < 100 ? perBet * 4 : 0;
+    return `up to ${formatNaira(perBet)} a bet${perMarket > 0 ? ` and ${formatNaira(perMarket)} a market` : ""}${
+      pct < 100 ? ` (${pct}% of the limits)` : ""
+    }`;
+  };
+  const auto = trader.stakeLevelBy?.startsWith("system:");
+
+  const save = async () => {
+    if (!picked) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await setStakeLevel(trader.authUserId, picked, reason.trim());
+      showToast(`${name} is on ${STAKE_LEVEL[picked].label} now`, "success");
+      setPicked(null);
+      setReason("");
+      onChanged();
+    } catch (err) {
+      setError(err instanceof Error && err.message ? err.message : "Request failed. Try again.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="mb-3 rounded-md border border-border bg-surface p-3 text-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="font-semibold">
+          Stake level: <span className={current === "normal" ? "" : current === "reduced" ? "text-warning" : "text-no"}>
+            {STAKE_LEVEL[current].label}
+          </span>
+          {limits(current) && <span className="font-normal text-secondary"> · {limits(current)}</span>}
+        </p>
+        <div role="group" aria-label="Stake level" className="flex rounded-md bg-element-2 p-0.5">
+          {LEVELS.map((level) => (
+            <button
+              key={level}
+              type="button"
+              aria-pressed={(picked ?? current) === level}
+              onClick={() => {
+                setPicked(level === current ? null : level);
+                setError(null);
+              }}
+              className={`h-8 rounded-sm px-3 text-xs font-semibold ${
+                (picked ?? current) === level ? "bg-surface text-primary shadow-card" : "text-secondary hover:text-primary"
+              }`}
+            >
+              {STAKE_LEVEL[level].label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {current !== "normal" && trader.stakeLevelAt && (
+        <p className="mt-1 text-xs text-secondary">
+          {auto ? "Set automatically by the abuse checks" : `Set by ${trader.stakeLevelBy}`} on {when(trader.stakeLevelAt)}
+          {trader.stakeLevelReason && <>: &ldquo;{trader.stakeLevelReason}&rdquo;</>}
+          {auto && ". Clearing their alert on Today puts them back on Normal."}
+        </p>
+      )}
+      {picked && (
+        <div className="mt-2 border-t border-border pt-2">
+          <p className="text-secondary">
+            Move {name} to <b className="text-primary">{STAKE_LEVEL[picked].label}</b>
+            {`${limits(picked) ? `: ${limits(picked)}.` : "."} Bets already placed aren’t touched. They aren’t told; a bet over their limit is refused with the limit it allows.`}
+          </p>
+          <label className="mt-2 block">
+            <span className="text-xs font-medium text-secondary">Why (for the account&rsquo;s history; the customer never sees it)</span>
+            <input
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              maxLength={500}
+              autoFocus
+              placeholder={picked === "normal" ? "e.g. Checked their bets, all fine" : "e.g. Buying X post counts late in the day"}
+              className="mt-1 h-9 w-full rounded-md border border-border bg-sunken px-3 text-sm outline-none placeholder:text-tertiary focus:border-accent"
+            />
+          </label>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={save}
+              disabled={busy || reason.trim().length < MIN_REASON}
+              className="pressable h-9 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover disabled:opacity-40"
+            >
+              {busy ? "Saving…" : `Set to ${STAKE_LEVEL[picked].label}`}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPicked(null);
+                setReason("");
+                setError(null);
+              }}
+              disabled={busy}
+              className="h-9 rounded-sm border border-border px-4 text-sm font-semibold text-secondary hover:text-primary"
+            >
+              Cancel
+            </button>
+            {reason.trim().length < MIN_REASON && (
+              <span className="text-xs text-tertiary">Write at least {MIN_REASON} characters.</span>
+            )}
+          </div>
+        </div>
+      )}
+      {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
+    </div>
+  );
+}
 
 /**
  * The lighter stop: lock withdrawals and leave betting alone. The customer

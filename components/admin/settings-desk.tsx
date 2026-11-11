@@ -58,12 +58,14 @@ import {
 
 /* ---------- what each setting is, in friendly units ---------- */
 
-type Unit = "points" | "percent" | "credit" | "seconds" | "hours";
+type Unit = "points" | "percent" | "share" | "credit" | "seconds" | "hours";
 
 /** API units per unit on screen, and the decimals that leaves room for. */
 const UNIT: Record<Unit, { scale: number; decimals: number }> = {
   points: { scale: 100, decimals: 2 },
   percent: { scale: 100, decimals: 2 },
+  // a whole percent, as the API keeps it
+  share: { scale: 1, decimals: 0 },
   credit: { scale: 100, decimals: 2 },
   seconds: { scale: 1, decimals: 0 },
   hours: { scale: 1, decimals: 0 },
@@ -160,6 +162,20 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     step: 50_000,
     info: "All of one customer's bets on one market together can't go above this. It stops someone stacking bet after bet on a result they already know — like 41 bets of ₦50,000 on one post-count market. Honest players rarely come close. Set to 0 for no cap.",
   },
+  reducedStakePct: {
+    key: "reducedStakePct",
+    label: "Reduced customers can stake",
+    unit: "share",
+    step: 5,
+    info: "A customer on the Reduced stake level gets this share of the stake limits above: the most per bet, and the most per market. At 25%, a ₦50,000 limit becomes ₦12,500. Customers flagged as moving in a pair with another account go on Reduced on their own; set anyone's level from their panel in Customers.",
+  },
+  restrictedStakePct: {
+    key: "restrictedStakePct",
+    label: "Restricted customers can stake",
+    unit: "share",
+    step: 1,
+    info: "A customer on the Restricted stake level gets this share of the stake limits. At 5%, a ₦50,000 limit becomes ₦2,500. Customers the abuse checks flag for winning more than the odds allow or buying near-certain sides go on Restricted on their own, at once; clearing their alert on Today puts them back. It can't be more than Reduced.",
+  },
   maxBookLossKobo: {
     key: "maxBookLossKobo",
     label: "Maximum total loss (all markets)",
@@ -205,6 +221,8 @@ const ORDER: FormKey[] = [
   "maxMarketExposureKobo",
   "maxBookLossKobo",
   "maxStakePerMarketKobo",
+  "reducedStakePct",
+  "restrictedStakePct",
   "maxQuoteKobo",
   "priceToleranceKobo",
   "countdownCutoffSeconds",
@@ -234,7 +252,15 @@ const GROUPS: { title: string; note: string; rows: FormKey[] }[] = [
   {
     title: "Limits",
     note: "How much one bet, one customer, one market and the whole book can put at stake.",
-    rows: ["minStakeKobo", "maxStakeKobo", "maxStakePerMarketKobo", "maxMarketExposureKobo", "maxBookLossKobo"],
+    rows: [
+      "minStakeKobo",
+      "maxStakeKobo",
+      "maxStakePerMarketKobo",
+      "reducedStakePct",
+      "restrictedStakePct",
+      "maxMarketExposureKobo",
+      "maxBookLossKobo",
+    ],
   },
   {
     title: "Safety",
@@ -309,6 +335,7 @@ function formatValue(key: string, value: number | boolean | string[]): string {
     case "credit":
       return formatNaira(value);
     case "percent":
+    case "share":
       return `${friendly(key, value)}%`;
     default:
       return `${friendly(key, value)} ${unitWord(key, value)}`;
@@ -332,6 +359,7 @@ function formatPair(
     case "credit":
       return `${formatNaira(a)}${sep}${formatNaira(b)}`;
     case "percent":
+    case "share":
       return `${friendly(key, a)}%${sep}${friendly(key, b)}%`;
     default:
       return `${friendly(key, a)}${sep}${friendly(key, b)} ${unitWord(key, b)}`;
@@ -363,7 +391,9 @@ function parseField(
       ok: false,
       message:
         decimals === 0
-          ? `Use a whole number of ${FIELDS[key].unit}.`
+          ? FIELDS[key].unit === "share"
+            ? "Use a whole number."
+            : `Use a whole number of ${FIELDS[key].unit}.`
           : `Use at most ${decimals} decimal places.`,
     };
   }
@@ -890,7 +920,7 @@ function NumberRow({
           />
           {field.unit !== "credit" && (
             <span className="shrink-0 text-sm font-medium text-tertiary">
-              {field.unit === "percent" ? "%" : field.unit}
+              {field.unit === "percent" || field.unit === "share" ? "%" : field.unit}
             </span>
           )}
           <span className="ml-1 flex shrink-0 items-center">
