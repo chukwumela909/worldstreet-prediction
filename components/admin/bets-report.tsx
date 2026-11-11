@@ -18,23 +18,32 @@ import {
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
- * Settled bets: every bet on a topic's markets that finished in a window
- * — won, lost or refunded — and who placed it. Opens on the paused topics
- * (Bitcoin).
+ * Who bet on a type of market: every bet on its markets that finished,
+ * won, lost or refunded, and who placed it. Take action shows it under
+ * its card, for the same markets and date.
  *
  * Built to be read at a glance, not scrolled: one line says what
- * happened (who won, at what prices, what it cost us), then three tabs —
- * Customers (one row each, with win rate and average price), Rounds (one
- * row per market, expanding to its bets) and All bets (paged). Amounts
- * follow the desk's ₦/$ switch.
+ * happened (who won, at what prices, what it cost us), then three tabs:
+ * Customers (one row each, with win rate, average price, balance and a
+ * way to act on them), Rounds (one row per market, expanding to its bets)
+ * and All bets (paged). Amounts follow the desk's ₦/$ switch.
+ *
+ * The window: bets placed from the card's date (the bets a take-back
+ * from that date would touch), or the ones settled in the last 24 hours,
+ * 7 or 30 days.
  */
 
+/** The furthest back the API reads by settling time: 90 days. */
+const MAX_HOURS = 2_160;
 const WINDOWS = [
   { hours: 24, label: "24 hours" },
-  { hours: 72, label: "3 days" },
   { hours: 168, label: "7 days" },
   { hours: 720, label: "30 days" },
 ] as const;
+const PLACED = "placed";
+
+const dayLabel = (iso: string) =>
+  new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Africa/Lagos" });
 
 type Tab = "customers" | "rounds" | "bets";
 type Filter = "all" | SettledStatus;
@@ -58,15 +67,25 @@ const BETS_PAGE = 25;
 /** A ₦100 share bought at this price or more was already nearly decided. */
 const NEAR_CERTAIN_KOBO = 8_500;
 
-export function SettledDesk() {
+export function BetsReport({
+  topics,
+  sinceAt,
+  busy = false,
+  reloadKey = 0,
+  onPick,
+}: {
+  topics: string[];
+  /** Bets placed from this moment (ISO); null = as far back as the API reads. */
+  sinceAt: string | null;
+  busy?: boolean;
+  /** Bump to re-read, after something on the page moved these bets. */
+  reloadKey?: number;
+  /** "Act on them": fills the card above with this customer. */
+  onPick?: (username: string) => void;
+}) {
   const money = useAdminMoney();
-  // what's typed vs what's been asked for: null = the paused topics
-  const [typed, setTyped] = useState<string | null>(null);
-  const [asked, setAsked] = useState<{ topics: string[] | null; hours: number; n: number }>({
-    topics: null,
-    hours: 72,
-    n: 0,
-  });
+  const [windowKey, setWindowKey] = useState<string>(PLACED);
+  const [n, setN] = useState(0);
   const [tab, setTab] = useState<Tab>("customers");
   const [filter, setFilter] = useState<Filter>("all");
   const [loaded, setLoaded] = useState<{
@@ -77,12 +96,15 @@ export function SettledDesk() {
   } | null>(null);
 
   const configured = isApiConfigured();
-  const key = `${asked.topics?.join(",") ?? ""}|${asked.hours}|${asked.n}`;
+  const placed = windowKey === PLACED;
+  const hours = placed ? MAX_HOURS : Number(windowKey);
+  const placedFrom = placed ? sinceAt : null;
+  const key = `${topics.join(",")}|${windowKey}|${placedFrom ?? ""}|${n}|${reloadKey}`;
 
   useEffect(() => {
-    if (!configured) return;
+    if (!configured || topics.length === 0) return;
     let cancelled = false;
-    fetchTopicBets({ topics: asked.topics ?? undefined, hours: asked.hours })
+    fetchTopicBets({ topics, hours, sinceAt: placedFrom })
       .then((data) => {
         if (!cancelled) setLoaded({ key, data, error: null, errorCode: null });
       })
@@ -102,84 +124,72 @@ export function SettledDesk() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configured, key]);
 
+  if (!configured || topics.length === 0) return null;
+
   const fresh = loaded?.key === key ? loaded : null;
   // the last answer stays on screen while a new one loads
   const report = fresh?.data ?? loaded?.data ?? null;
   const loading = fresh === null;
-
-  if (!configured) {
-    return <Notice>This desk needs the prediction API (NEXT_PUBLIC_API_URL).</Notice>;
-  }
-  if (fresh?.errorCode === "FORBIDDEN") {
-    return <Notice>Your account isn&rsquo;t an admin of the Local book.</Notice>;
-  }
-
-  const topicsText = typed ?? report?.topics.join(", ") ?? "";
-  const show = () => {
-    const topics = topicsText
-      .split(",")
-      .map((t) => t.trim().toLowerCase())
-      .filter(Boolean);
-    setAsked((a) => ({ topics: topics.length > 0 ? topics : null, hours: a.hours, n: a.n + 1 }));
-  };
+  // an API older than sinceAt answers with the last 90 days by settling time
+  const olderApi = Boolean(placedFrom) && report !== null && report.sinceAt === undefined;
+  const span = !placed
+    ? `settled in the last ${windowLabel(hours)}`
+    : placedFrom && !olderApi
+      ? `placed from ${dayLabel(placedFrom)}`
+      : "settled in the last 90 days";
 
   return (
-    <div className="max-w-5xl">
-      <div className="flex flex-wrap items-end justify-between gap-4">
+    <section className="mt-5 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Settled bets</h1>
-          <p className="mt-1 text-sm text-secondary">
-            Who won, lost or was refunded on a topic, and what it cost us.
+          <h2 className="text-base font-semibold">Who bet on these markets</h2>
+          <p className="mt-0.5 text-sm text-secondary">
+            Finished bets on &ldquo;{topics.join(", ")}&rdquo; markets, {span}.
+            {onPick && " Press “Act on them” to fill in the card above."}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setAsked((a) => ({ ...a, n: a.n + 1 }))}
-          className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
-        >
-          <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Segmented
+            label="Which bets"
+            small
+            options={[
+              { key: PLACED, label: sinceAt ? `From ${dayLabel(sinceAt)}` : "All time" },
+              ...WINDOWS.map((w) => ({ key: String(w.hours), label: w.label })),
+            ]}
+            value={windowKey}
+            onChange={setWindowKey}
+          />
+          <button
+            type="button"
+            onClick={() => setN((x) => x + 1)}
+            aria-label="Refresh who bet"
+            className="flex h-8 items-center rounded-sm border border-border px-2.5 text-secondary hover:text-primary"
+          >
+            <RefreshCw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
+          </button>
+        </div>
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-2">
-        <input
-          aria-label="Topics, comma-separated"
-          value={topicsText}
-          onChange={(e) => setTyped(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && show()}
-          placeholder="bitcoin, btc"
-          className="h-9 min-w-0 flex-1 basis-48 rounded-md border border-border bg-sunken px-3 text-sm outline-none focus:border-accent"
-        />
-        <button
-          type="button"
-          onClick={show}
-          className="pressable h-9 rounded-sm bg-accent px-4 text-sm font-semibold text-on-accent hover:bg-accent-hover"
-        >
-          Show
-        </button>
-        <Segmented
-          label="Time window"
-          options={WINDOWS.map((w) => ({ key: String(w.hours), label: w.label }))}
-          value={String(asked.hours)}
-          onChange={(h) => setAsked((a) => ({ ...a, hours: Number(h), n: a.n + 1 }))}
-        />
-      </div>
-
+      {olderApi && (
+        <p className={`mt-3 rounded-md px-3 py-2 text-xs font-semibold ${FLAG_TONE.caution.chip}`}>
+          The API is older than this page, so this counts bets settled in the last 90 days, not placed from the date.
+          Deploy the API.
+        </p>
+      )}
       {fresh?.error && <p className="mt-3 text-sm font-semibold text-no">{fresh.error}</p>}
 
       {!report ? (
-        <p className="mt-8 text-center text-sm text-secondary">{loading ? "Loading…" : ""}</p>
+        <p className="mt-6 text-center text-sm text-secondary">{loading ? "Loading…" : ""}</p>
       ) : report.totals.bets === 0 ? (
-        <p className="mt-6 rounded-xl border border-border bg-surface p-6 text-center text-sm text-secondary shadow-card">
-          No bets on {report.topics.join(", ")} finished in the last {windowLabel(report.hours)}.
+        <p className="mt-4 rounded-md bg-element-2 px-3 py-3 text-sm text-secondary">
+          No finished bets on {report.topics.join(", ")}, {span}.
           {report.open.bets > 0 &&
             ` ${report.open.bets} bet${report.open.bets === 1 ? " is" : "s are"} still open (${money.format(report.open.stakeKobo)}).`}
         </p>
       ) : (
         <>
           <Insight report={report} money={money} />
-          <Totals report={report} money={money} />
+          <Totals report={report} money={money} span={span} />
 
           <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-b border-border">
             <div className="flex gap-1" role="tablist">
@@ -216,7 +226,14 @@ export function SettledDesk() {
           </div>
 
           {tab === "customers" && (
-            <CustomersTab key={`${key}|${filter}`} report={report} filter={filter} money={money} />
+            <CustomersTab
+              key={`${key}|${filter}`}
+              report={report}
+              filter={filter}
+              money={money}
+              busy={busy}
+              onPick={onPick}
+            />
           )}
           {tab === "rounds" && <RoundsTab key={key} report={report} money={money} />}
           {tab === "bets" && <BetsTab key={`${key}|${filter}`} report={report} filter={filter} money={money} />}
@@ -226,7 +243,7 @@ export function SettledDesk() {
           )}
         </>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -268,7 +285,7 @@ function Insight({ report, money }: { report: TopicBetsReport; money: AdminMoney
   );
 }
 
-function Totals({ report, money }: { report: TopicBetsReport; money: AdminMoney }) {
+function Totals({ report, money, span }: { report: TopicBetsReport; money: AdminMoney; span: string }) {
   const t = report.totals;
   return (
     <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -290,7 +307,7 @@ function Totals({ report, money }: { report: TopicBetsReport; money: AdminMoney 
         note={
           report.open.bets > 0
             ? `${report.open.bets} still open (${money.format(report.open.stakeKobo)})`
-            : `last ${windowLabel(report.hours)}`
+            : span
         }
       />
     </dl>
@@ -303,16 +320,20 @@ function CustomersTab({
   report,
   filter,
   money,
+  busy,
+  onPick,
 }: {
   report: TopicBetsReport;
   filter: Filter;
   money: AdminMoney;
+  busy: boolean;
+  onPick?: (username: string) => void;
 }) {
   const [shown, setShown] = useState(CUSTOMERS_PAGE);
   const rows = report.customers.filter((c) => matches(c, filter));
   return (
     <TableCard>
-      <table className="w-full min-w-[680px] text-left text-sm">
+      <table className="w-full min-w-[860px] text-left text-sm">
         <thead className="text-xs text-secondary">
           <tr className="border-b border-border">
             <th className="py-2 pr-3 font-medium">Customer</th>
@@ -321,7 +342,13 @@ function CustomersTab({
             <th className="py-2 pr-3 text-right font-medium">Avg price</th>
             <th className="py-2 pr-3 text-right font-medium">Staked</th>
             <th className="py-2 pr-3 text-right font-medium">Refunded</th>
-            <th className="py-2 text-right font-medium">Their result</th>
+            <th className="py-2 pr-3 text-right font-medium">Their result</th>
+            <th className="py-2 pr-3 text-right font-medium">Balance</th>
+            {onPick && (
+              <th className="py-2 font-medium">
+                <span className="sr-only">Action</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -330,7 +357,19 @@ function CustomersTab({
             return (
               <tr key={c.authUserId} className="border-b border-border last:border-0">
                 <td className="py-2 pr-3">
-                  <p className="font-semibold">{c.username || "—"}</p>
+                  <p className="font-semibold">
+                    {c.username || "—"}
+                    {c.suspended && (
+                      <span className={`ml-2 rounded-sm px-1.5 text-xs font-semibold ${FLAG_TONE.danger.chip}`}>
+                        Suspended
+                      </span>
+                    )}
+                    {!c.suspended && c.withdrawalsLocked && (
+                      <span className={`ml-2 rounded-sm px-1.5 text-xs font-semibold ${FLAG_TONE.caution.chip}`}>
+                        Withdrawals locked
+                      </span>
+                    )}
+                  </p>
                   <p className="break-all text-xs text-secondary">{c.email}</p>
                 </td>
                 <td className="whitespace-nowrap py-2 pr-3 text-secondary">
@@ -356,9 +395,32 @@ function CustomersTab({
                 <td className="py-2 pr-3 text-right tabular-nums text-secondary">
                   {c.refundedKobo > 0 ? money.format(c.refundedKobo) : "—"}
                 </td>
-                <td className={`whitespace-nowrap py-2 text-right font-semibold tabular-nums ${resultTone(c.resultKobo)}`}>
+                <td className={`whitespace-nowrap py-2 pr-3 text-right font-semibold tabular-nums ${resultTone(c.resultKobo)}`}>
                   {resultText(c.resultKobo, money)}
                 </td>
+                <td
+                  className={`whitespace-nowrap py-2 pr-3 text-right tabular-nums ${
+                    (c.balanceKobo ?? 0) < 0 ? "font-semibold text-no" : ""
+                  }`}
+                >
+                  {c.balanceKobo === undefined
+                    ? "—"
+                    : c.balanceKobo < 0
+                      ? `owes ${money.format(-c.balanceKobo)}`
+                      : money.format(c.balanceKobo)}
+                </td>
+                {onPick && (
+                  <td className="py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onPick(c.username)}
+                      disabled={busy || !c.username}
+                      className="h-8 whitespace-nowrap rounded-sm border border-border px-3 text-xs font-semibold text-secondary hover:text-primary disabled:opacity-40"
+                    >
+                      Act on them
+                    </button>
+                  </td>
+                )}
               </tr>
             );
           })}
@@ -611,14 +673,6 @@ function Stat({
       <dt className="text-xs font-medium text-secondary">{label}</dt>
       <dd className={`mt-0.5 text-lg font-semibold tabular-nums ${valueClass}`}>{value}</dd>
       {note && <dd className="text-[11px] leading-4 text-tertiary">{note}</dd>}
-    </div>
-  );
-}
-
-function Notice({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="max-w-3xl rounded-xl border border-border bg-surface p-6 text-sm leading-6 text-secondary shadow-card">
-      {children}
     </div>
   );
 }

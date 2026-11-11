@@ -1,5 +1,5 @@
 import { User } from "../models.js";
-import { Position } from "./models.js";
+import { NairaAccount, Position } from "./models.js";
 import { pausedPattern } from "./paused.js";
 
 /**
@@ -61,6 +61,10 @@ export interface TopicCustomer {
   /** Stake-weighted average price paid per ₦100 share. */
   avgPriceKobo: number;
   lastSettledAt: string | null;
+  /** Their credit balance now; below zero = they owe it. */
+  balanceKobo: number;
+  suspended: boolean;
+  withdrawalsLocked: boolean;
 }
 
 /** One market's bets — for a 15-minute series, one window. */
@@ -84,6 +88,12 @@ export interface TopicRound {
 export interface TopicBetsReport {
   topics: string[];
   hours: number;
+  /**
+   * When set, the report counts the bets placed from this moment (ISO),
+   * whenever they settled, instead of the ones settled in the last `hours`:
+   * the same bets a reversal from that moment would touch.
+   */
+  sinceAt: string | null;
   totals: {
     customers: number;
     bets: number;
@@ -117,11 +127,15 @@ const avg = (priceStake: number, stake: number) => (stake > 0 ? Math.round(price
 export async function getTopicBets(
   topics: readonly string[],
   hoursAsked: number,
+  /** Bets placed from this moment instead (see TopicBetsReport.sinceAt). */
+  placedFrom?: Date,
 ): Promise<TopicBetsReport> {
   const hours = Math.min(Math.max(Math.round(hoursAsked), 1), MAX_HOURS);
+  const sinceAt = placedFrom ? placedFrom.toISOString() : null;
   const empty: TopicBetsReport = {
     topics: [...topics],
     hours,
+    sinceAt,
     totals: {
       customers: 0,
       bets: 0,
@@ -144,11 +158,13 @@ export async function getTopicBets(
   const pattern = pausedPattern(topics);
   if (!pattern) return empty;
   const onTopic = { $or: [{ eventTitle: pattern }, { eventSlug: pattern }, { marketTitle: pattern }] };
-  const since = new Date(Date.now() - hours * 3_600_000);
+  const window = placedFrom
+    ? { createdAt: { $gte: placedFrom } }
+    : { settledAt: { $gte: new Date(Date.now() - hours * 3_600_000) } };
 
   const [settled, [openAgg]] = await Promise.all([
     Position.find(
-      { status: { $in: ["won", "lost", "voided"] }, settledAt: { $gte: since }, ...onTopic },
+      { status: { $in: ["won", "lost", "voided"] }, ...window, ...onTopic },
       {
         authUserId: 1,
         marketId: 1,
@@ -175,11 +191,16 @@ export async function getTopicBets(
   const truncated = settled.length > MAX_BETS;
   const rows = settled.slice(0, MAX_BETS);
 
-  const users = await User.find(
-    { authUserId: { $in: [...new Set(rows.map((b) => b.authUserId))] } },
-    { authUserId: 1, username: 1, email: 1 },
-  ).lean();
+  const ids = [...new Set(rows.map((b) => b.authUserId))];
+  const [users, accounts] = await Promise.all([
+    User.find(
+      { authUserId: { $in: ids } },
+      { authUserId: 1, username: 1, email: 1, suspendedAt: 1, withdrawalsLockedAt: 1 },
+    ).lean(),
+    NairaAccount.find({ authUserId: { $in: ids } }, { authUserId: 1, balanceKobo: 1 }).lean(),
+  ]);
   const userById = new Map(users.map((u) => [u.authUserId, u]));
+  const balanceById = new Map(accounts.map((a) => [a.authUserId, a.balanceKobo]));
 
   const totals = { ...empty.totals };
   let totalPriceStake = 0;
@@ -217,6 +238,9 @@ export async function getTopicBets(
       resultKobo: 0,
       avgPriceKobo: 0,
       lastSettledAt: iso(b.settledAt), // rows are newest first
+      balanceKobo: balanceById.get(b.authUserId) ?? 0,
+      suspended: Boolean(u?.suspendedAt),
+      withdrawalsLocked: Boolean(u?.withdrawalsLockedAt),
       priceStake: 0,
     };
     c.bets += 1;
@@ -264,6 +288,7 @@ export async function getTopicBets(
   return {
     topics: [...topics],
     hours,
+    sinceAt,
     totals,
     open: { bets: openAgg?.bets ?? 0, stakeKobo: openAgg?.stakeKobo ?? 0 },
     customers: [...customers.values()]

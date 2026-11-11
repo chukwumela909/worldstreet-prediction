@@ -441,6 +441,10 @@ export interface TopicCustomer {
   /** Stake-weighted average price paid per ₦100 share. */
   avgPriceKobo: number;
   lastSettledAt: string | null;
+  /** Absent on an older API. */
+  balanceKobo?: number;
+  suspended?: boolean;
+  withdrawalsLocked?: boolean;
 }
 
 /** One market's bets — for a 15-minute series, one window. */
@@ -464,6 +468,8 @@ export interface TopicRound {
 export interface TopicBetsReport {
   topics: string[];
   hours: number;
+  /** Counting bets placed from this moment; null or absent = settled in the last `hours`. */
+  sinceAt?: string | null;
   totals: {
     customers: number;
     bets: number;
@@ -490,9 +496,12 @@ export interface TopicBetsReport {
 export async function fetchTopicBets(params: {
   topics?: string[];
   hours: number;
+  /** Bets placed from this exact moment instead (ISO with offset). */
+  sinceAt?: string | null;
 }): Promise<TopicBetsReport> {
   const qs = new URLSearchParams({ hours: String(params.hours) });
   if (params.topics && params.topics.length > 0) qs.set("topics", params.topics.join(","));
+  if (params.sinceAt) qs.set("sinceAt", params.sinceAt);
   try {
     const res = await apiFetch<{ data: TopicBetsReport }>(`/v1/admin/topic-bets?${qs}`);
     return res.data;

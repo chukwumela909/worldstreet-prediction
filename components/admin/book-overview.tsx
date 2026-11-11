@@ -11,7 +11,7 @@ import { useAdminMoney } from "@/lib/admin-money";
 import { UsdRateNote } from "@/components/admin/currency-switch";
 
 /**
- * The owner's headline numbers, at the top of the Local book desk:
+ * The owner's headline numbers, at the top of Today:
  * what the book made or lost, what was staked, what went to winners,
  * and what is riding right now. Read from GET /v1/admin/overview.
  *

@@ -104,6 +104,25 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },
+  // The admin desk's old addresses, from before it was five sections
+  // (components/admin/admin-shell.tsx): bookmarks and alert emails still
+  // land on the right view. Temporary (307), so they can move again.
+  async redirects() {
+    const moved: [string, string][] = [
+      ["/admin/alerts", "/admin"],
+      ["/admin/traders", "/admin/customers"],
+      ["/admin/abuse", "/admin/customers/flagged"],
+      ["/admin/money-checks", "/admin/customers/flagged"],
+      ["/admin/action", "/admin/customers/action"],
+      ["/admin/recovery", "/admin/customers/action"],
+      ["/admin/settled", "/admin/customers/action"],
+      ["/admin/support", "/admin/customers/support"],
+      ["/admin/withdrawals", "/admin/money"],
+      ["/admin/wallet-check", "/admin/money/wallet-test"],
+      ["/admin/money-test", "/admin/money/wallet-test"],
+    ];
+    return moved.map(([source, destination]) => ({ source, destination, permanent: false }));
+  },
   experimental: {
     // Client router cache. `dynamic` is how long a page the visitor has
     // already seen is reused on the way back (default 0: every tab switch

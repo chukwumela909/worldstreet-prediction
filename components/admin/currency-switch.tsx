@@ -76,7 +76,7 @@ export function CurrencySwitch({
       {hint && !usdReady && (
         <p className="text-[11px] font-medium text-tertiary" role="status">
           {noRate ? (
-            <Link href="/admin#conversion-rate" className="hover:text-primary hover:underline">
+            <Link href="/admin/settings#conversion-rate" className="hover:text-primary hover:underline">
               {reason}
             </Link>
           ) : (

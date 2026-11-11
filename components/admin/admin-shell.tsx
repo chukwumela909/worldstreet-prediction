@@ -5,13 +5,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeftIcon as ArrowLeft,
-  ArrowUturnLeftIcon as Recovery,
-  BanknotesIcon as Coins,
-  BeakerIcon as Test,
-  BoltIcon as Act,
-  ChatBubbleLeftRightIcon as Support,
+  BanknotesIcon as Money,
+  ChartBarIcon as Markets,
   Cog6ToothIcon as Settings,
-  ShieldExclamationIcon as Shield,
+  InboxIcon as Today,
   UsersIcon as Users,
 } from "@heroicons/react/24/outline";
 import { useAuth } from "@/components/auth/auth-context";
@@ -20,53 +17,60 @@ import { AdminUnlock } from "./admin-unlock";
 import { CurrencySwitch } from "./currency-switch";
 
 /**
- * The sidebar's sections. A section with more than one page shows them
- * as tabs along the top of the page — the pages and their addresses are
- * unchanged, only the sidebar is shorter.
+ * The desk in five sections, each one kind of work, every action in one
+ * place:
+ *  - Today: what needs someone now (markets to pay out, customers to
+ *    check, money at risk, what's waiting) and how the book stands.
+ *  - Markets: our own markets, and every open one with the controls for
+ *    a type of market (stop new bets, close and refund, close early).
+ *  - Customers: the people, the flagged ones, putting a type of market
+ *    right (Take action), and their support requests.
+ *  - Money: withdrawals, and the wallet test.
+ *  - Settings: pricing, limits, the conversion rate.
+ * A section with more than one view shows them as tabs along the top.
+ * The old addresses redirect here (next.config.ts).
  */
 const NAV = [
+  { label: "Today", icon: Today, pages: [{ href: "/admin", label: "Today" }] },
   {
-    label: "Book",
-    icon: Coins,
+    label: "Markets",
+    icon: Markets,
     pages: [
-      { href: "/admin", label: "Local book" },
       { href: "/admin/markets", label: "Our markets" },
-    ],
-  },
-  { label: "Traders", icon: Users, pages: [{ href: "/admin/traders", label: "Traders" }] },
-  { label: "Take action", icon: Act, pages: [{ href: "/admin/action", label: "Take action" }] },
-  {
-    label: "Watch",
-    icon: Shield,
-    pages: [
-      { href: "/admin/alerts", label: "Alerts" },
-      { href: "/admin/withdrawals", label: "Withdrawals" },
-      { href: "/admin/abuse", label: "Suspicious customers" },
-      { href: "/admin/money-checks", label: "Money checks" },
+      { href: "/admin/markets/open", label: "All open" },
     ],
   },
   {
-    label: "Test",
-    icon: Test,
+    label: "Customers",
+    icon: Users,
     pages: [
-      { href: "/admin/wallet-check", label: "1. Quick wallet check" },
-      { href: "/admin/money-test", label: "2. Full money test" },
+      { href: "/admin/customers", label: "People" },
+      { href: "/admin/customers/flagged", label: "Flagged" },
+      { href: "/admin/customers/action", label: "Take action" },
+      { href: "/admin/customers/support", label: "Support" },
     ],
   },
   {
-    label: "Incidents",
-    icon: Recovery,
+    label: "Money",
+    icon: Money,
     pages: [
-      { href: "/admin/settled", label: "Settled bets" },
-      { href: "/admin/recovery", label: "Recovery" },
+      { href: "/admin/money", label: "Withdrawals" },
+      { href: "/admin/money/wallet-test", label: "Wallet test" },
     ],
   },
-  { label: "Support", icon: Support, pages: [{ href: "/admin/support", label: "Support" }] },
   { label: "Settings", icon: Settings, pages: [{ href: "/admin/settings", label: "Settings" }] },
 ] as const;
 
-const isOn = (href: string, pathname: string) =>
-  href === "/admin" ? pathname === href : pathname.startsWith(href);
+const PAGES: string[] = NAV.flatMap((g) => g.pages.map((p) => p.href));
+
+/** The page the address belongs to: the longest href it is, or sits under. */
+function currentHref(pathname: string): string | null {
+  let best: string | null = null;
+  for (const href of PAGES) {
+    if ((pathname === href || pathname.startsWith(`${href}/`)) && (!best || href.length > best.length)) best = href;
+  }
+  return best;
+}
 
 /**
  * Admin chrome: sidebar on desktop, horizontal tab row on mobile. Both
@@ -128,7 +132,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
     </span>
   );
 
-  const section = NAV.find((g) => g.pages.some((p) => isOn(p.href, pathname)));
+  const here = currentHref(pathname);
+  const section = NAV.find((g) => g.pages.some((p) => p.href === here));
 
   const nav = NAV.map(({ label, icon: Icon, pages }) => {
     const href = pages[0].href;
@@ -204,7 +209,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             className="mb-5 inline-flex max-w-full overflow-x-auto rounded-md bg-element-2 p-1"
           >
             {section.pages.map((p) => {
-              const on = isOn(p.href, pathname);
+              const on = p.href === here;
               return (
                 <Link
                   key={p.href}

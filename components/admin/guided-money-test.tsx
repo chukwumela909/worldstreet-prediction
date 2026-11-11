@@ -49,7 +49,7 @@ function compare(step: StepKey, amount: number, before: TestAccount, after: Test
     return { ok: false, lines: [`Couldn't read the dollar wallet: ${after.walletError || before.walletError}`] };
   }
   const want = expected(step, amount, before);
-  if (!want) return { ok: false, lines: ["No exchange rate is set. Set one on the Local book."] };
+  if (!want) return { ok: false, lines: ["No exchange rate is set. Set one in Settings."] };
   const dollars = after.dollarsMinor - before.dollarsMinor;
   const credit = after.balanceKobo - before.balanceKobo;
   const lines = [
@@ -129,8 +129,8 @@ export function GuidedTest() {
   const done = passed("deposit") && passed("bet") && passed("withdraw") && bank === "yes" && approval === "yes";
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Full money test</h1>
+    <section id="full-money-test" className="mt-10 scroll-mt-6">
+      <h2 className="text-xl font-semibold tracking-tight">2. Full money test</h2>
       <p className="mt-1 text-sm text-secondary">
         Do each step yourself on the customer site, logged in as your own account, in another tab, using a small amount
         of real money. Then click the check button here, and this page tells you if the money moved correctly. This page
@@ -258,7 +258,7 @@ export function GuidedTest() {
           )}
         </>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -345,7 +345,7 @@ function AskStep({
       <StepTitle n={n} title={title} state={answer === "yes" ? "pass" : answer === "no" ? "fail" : null} />
       <p className="mt-1 text-sm text-secondary">{how}</p>
       {link && (
-        <Link href="/admin/withdrawals" target="_blank" className="mt-1 inline-block text-xs font-semibold text-accent-ink hover:underline">
+        <Link href="/admin/money" target="_blank" className="mt-1 inline-block text-xs font-semibold text-accent-ink hover:underline">
           Open Withdrawals in a new tab
         </Link>
       )}

@@ -341,7 +341,7 @@ function EventCard({
                 </Link>
               </>
             )}
-            . Settle it from the Local book desk.
+            . Settle it in Markets, All open.
           </p>
         </div>
       )}

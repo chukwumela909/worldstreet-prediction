@@ -8,18 +8,14 @@ import {
   SignalSlashIcon as CloudOff,
   ArrowPathIcon as Loader2,
   EnvelopeIcon as Mail,
-  ArrowPathIcon as RefreshCw,
   ChevronDownIcon as ChevronDown,
 } from "@heroicons/react/24/outline";
 import { bookHref } from "@/lib/book";
-import { ApiError, isApiConfigured } from "@/lib/api-client";
+import { ApiError } from "@/lib/api-client";
 import {
-  fetchSettlementQueue,
-  fetchSettlements,
   sendTestAlert,
   setFxRate,
   settleMarket,
-  useAdminResource,
   voidMarket,
   type AlertTestResult,
   type Attention,
@@ -34,105 +30,25 @@ import {
   useAdminFx,
   useAdminMoney,
 } from "@/lib/admin-money";
-import { BookRiskStrip } from "@/components/admin/book-risk";
-import { BookOverview } from "@/components/admin/book-overview";
 
 /**
- * The Local (naira) book's operating desk. It opens on the owner's
- * headline numbers (BookOverview: profit or loss, money staked, paid
- * out, in play), then the open book's risk, then its two jobs:
+ * The Local (naira) book's working parts, shared by the admin views that
+ * show them: the settlement queue and recent settlements (Markets → All
+ * open), the conversion rate and the test alert (Settings), and one
+ * market's settle-or-void row (also on Today's to-do list).
  *
- *  - the FX rate, which nothing else can set and without which the
- *    whole book is inert (no rate → conversions 503 → nobody can fund)
- *  - settlement, for both origins of market. On the Bayse half the
- *    poller has already handled the easy cases and what's left is
- *    exceptions: resolved-but-unsettled, a winning label Bayse's own
- *    outcomes don't match, overdue, or unreachable. On our own markets
- *    there is no poller to defer to — this desk IS the oracle, and
- *    every one of them ends up here.
- *
- * Writing those markets is the Markets desk next door; this one only
- * ever finishes them.
+ * Settlement covers both origins of market. On the Bayse half the poller
+ * has already handled the easy cases and what's left is exceptions:
+ * resolved-but-unsettled, a winning label Bayse's own outcomes don't
+ * match, overdue, or unreachable. On our own markets there is no poller
+ * to defer to: the desk IS the oracle, and every one of them ends up in
+ * the queue.
  *
  * Settling pays out every open position on the market, so both actions
  * ask for confirmation and neither is undoable.
  *
  * Amounts follow the desk's naira/dollar switch (useAdminMoney).
  */
-export function LocalDesk() {
-  const queue = useAdminResource(fetchSettlementQueue, true);
-  const settlements = useAdminResource(fetchSettlements, true);
-  // The overview and the risk strip read their own endpoints; settling
-  // here empties part of the book, so they re-read with the rest of the desk.
-  const [bookVersion, setBookVersion] = useState(0);
-  const refresh = () => {
-    queue.refresh();
-    settlements.refresh();
-    setBookVersion((v) => v + 1);
-    void refreshAdminFx();
-  };
-
-  if (!isApiConfigured()) {
-    return (
-      <Notice>
-        This desk needs the prediction API. Set{" "}
-        <code className="font-mono text-[13px]">NEXT_PUBLIC_API_URL</code> and
-        rebuild.
-      </Notice>
-    );
-  }
-
-  // 403 means a signed-in non-admin, not a broken page.
-  if (queue.errorCode === "FORBIDDEN" || settlements.errorCode === "FORBIDDEN") {
-    return (
-      <Notice>
-        Your account isn&rsquo;t an admin of the Local book. Ask for the{" "}
-        <code className="font-mono text-[13px]">admin</code> role on your
-        central WorldStreet account.
-      </Notice>
-    );
-  }
-
-  return (
-    <>
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Local book</h1>
-          <p className="mt-1 text-sm text-secondary">
-            Credit markets, ours and Bayse&rsquo;s, settled by us.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <TestAlertButton />
-          <button
-            onClick={refresh}
-            className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
-          >
-            <RefreshCw
-              className={`size-3.5 ${queue.loading ? "animate-spin" : ""}`}
-            />
-            Refresh
-          </button>
-        </div>
-      </div>
-
-      <BookOverview reloadKey={bookVersion} />
-
-      <BookRiskStrip reloadKey={bookVersion} />
-
-      <FxCard />
-
-      <SettlementQueue
-        queue={queue.data}
-        loading={queue.loading}
-        error={queue.error}
-        onDone={refresh}
-      />
-
-      <RecentSettlements items={settlements.data} />
-    </>
-  );
-}
 
 /* ---------- settlement queue ---------- */
 
@@ -142,22 +58,28 @@ const QUEUE_PAGE = 20;
 /**
  * Every event that still has open bets — most of them just waiting for
  * their result. The desk only has to act on the ones the API flags
- * (resolved but unsettled, overdue, cancelled, unmatched, unreachable),
- * so those come first under "Needs action" with their settle controls
- * open; everything else sits folded under "All open", searchable.
+ * (resolved but unsettled, overdue, cancelled, unmatched, unreachable).
+ *
+ * "split" (the default): those come first under "Needs action" with their
+ * settle controls open; everything else sits folded under "All open",
+ * searchable. "all": one searchable list, no toggle, the flagged events
+ * first with their settle controls open and the rest folded below.
  */
-function SettlementQueue({
+export function SettlementQueue({
   queue,
   loading,
   error,
   onDone,
+  mode = "split",
 }: {
   queue: SettlementQueueData | null;
   loading: boolean;
   error: string | null;
   onDone: () => void;
+  mode?: "split" | "all";
 }) {
-  const [view, setView] = useState<"action" | "all">("action");
+  const [picked, setView] = useState<"action" | "all">("action");
+  const view = mode === "all" ? "all" : picked;
   const [search, setSearch] = useState("");
   const [shown, setShown] = useState(QUEUE_PAGE);
 
@@ -191,12 +113,16 @@ function SettlementQueue({
     <section className="mt-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">Settlement queue</h2>
+          <h2 className="text-lg font-semibold">{mode === "all" ? "Open markets" : "Settlement queue"}</h2>
           <p className="mt-0.5 text-[13px] text-secondary">
-            Markets with open bets. Only the flagged ones need you.
+            {mode === "all" && queue
+              ? `${events.length} with open bets${
+                  needsAction.length > 0 ? `, ${needsAction.length} flagged and shown first` : ""
+                }. Only the flagged ones need you.`
+              : "Markets with open bets. Only the flagged ones need you."}
           </p>
         </div>
-        {queue && (
+        {queue && mode === "split" && (
           <div role="group" aria-label="Queue view" className="flex rounded-md bg-element-2 p-0.5">
             {tab("action", "Needs action", needsAction.length)}
             {tab("all", "All open", events.length)}
@@ -254,7 +180,7 @@ function SettlementQueue({
             event={event}
             overdueHours={queue!.overdueHours}
             onDone={onDone}
-            startOpen={view === "action"}
+            startOpen={view === "action" || (mode === "all" && event.attention !== null)}
           />
         ))}
       </div>
@@ -284,7 +210,7 @@ function SettlementQueue({
 
 const SETTLED_PAGE = 10;
 
-function RecentSettlements({ items }: { items: SettlementRecord[] | null }) {
+export function RecentSettlements({ items }: { items: SettlementRecord[] | null }) {
   const money = useAdminMoney();
   const [shown, setShown] = useState(SETTLED_PAGE);
   if (!items) return null;
@@ -357,7 +283,7 @@ function RecentSettlements({ items }: { items: SettlementRecord[] | null }) {
  * one through the real path and says exactly what came back — including
  * Resend's own reason when it refuses.
  */
-function TestAlertButton() {
+export function TestAlertButton() {
   const [pending, setPending] = useState(false);
   const [result, setResult] = useState<AlertTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -417,7 +343,8 @@ function describeAlertResult(r: AlertTestResult): string {
 
 /* ---------- FX rate ---------- */
 
-function FxCard() {
+/** The conversion rate card; Settings shows it (anchor #conversion-rate). */
+export function FxCard() {
   // the admin endpoint, not the user wallet's: a desk unlocked with an
   // access key has no user session to read the wallet with
   const { fx: current, status, error: loadError } = useAdminFx();
@@ -551,7 +478,7 @@ function nairaRate(n: number): string {
 
 /* ---------- settlement queue ---------- */
 
-const ATTENTION: Record<
+export const ATTENTION: Record<
   NonNullable<Attention>,
   { label: string; className: string }
 > = {
@@ -651,7 +578,7 @@ function QueueCard({
   );
 }
 
-/** One market's settle-or-void control; the Alerts tab reuses it. */
+/** One market's settle-or-void control; Today's to-do list reuses it. */
 export function MarketRow({
   eventId,
   market,
@@ -787,15 +714,6 @@ function Stat({ label, value }: { label: string; value: string }) {
     <div className="min-w-0 rounded-md border border-border bg-page px-3 py-2">
       <p className="text-xs font-medium text-secondary">{label}</p>
       <p className="mt-0.5 text-base font-semibold">{value}</p>
-    </div>
-  );
-}
-
-function Notice({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="mx-auto max-w-md rounded-xl border border-border bg-surface p-8 text-center shadow-card">
-      <h1 className="text-lg font-semibold">Local book</h1>
-      <p className="mt-2 text-sm text-secondary">{children}</p>
     </div>
   );
 }

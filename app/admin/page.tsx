@@ -1,9 +1,9 @@
-import { LocalDesk } from "@/components/admin/local-desk";
+import { TodayDesk } from "@/components/admin/today-desk";
 
 /**
- * The Local book's operating desk: the FX rate and settlement, for both
- * origins of market. Writing Worldstreet's own markets is /admin/markets.
+ * Today: what needs someone now (markets to pay out, customers to check,
+ * money at risk, withdrawals and support waiting) and how the book stands.
  */
 export default function AdminPage() {
-  return <LocalDesk />;
+  return <TodayDesk />;
 }

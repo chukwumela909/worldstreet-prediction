@@ -27,7 +27,7 @@ export function PausedRefundsReport() {
     <section className="mt-6 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">Refunds from paused markets</h2>
+          <h2 className="text-lg font-semibold">Refunds from closed markets</h2>
           <p className="mt-0.5 text-sm text-secondary">
             Last 3 days · who was refunded, how much, and who has had the apology email.
           </p>

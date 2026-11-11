@@ -204,6 +204,8 @@ const topicBetsQuery = z.object({
   /** Comma-separated; absent = the paused topics. */
   topics: z.string().max(400).optional(),
   hours: z.coerce.number().int().min(1).max(2160).default(72),
+  /** Bets placed from this exact moment instead of settled in the last `hours`. */
+  sinceAt: z.iso.datetime({ offset: true }).optional(),
 });
 
 const refundsQuery = z.object({
@@ -568,11 +570,16 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       throw new ApiError(400, "Name at least one topic, e.g. bitcoin", "NO_TOPICS");
     }
     if (topics.length > 10) throw new ApiError(400, "At most 10 topics at once", "TOO_MANY_TOPICS");
-    const bad = topics.find((t) => !isUsableTopic(t));
+    // a word, or a market's slug from a pasted link (longer than a saved topic)
+    const bad = topics.find((t) => !isUsableTopic(t) && !MARKET_SLUG.test(t));
     if (bad !== undefined) {
       throw new ApiError(400, `"${bad}" isn't a usable topic — letters, numbers, spaces, dots or dashes`, "BAD_TOPIC");
     }
-    return { success: true, data: await getTopicBets(topics, request.query.hours) };
+    const { sinceAt } = request.query;
+    return {
+      success: true,
+      data: await getTopicBets(topics, request.query.hours, sinceAt ? new Date(sinceAt) : undefined),
+    };
   });
 
   /**

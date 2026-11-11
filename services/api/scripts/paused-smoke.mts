@@ -268,6 +268,16 @@ check(
 check("the average price paid, stake-weighted", t.avgPriceKobo === 5_500 && bola?.avgPriceKobo === 5_500);
 check("other topics stay out", !topicBets.bets.some((b) => /ETH/.test(b.eventTitle)));
 check("a topic with nothing on it is empty", (await getTopicBets(["dogecoin"], 72)).totals.bets === 0);
+check(
+  "each customer comes with their balance and account status",
+  topicBets.customers.every((c) => typeof c.balanceKobo === "number" && c.suspended === false && c.withdrawalsLocked === false),
+);
+check("a placed-from moment says so", (await getTopicBets(btc, 72, new Date(Date.now() - 3_600_000))).sinceAt !== null);
+check(
+  "…and counts only bets placed from it",
+  (await getTopicBets(btc, 72, new Date(Date.now() + 3_600_000))).totals.bets === 0 &&
+    (await getTopicBets(btc, 72, new Date(0))).totals.bets === topicBets.totals.bets,
+);
 
 /* ---------------- stopping new bets only ---------------- */
 console.log("stopped");

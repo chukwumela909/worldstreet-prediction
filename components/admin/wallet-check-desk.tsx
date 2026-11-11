@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import {
   CheckCircleIcon as Check,
   MinusCircleIcon as Skipped,
@@ -17,8 +16,8 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  * picks, takes it back, and repeats each request to prove nothing pays
  * twice, reading the balance every time (trading/wallet-check.ts). The
  * answer is a plain working or not working, with the wallet's own words
- * for each step to pass to the wallet team. The full money test is the next
- * tab (guided-money-test.tsx).
+ * for each step to pass to the wallet team. Step 1 of the Wallet test page;
+ * the full money test is step 2 (guided-money-test.tsx).
  */
 
 export function WalletCheckDesk() {
@@ -72,15 +71,15 @@ export function WalletCheckDesk() {
   const [latest, ...earlier] = runs ?? [];
 
   return (
-    <div className="max-w-3xl">
-      <h1 className="text-2xl font-semibold tracking-tight">Quick wallet check</h1>
+    <section className="mt-6">
+      <h2 className="text-xl font-semibold tracking-tight">1. Quick wallet check</h2>
       <p className="mt-1 text-sm text-secondary">
         One button, a few seconds. It tests adding and taking dollars, and that nothing pays or charges twice. If it
         says Working, go on to the{" "}
-        <Link href="/admin/money-test" className="font-semibold text-accent-ink hover:underline">
+        <a href="#full-money-test" className="font-semibold text-accent-ink hover:underline">
           full money test
-        </Link>
-        .
+        </a>{" "}
+        below.
       </p>
 
       <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
@@ -146,7 +145,7 @@ export function WalletCheckDesk() {
 
       {earlier.length > 0 && (
         <section className="mt-4 rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
-          <h2 className="text-base font-semibold">Earlier checks</h2>
+          <h3 className="text-base font-semibold">Earlier checks</h3>
           <ul className="mt-2 flex flex-col divide-y divide-border">
             {earlier.map((r) => (
               <li key={r.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
@@ -161,7 +160,7 @@ export function WalletCheckDesk() {
           </ul>
         </section>
       )}
-    </div>
+    </section>
   );
 }
 
@@ -173,9 +172,9 @@ function Result({ run }: { run: WalletCheckRun }) {
         working ? "border-border bg-yes-tint" : FLAG_TONE.danger.banner
       }`}
     >
-      <h2 className={`text-xl font-semibold ${working ? "text-yes" : "text-no"}`}>
+      <h3 className={`text-xl font-semibold ${working ? "text-yes" : "text-no"}`}>
         {working ? "Working" : "Not working"}
-      </h2>
+      </h3>
       <p className="mt-1 text-sm font-semibold text-primary">{run.summary}</p>
       <p className="mt-1 text-xs text-secondary">
         Tested on @{run.account} by {run.ranBy} · {when(run.ranAt)}

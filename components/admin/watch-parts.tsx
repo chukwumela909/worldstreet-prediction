@@ -8,7 +8,7 @@ import type { AdminMoney } from "@/lib/admin-money";
 import { AccountControl } from "@/components/admin/account-control";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
-/** The pieces the Suspicious customers and Money checks tabs share. */
+/** The pieces of the Flagged customers view (flagged-desk.tsx). */
 
 const NEUTRAL = "bg-element-2 text-secondary";
 

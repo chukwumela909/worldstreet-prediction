@@ -13,10 +13,8 @@ import {
 import { CREDIT, formatNaira } from "@/lib/format";
 import { isApiConfigured } from "@/lib/api-client";
 import { showToast } from "@/lib/toast-store";
-import { PausedMarketsCard } from "@/components/admin/paused-markets";
-import { PausedRefundsReport } from "@/components/admin/paused-refunds";
-import { EarlyCloseCard } from "@/components/admin/early-close-card";
-import { StopBetsCard } from "@/components/admin/stop-bets-card";
+import { refreshAdminFx } from "@/lib/admin-money";
+import { FxCard, TestAlertButton } from "@/components/admin/local-desk";
 import {
   fetchBookSettings,
   updateBookSettings,
@@ -51,6 +49,11 @@ import {
  *
  * Nothing is sent until Save, and Save asks first, listing each change
  * in the same friendly units. Only the changed keys go to the API.
+ *
+ * Above the form, the conversion rate (nothing else can set it, and with
+ * no rate nobody can fund a balance); in the header, a test alert email.
+ * The topic lists (stop, close and refund, close early) are edited on
+ * Markets → All open, in Market controls; History still names them.
  */
 
 /* ---------- what each setting is, in friendly units ---------- */
@@ -169,14 +172,14 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
     label: "Close count markets early",
     unit: "hours",
     step: 1,
-    info: "Markets whose answer shows itself during the day — a count of posts or likes anyone can watch — stop taking bets this many hours before they close, before the answer is plain. Which markets: the topics on the Markets that close early card. Set to 0 to switch it off.",
+    info: "Markets whose answer shows itself during the day — a count of posts or likes anyone can watch — stop taking bets this many hours before they close, before the answer is plain. Which markets: the words set to Close early in Market controls (Markets → All open). Set to 0 to switch it off.",
   },
   withdrawalReviewKobo: {
     key: "withdrawalReviewKobo",
     label: "Approve withdrawals over (per day)",
     unit: "credit",
     step: 10_000,
-    info: "When a customer's withdrawals to dollars in the last 24 hours reach this much, the withdrawal waits in Watch → Withdrawals for an admin to approve it before any money leaves — splitting it into smaller ones doesn't get round it. Any withdrawal by a customer flagged as suspicious waits too, whatever its size. Set to 0 to let withdrawals go straight out (flagged accounts still wait).",
+    info: "When a customer's withdrawals to dollars in the last 24 hours reach this much, the withdrawal waits in Money → Withdrawals for an admin to approve it before any money leaves — splitting it into smaller ones doesn't get round it. Any withdrawal by a customer flagged as suspicious waits too, whatever its size. Set to 0 to let withdrawals go straight out (flagged accounts still wait).",
   },
   lossAlertKobo: {
     key: "lossAlertKobo",
@@ -188,7 +191,7 @@ const FIELDS: Record<NumericBookSettingKey, NumberField> = {
 };
 
 /** Page order — the groups below, flattened. */
-/** The settings this form edits — all but the topic lists, which have their own cards. */
+/** The settings this form edits — all but the topic lists, which Market controls edits. */
 type FormKey = Exclude<BookSettingKey, "pausedTopics" | "earlyCloseTopics" | "stoppedTopics">;
 
 const ORDER: FormKey[] = [
@@ -526,17 +529,25 @@ export function SettingsDesk() {
             </p>
           )}
         </div>
-        <button
-          type="button"
-          onClick={resource.refresh}
-          className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
-        >
-          <RefreshCw
-            className={`size-3.5 ${resource.loading ? "animate-spin" : ""}`}
-          />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          <TestAlertButton />
+          <button
+            type="button"
+            onClick={() => {
+              resource.refresh();
+              void refreshAdminFx();
+            }}
+            className="flex h-9 items-center gap-1.5 rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
+          >
+            <RefreshCw
+              className={`size-3.5 ${resource.loading ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+        </div>
       </div>
+
+      <FxCard />
 
       {state ? (
         <>
@@ -544,28 +555,6 @@ export function SettingsDesk() {
             <p className="mt-3 text-sm font-semibold text-no">
               Couldn&rsquo;t refresh: {resource.error}
             </p>
-          )}
-          {/* an older API publishes no topics: nothing to show */}
-          {Array.isArray(state.settings.pausedTopics) && (
-            <>
-              <PausedMarketsCard
-                state={state}
-                onSaved={(next) => setSaved({ state: next, over: resource.data })}
-              />
-              <PausedRefundsReport />
-            </>
-          )}
-          {Array.isArray(state.settings.stoppedTopics) && (
-            <StopBetsCard
-              state={state}
-              onSaved={(next) => setSaved({ state: next, over: resource.data })}
-            />
-          )}
-          {Array.isArray(state.settings.earlyCloseTopics) && (
-            <EarlyCloseCard
-              state={state}
-              onSaved={(next) => setSaved({ state: next, over: resource.data })}
-            />
           )}
           <SettingsForm
             state={state}

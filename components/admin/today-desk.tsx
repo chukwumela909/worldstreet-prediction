@@ -22,17 +22,24 @@ import {
 import { useAdminMoney } from "@/lib/admin-money";
 import { showToast } from "@/lib/toast-store";
 import { AccountControl } from "@/components/admin/account-control";
+import { BookOverview } from "@/components/admin/book-overview";
 import { BookRiskStrip } from "@/components/admin/book-risk";
-import { MarketRow } from "@/components/admin/local-desk";
+import { ATTENTION, MarketRow } from "@/components/admin/local-desk";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
- * Alerts, as a to-do list: what needs doing now, each with the action on
- * the card, then the old alerts that are already over, cleared in one go.
+ * Today: the desk's one inbox. The owner's headline numbers on top
+ * (BookOverview), then what needs doing now as a to-do list, each with the
+ * action on the card, then the old alerts that are already over, cleared
+ * in one go, then how the book stands (BookRiskStrip).
  *
  *  - Markets to pay out: one card per event (not per alert), with its
  *    unpaid bets and the settle or refund controls right there. Settling
  *    closes the event's alerts. An event whose bets are all paid is old.
+ *    The settlement queue's flagged events come in too, alert or not
+ *    (resolved but unsettled, overdue, cancelled, unmatched, unreachable),
+ *    so nothing that needs settling is missing; every other open market
+ *    waits under Markets, All open.
  *  - Customers to check: who, why in one line, and suspend or clear.
  *  - Money at risk: only while it's still happening.
  *  - Old alerts: anything that has stopped and needs no action.
@@ -55,7 +62,7 @@ const KIND_LABEL: Record<AlertKind, string> = {
   other: "Other",
 };
 
-export function AlertsDesk() {
+export function TodayDesk() {
   const [showCleared, setShowCleared] = useState(false);
   const [reloads, setReloads] = useState(0);
   const [loaded, setLoaded] = useState<{
@@ -110,9 +117,11 @@ export function AlertsDesk() {
     <div className="max-w-4xl">
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Alerts</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
           <p className="mt-1 text-sm text-secondary">
-            {showCleared ? "Alerts you've already cleared." : "What needs you, with the action on each card."}
+            {showCleared
+              ? "Alerts you've already cleared."
+              : "What needs you now, with the action on each card, and how the book stands."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -121,7 +130,7 @@ export function AlertsDesk() {
             onClick={() => setShowCleared(!showCleared)}
             className="flex h-9 items-center rounded-full border border-border px-4 text-sm font-semibold text-secondary hover:border-border-hover hover:text-primary"
           >
-            {showCleared ? "Back to the to-do list" : "Show cleared"}
+            {showCleared ? "Back to the to-do list" : "Show cleared alerts"}
           </button>
           <button
             type="button"
@@ -134,6 +143,8 @@ export function AlertsDesk() {
         </div>
       </div>
 
+      <BookOverview reloadKey={reloads} />
+
       {fresh?.error && <p className="mt-4 text-sm font-semibold text-no">Couldn&rsquo;t load: {fresh.error}</p>}
       {!data ? (
         <div className="mt-4 flex flex-col gap-2" aria-busy="true" aria-label="Loading alerts">
@@ -144,7 +155,7 @@ export function AlertsDesk() {
       ) : showCleared ? (
         <ClearedList alerts={data.alerts} />
       ) : (
-        <ToDo data={data} queue={queue} onChanged={reload} />
+        <ToDo data={data} queue={queue} reloadKey={reloads} onChanged={reload} />
       )}
     </div>
   );
@@ -159,7 +170,17 @@ interface MarketTask {
   queued: QueueEvent | null;
 }
 
-function ToDo({ data, queue, onChanged }: { data: AlertsView; queue: SettlementQueue | null; onChanged: () => void }) {
+function ToDo({
+  data,
+  queue,
+  reloadKey,
+  onChanged,
+}: {
+  data: AlertsView;
+  queue: SettlementQueue | null;
+  reloadKey: number;
+  onChanged: () => void;
+}) {
   // a queue that loaded in full says which events still owe customers money
   const queueComplete = queue !== null && !queue.truncated;
   const queuedById = new Map((queue?.events ?? []).map((e) => [e.eventId, e]));
@@ -188,6 +209,13 @@ function ToDo({ data, queue, onChanged }: { data: AlertsView; queue: SettlementQ
     else if (a.kind === "withdrawal" && data.waiting.withdrawals > 0) continue; // the banner below covers them
     else old.push(a);
   }
+  // the queue's flagged events with no alert of their own need settling
+  // just the same: this list is the old "Needs action" queue too
+  for (const e of queue?.events ?? []) {
+    if (e.attention !== null && !markets.has(e.eventId)) {
+      markets.set(e.eventId, { eventId: e.eventId, title: e.eventTitle || e.eventId, alerts: [], queued: e });
+    }
+  }
   const marketTasks = [...markets.values()];
   const todo = marketTasks.length + customers.length + risks.length;
 
@@ -209,10 +237,10 @@ function ToDo({ data, queue, onChanged }: { data: AlertsView; queue: SettlementQ
       {(data.waiting.support > 0 || data.waiting.withdrawals > 0) && (
         <div className="mt-3 flex flex-wrap gap-2">
           {data.waiting.withdrawals > 0 && (
-            <Waiting href="/admin/withdrawals" n={data.waiting.withdrawals} what="withdrawal" where="Withdrawals" />
+            <Waiting href="/admin/money" n={data.waiting.withdrawals} what="withdrawal" where="Withdrawals" />
           )}
           {data.waiting.support > 0 && (
-            <Waiting href="/admin/support" n={data.waiting.support} what="support request" where="Support" />
+            <Waiting href="/admin/customers/support" n={data.waiting.support} what="support request" where="Support" />
           )}
         </div>
       )}
@@ -251,7 +279,7 @@ function ToDo({ data, queue, onChanged }: { data: AlertsView; queue: SettlementQ
       {old.length > 0 && <OldAlerts alerts={old} onChanged={onChanged} />}
 
       <h2 className="mt-8 text-base font-semibold">The book right now</h2>
-      <BookRiskStrip reloadKey={data.alerts.length} />
+      <BookRiskStrip reloadKey={reloadKey} />
     </>
   );
 }
@@ -267,6 +295,8 @@ function MarketCard({ task, onChanged }: { task: MarketTask; onChanged: () => vo
   const days = ended ? Math.floor((now - ended.getTime()) / DAY_MS) : null;
   const unmatched = task.alerts.find((a) => a.subject.startsWith("Resolved market with unmatchable outcome"));
   const sourceSaid = unmatched ? text(unmatched.detail.resolvedOutcome) : "";
+  // the queue's own reason, on every flagged event (the only one when no alert came)
+  const flag = q?.attention ? ATTENTION[q.attention] : null;
 
   const closeAlerts = async () => {
     await Promise.all(task.alerts.map((a) => settleAlert(a.id, "Market settled").catch(() => undefined)));
@@ -275,12 +305,22 @@ function MarketCard({ task, onChanged }: { task: MarketTask; onChanged: () => vo
 
   return (
     <li className="rounded-xl border border-border bg-surface p-4 shadow-card sm:p-5">
-      <h3 className="text-base font-semibold">{task.title}</h3>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-base font-semibold">{task.title}</h3>
+        {flag && (
+          <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${flag.className}`}>{flag.label}</span>
+        )}
+      </div>
       <p className="mt-0.5 text-sm text-secondary">
         {ended ? `Ended ${day(ended)}` : "Ended"}
         {days !== null && days >= 1 && <b className={days >= 3 ? "text-no" : "text-primary"}> · waiting {days} day{days === 1 ? "" : "s"}</b>}
         {q && ` · ${q.openPositions} bet${q.openPositions === 1 ? "" : "s"} (${money.format(q.openStakeKobo)}) not paid yet`}
       </p>
+      {q?.attention === "bayse_unreachable" && (
+        <p className={`mt-2 rounded-md px-3 py-2 text-sm font-semibold ${FLAG_TONE.caution.chip}`}>
+          We couldn&rsquo;t reach Bayse to check this one. Look up the result on Bayse yourself before settling.
+        </p>
+      )}
       {sourceSaid && (
         <p className={`mt-2 rounded-md px-3 py-2 text-sm font-semibold ${FLAG_TONE.caution.chip}`}>
           Our data source called it &ldquo;{sourceSaid}&rdquo;, which isn&rsquo;t one of the answers. If there was no clear
@@ -299,10 +339,10 @@ function MarketCard({ task, onChanged }: { task: MarketTask; onChanged: () => vo
         </div>
       ) : (
         <Link
-          href="/admin"
+          href="/admin/markets/open"
           className="mt-3 inline-flex h-9 items-center rounded-sm border border-border px-3 text-sm font-semibold text-secondary hover:text-primary"
         >
-          Settle it on the Local book
+          Settle it in All open markets
         </Link>
       )}
     </li>
@@ -382,7 +422,7 @@ function CustomerCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: ()
         {people.map((p) => (
           <Link
             key={p.authUserId}
-            href={`/admin/traders?search=${encodeURIComponent(p.username)}`}
+            href={`/admin/customers?search=${encodeURIComponent(p.username)}`}
             className="inline-flex h-9 items-center rounded-sm border border-border px-3 text-sm font-semibold text-secondary hover:text-primary"
           >
             {people.length > 1 ? `See @${p.username}'s bets` : "See their bets"}
@@ -445,7 +485,7 @@ function RiskCard({ alert: a, onChanged }: { alert: AlertItem; onChanged: () => 
         </dl>
       )}
       <p className="mt-2 text-sm text-primary">
-        <b>What to do:</b> {text(a.detail.whatToDo) || "look at the riskiest markets on the Local book."}
+        <b>What to do:</b> {text(a.detail.whatToDo) || "look at the riskiest markets under The book right now, below."}
       </p>
       {voiding ? (
         <div className="mt-3 rounded-md border border-border bg-surface p-3">

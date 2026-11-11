@@ -238,7 +238,7 @@ function PersonCard({ person: p, money, onDone }: { person: WithdrawalPerson; mo
         <p className="text-sm font-semibold">
           {p.requests.length} request{p.requests.length === 1 ? "" : "s"}
         </p>
-        <Link href={`/admin/traders?search=${encodeURIComponent(p.username)}`} className="text-xs font-semibold text-accent-ink hover:underline">
+        <Link href={`/admin/customers?search=${encodeURIComponent(p.username)}`} className="text-xs font-semibold text-accent-ink hover:underline">
           See their bets in Traders
         </Link>
       </div>
@@ -317,7 +317,7 @@ function VerdictNote({ person: p }: { person: WithdrawalPerson }) {
             <li key={f.id}>{f.subject}</li>
           ))}
         </ul>
-        <Link href="/admin/alerts" className="mt-1 inline-block text-xs font-semibold text-accent-ink hover:underline">
+        <Link href="/admin" className="mt-1 inline-block text-xs font-semibold text-accent-ink hover:underline">
           Clear them in Alerts if they&rsquo;re fine
         </Link>
       </div>

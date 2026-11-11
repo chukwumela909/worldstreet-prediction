@@ -48,7 +48,7 @@ import { FLAG_TONE } from "@/components/admin/risk-flags";
  * Nothing here moves anyone's money. The one action is on a person, not
  * a market: suspending an account (and lifting it), from the opened
  * person — with a third view, "Suspended", listing who is. Settlement is
- * the Local book desk. Amounts follow the desk's ₦/$ switch
+ * Markets, All open. Amounts follow the desk's ₦/$ switch
  * (useAdminMoney).
  */
 
@@ -233,7 +233,7 @@ export function TradersDesk() {
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">Traders</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">People</h1>
           <p className="mt-1 text-sm text-secondary">
             Who is betting, how much they&rsquo;ve staked, and how they&rsquo;re doing.
           </p>
@@ -697,14 +697,7 @@ function TraderDetailPanel({
         }}
       />
 
-      <CustomerActions
-        trader={trader}
-        money={money}
-        onChanged={() => {
-          load();
-          onChanged();
-        }}
-      />
+      <CustomerActions trader={trader} money={money} />
 
       {detail?.money && (
         <BalanceBreakdown totals={detail.money} balanceKobo={trader.balanceKobo} money={money} />
