@@ -15,18 +15,23 @@ import { isApiConfigured, ApiError } from "@/lib/api-client";
 import {
   TRADER_SORTS,
   fetchTrader,
+  fetchTraderWallets,
   fetchTraders,
   type MoneyTotal,
   type TraderDetail,
   type TraderList,
+  type TraderPosition,
   type TraderRow,
   type TraderSort,
+  type TraderWallets,
+  type WalletBalance,
 } from "@/lib/admin-api";
+import { BTN_QUIET, Chip, FilterTabs, InfoList } from "@/components/admin/kit";
 import { useAdminMoney, type AdminMoney } from "@/lib/admin-money";
 import { localPref, useLocalPref } from "@/lib/admin-prefs";
 import { UsdRateNote } from "@/components/admin/currency-switch";
-import { AccountControl, StakeLevelChip, StakeLevelControl } from "@/components/admin/account-control";
-import { CustomerActions } from "@/components/admin/customer-actions";
+import { AccountControl, AccountHistory, StakeLevelChip, StakeLevelControl } from "@/components/admin/account-control";
+import { HighPriceBets, TakeBackWinningsLink } from "@/components/admin/customer-actions";
 import { FLAG_TONE } from "@/components/admin/risk-flags";
 
 /**
@@ -209,6 +214,9 @@ export function TradersDesk() {
     // key encodes every input to the request above
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [configured, key]);
+
+  // the WorldStreet wallets of whoever is on screen, for the Locked column
+  const walletOf = useTraderWallets((loaded?.data?.traders ?? []).map((t) => t.authUserId), reloads);
 
   const fresh = loaded?.key === key ? loaded : null;
   const loading = fresh === null;
@@ -407,6 +415,13 @@ export function TradersDesk() {
                       <HeadCell column="balance" sortColumn={sortColumn} sort={sort} right>
                         Balance
                       </HeadCell>
+                      <th
+                        scope="col"
+                        title="Dollars their WorldStreet wallet is holding — e.g. a payout to their bank still on its way"
+                        className="whitespace-nowrap px-3 py-2.5 text-right font-semibold"
+                      >
+                        Locked
+                      </th>
                       <th scope="col" className="w-10 py-2.5 pr-3">
                         <span className="sr-only">Details</span>
                       </th>
@@ -419,6 +434,7 @@ export function TradersDesk() {
                         trader={t}
                         now={now}
                         money={money}
+                        wallet={walletOf(t.authUserId)}
                         onChanged={() => setReloads((n) => n + 1)}
                       />
                     ))}
@@ -435,6 +451,7 @@ export function TradersDesk() {
                   trader={t}
                   now={now}
                   money={money}
+                  wallet={walletOf(t.authUserId)}
                   onChanged={() => setReloads((n) => n + 1)}
                 />
               ))}
@@ -500,6 +517,58 @@ function useTraderDetail(authUserId: string) {
 
 type DetailState = ReturnType<typeof useTraderDetail>;
 
+/**
+ * One customer's WorldStreet wallet as the list knows it: undefined while
+ * it's being read, "off" when the API has no wallet connection, null when
+ * the wallet couldn't say just now.
+ */
+type WalletCell = WalletBalance | null | "off" | undefined;
+
+/**
+ * The wallets of the customers on screen, read together (one request,
+ * the API reads them a few at a time) and again on Refresh.
+ */
+function useTraderWallets(ids: string[], reloads: number): (authUserId: string) => WalletCell {
+  const key = ids.length > 0 ? `${ids.join(",")}|${reloads}` : "";
+  const [state, setState] = useState<{ key: string; data: TraderWallets | null } | null>(null);
+  useEffect(() => {
+    if (!key) return;
+    let cancelled = false;
+    fetchTraderWallets(key.split("|")[0]!.split(","))
+      .then((data) => {
+        if (!cancelled) setState({ key, data });
+      })
+      .catch(() => {
+        if (!cancelled) setState({ key, data: null });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [key]);
+  const fresh = state?.key === key ? state : null;
+  return (id) => {
+    if (!fresh) return undefined;
+    if (!fresh.data) return null;
+    if (!fresh.data.configured) return "off";
+    return fresh.data.wallets[id] ?? null;
+  };
+}
+
+/** What's locked, in ₦ or $ as the desk shows — caution when there's any, quiet at nothing. */
+function LockedAmount({ wallet, money }: { wallet: WalletCell; money: AdminMoney }) {
+  if (wallet === undefined) return <span className="text-tertiary">…</span>;
+  if (wallet === "off") return <span className="text-tertiary" title="No wallet connection on the API">—</span>;
+  if (wallet === null) return <span className="text-tertiary" title="Couldn't read their wallet just now">?</span>;
+  return (
+    <span
+      className={wallet.lockedMinor > 0 ? "text-warning" : "text-tertiary"}
+      title={`$${(wallet.lockedMinor / 100).toFixed(2)} in their wallet`}
+    >
+      {money.formatUsd(wallet.lockedMinor)}
+    </span>
+  );
+}
+
 function nameOf(t: TraderRow): string {
   return t.displayName || t.username || "Unnamed";
 }
@@ -508,11 +577,13 @@ function TraderTableRow({
   trader,
   now,
   money,
+  wallet,
   onChanged,
 }: {
   trader: TraderRow;
   now: number;
   money: AdminMoney;
+  wallet: WalletCell;
   onChanged: () => void;
 }) {
   const d = useTraderDetail(trader.authUserId);
@@ -565,6 +636,9 @@ function TraderTableRow({
           {result.text}
         </MoneyCell>
         <MoneyCell>{money.format(trader.balanceKobo)}</MoneyCell>
+        <MoneyCell>
+          <LockedAmount wallet={wallet} money={money} />
+        </MoneyCell>
         <td className="py-3 pr-3 text-right">
           <button
             type="button"
@@ -584,8 +658,8 @@ function TraderTableRow({
       </tr>
       {d.open && (
         <tr>
-          <td colSpan={8} className="border-t border-border bg-page px-4 py-3">
-            <TraderDetailPanel trader={trader} state={d} money={money} onChanged={onChanged} />
+          <td colSpan={9} className="border-t border-border bg-page px-4 py-3">
+            <TraderDetailPanel trader={trader} state={d} money={money} wallet={wallet} onChanged={onChanged} />
           </td>
         </tr>
       )}
@@ -597,11 +671,13 @@ function TraderCard({
   trader,
   now,
   money,
+  wallet,
   onChanged,
 }: {
   trader: TraderRow;
   now: number;
   money: AdminMoney;
+  wallet: WalletCell;
   onChanged: () => void;
 }) {
   const d = useTraderDetail(trader.authUserId);
@@ -654,6 +730,7 @@ function TraderCard({
           title={result.title}
         />
         <Field label="Balance" value={money.format(trader.balanceKobo)} />
+        <Field label="Locked in their wallet" value={<LockedAmount wallet={wallet} money={money} />} />
       </dl>
 
       <button
@@ -668,108 +745,346 @@ function TraderCard({
 
       {d.open && (
         <div className="border-t border-border bg-page px-4 py-3">
-          <TraderDetailPanel trader={trader} state={d} money={money} onChanged={onChanged} />
+          <TraderDetailPanel trader={trader} state={d} money={money} wallet={wallet} onChanged={onChanged} />
         </div>
       )}
     </li>
   );
 }
 
-/** Opened: the person's record, the suspend control, and every bet they have placed. */
+/**
+ * Opened: one customer, folded into sections, each with its gist on the
+ * fold so most questions are answered without opening it —
+ *  - Account: who they are, what's in play, and their WorldStreet dollar
+ *    wallet read live (spendable and locked — locked is money the wallet
+ *    holds, e.g. a payout to their bank still on its way);
+ *  - Actions: suspend, lock withdrawals, stake level, take back winnings;
+ *  - Where the balance comes from: every movement by kind;
+ *  - Bets: filtered by result, 20 at a time.
+ */
 function TraderDetailPanel({
   trader,
   state,
   money,
+  wallet,
   onChanged,
 }: {
   trader: TraderRow;
   state: DetailState;
   money: AdminMoney;
+  wallet: WalletCell;
   onChanged: () => void;
 }) {
   const { detail, failed, load } = state;
+  const changed = () => {
+    load();
+    onChanged();
+  };
+  const positions = detail?.positions ?? [];
+
+  return (
+    <div className="flex flex-col gap-2">
+      <Fold title="Account" open>
+        <InfoList
+          items={[
+            ["Joined", shortDate(trader.joinedAt)],
+            ["Last bet", fullDateTime(trader.lastTradeAt)],
+            [
+              "Record",
+              `${count(trader.wonPositions)} won · ${count(trader.lostPositions)} lost · ${count(trader.voidedPositions)} refunded`,
+            ],
+            [
+              "In play",
+              `${money.format(trader.openStakeKobo)} staked, could pay out ${money.format(trader.openPayoutKobo)}`,
+            ],
+            ["WorldStreet wallet", <WalletLine key="wallet" wallet={wallet} money={money} />],
+            ["User id", <span key="id" className="break-all font-mono text-xs">{trader.authUserId}</span>],
+          ]}
+        />
+      </Fold>
+
+      <Fold title="Actions" summary={<ActionsGist trader={trader} />}>
+        <div className="flex flex-col gap-3">
+          {/* status, then one row: suspend · lock withdrawals · take back winnings */}
+          <AccountControl
+            trader={trader}
+            actions={undefined}
+            onChanged={changed}
+            extra={<TakeBackWinningsLink trader={trader} />}
+          />
+          <StakeLevelControl trader={trader} onChanged={changed} />
+          <HighPriceBets trader={trader} money={money} />
+          <AccountHistory actions={detail?.accountActions} />
+        </div>
+      </Fold>
+
+      <Fold title="Where the balance comes from" summary={`Balance now ${money.format(trader.balanceKobo)}`}>
+        {detail?.money ? (
+          <BalanceBreakdown totals={detail.money} balanceKobo={trader.balanceKobo} money={money} />
+        ) : (
+          <p className="text-sm text-tertiary">{failed ? "Couldn't load it." : "Loading…"}</p>
+        )}
+      </Fold>
+
+      <Fold
+        title="Bets"
+        summary={
+          positions.length > 0
+            ? `${count(trader.trades)} placed${positions.length < trader.trades ? ` · latest ${positions.length} here` : ""}`
+            : undefined
+        }
+      >
+        {failed ? (
+          <p className="text-sm text-secondary">
+            Couldn&rsquo;t load this customer&rsquo;s bets.{" "}
+            <button type="button" onClick={load} className="font-semibold text-primary underline">
+              Try again
+            </button>
+          </p>
+        ) : !detail ? (
+          <p className="text-sm text-secondary">Loading bets…</p>
+        ) : positions.length === 0 ? (
+          <p className="text-sm text-secondary">This account has never placed a bet.</p>
+        ) : (
+          <BetList positions={positions} money={money} />
+        )}
+      </Fold>
+    </div>
+  );
+}
+
+/** A section of the customer panel that folds away; its gist shows while closed. */
+function Fold({
+  title,
+  summary,
+  open = false,
+  children,
+}: {
+  title: string;
+  summary?: React.ReactNode;
+  open?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <details open={open} className="group rounded-md border border-border bg-surface">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 [&::-webkit-details-marker]:hidden">
+        <ChevronDown className="size-4 shrink-0 -rotate-90 text-tertiary transition-transform group-open:rotate-0" aria-hidden />
+        <span className="shrink-0 text-sm font-semibold">{title}</span>
+        {summary && <span className="ml-auto flex min-w-0 items-center gap-1.5 truncate text-xs text-tertiary">{summary}</span>}
+      </summary>
+      <div className="border-t border-border px-3 py-3">{children}</div>
+    </details>
+  );
+}
+
+/** What's in force on the account, on the Actions fold. */
+function ActionsGist({ trader }: { trader: TraderRow }) {
+  if (trader.suspendedAt) return <Chip tone="danger">Suspended</Chip>;
+  const level = <StakeLevelChip level={trader.stakeLevel} />;
+  if (!trader.withdrawalsLockedAt && (!trader.stakeLevel || trader.stakeLevel === "normal")) {
+    return <>Nothing in force</>;
+  }
   return (
     <>
-      <dl className="mb-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px] font-medium text-secondary">
-        <Meta label="Joined" value={shortDate(trader.joinedAt)} />
-        <Meta label="Last bet" value={fullDateTime(trader.lastTradeAt)} />
-        <Meta
-          label="Record"
-          value={`${count(trader.wonPositions)} won · ${count(trader.lostPositions)} lost · ${count(
-            trader.voidedPositions,
-          )} refunded`}
-        />
-        <Meta
-          label="In play"
-          value={`${money.format(trader.openStakeKobo)} staked, could pay out ${money.format(
-            trader.openPayoutKobo,
-          )}`}
-        />
-        <Meta label="User id" value={trader.authUserId} mono />
-      </dl>
+      {trader.withdrawalsLockedAt && <Chip tone="warning">Withdrawals locked</Chip>}
+      {level}
+    </>
+  );
+}
 
-      <AccountControl
-        trader={trader}
-        actions={detail?.accountActions}
-        onChanged={() => {
-          load();
-          onChanged();
-        }}
-      />
-
-      <StakeLevelControl
-        trader={trader}
-        onChanged={() => {
-          load();
-          onChanged();
-        }}
-      />
-
-      <CustomerActions trader={trader} money={money} />
-
-      {detail?.money && (
-        <BalanceBreakdown totals={detail.money} balanceKobo={trader.balanceKobo} money={money} />
+/**
+ * Their WorldStreet dollar wallet, as the list read it (the Locked
+ * column). Locked dollars are held by the wallet, not Predict — when a
+ * customer says a withdrawal hasn't reached them, this is where it is.
+ */
+function WalletLine({ wallet, money }: { wallet: WalletCell; money: AdminMoney }) {
+  if (wallet === undefined) return <span className="text-tertiary">Checking…</span>;
+  if (wallet === null) return <span className="text-tertiary">Couldn&rsquo;t reach the wallet just now</span>;
+  if (wallet === "off") return <span className="text-tertiary">Wallet not connected on the API</span>;
+  const locked = wallet.lockedMinor;
+  return (
+    <span>
+      {money.formatUsd(wallet.availableMinor)} available ·{" "}
+      <span className={locked > 0 ? "font-semibold text-warning" : "text-tertiary"}>
+        {money.formatUsd(locked)} locked
+      </span>
+      {locked > 0 && (
+        <span className="mt-0.5 block text-xs text-tertiary">
+          Held by the WorldStreet wallet, not Predict — e.g. a payout to their bank still on its way.
+        </span>
       )}
+    </span>
+  );
+}
 
-      {failed ? (
-        <p className="py-3 text-sm text-secondary">
-          Couldn&rsquo;t load this trader&rsquo;s bets.{" "}
-          <button type="button" onClick={load} className="font-semibold text-primary underline">
-            Try again
-          </button>
-        </p>
-      ) : !detail ? (
-        <p className="py-3 text-sm text-secondary">Loading bets…</p>
-      ) : detail.positions.length === 0 ? (
-        <p className="py-3 text-sm text-secondary">This account has never placed a bet.</p>
-      ) : (
-        <ul className="flex flex-col gap-1.5">
-          {detail.positions.map((p) => (
-            <li
-              key={p.id}
-              className="flex min-w-0 items-center gap-3 rounded-md border border-border bg-surface px-3 py-2"
-            >
-              <span className="min-w-0 flex-1">
-                <Link
-                  href={bookHref(p.eventSlug, p.eventId)}
-                  className="block truncate text-[13px] font-semibold hover:underline"
-                >
-                  {p.eventTitle}
-                </Link>
-                <span className="block truncate text-xs font-medium text-tertiary">
-                  {p.marketTitle} · {p.outcomeLabel} @ {(p.priceKobo / 100).toFixed(0)}¢ ·{" "}
-                  {shortDate(p.createdAt)}
-                </span>
-              </span>
-              <span className="shrink-0 text-right text-[13px] font-semibold tabular-nums">
-                {money.format(p.stakeKobo)}
-              </span>
-              <StatusPill status={p.reversedFrom ? "reversed" : p.status} />
+type BetKey = "all" | "open" | "won" | "lost" | "reversed" | "voided";
+const BET_TABS: { key: Exclude<BetKey, "all">; label: string }[] = [
+  { key: "won", label: "Won" },
+  { key: "lost", label: "Lost" },
+  { key: "reversed", label: "Reversed" },
+  { key: "voided", label: "Refunded" },
+  { key: "open", label: "Open" },
+];
+const GROUPS_STEP = 15;
+const betKey = (p: TraderPosition): Exclude<BetKey, "all"> => (p.reversedFrom ? "reversed" : p.status);
+
+/** The market's own name, only when it says more than the event's. */
+const marketName = (p: TraderPosition) => (p.marketTitle && p.marketTitle !== p.eventTitle ? p.marketTitle : null);
+
+interface BetGroup {
+  key: string;
+  first: TraderPosition;
+  bets: TraderPosition[];
+  stakeKobo: number;
+  counts: [Exclude<BetKey, "all">, number][];
+}
+
+/** Bets on the same market together, the market with the latest bet first. */
+function groupBets(list: TraderPosition[]): BetGroup[] {
+  const byMarket = new Map<string, TraderPosition[]>();
+  for (const p of list) {
+    const key = `${p.eventId}|${p.marketTitle}`;
+    byMarket.set(key, [...(byMarket.get(key) ?? []), p]);
+  }
+  return [...byMarket].map(([key, bets]) => {
+    const tally = new Map<Exclude<BetKey, "all">, number>();
+    for (const b of bets) tally.set(betKey(b), (tally.get(betKey(b)) ?? 0) + 1);
+    return {
+      key,
+      first: bets[0]!,
+      bets,
+      stakeKobo: bets.reduce((s, b) => s + b.stakeKobo, 0),
+      counts: [...tally].sort((a, b) => b[1] - a[1]),
+    };
+  });
+}
+
+/**
+ * Their bets, filtered by result and grouped by market: a market they bet
+ * on once is one line; one they bet on again and again — sixty 15-minute
+ * Bitcoin rounds — folds into a single line with its totals, opened to
+ * see each bet.
+ */
+function BetList({ positions, money }: { positions: TraderPosition[]; money: AdminMoney }) {
+  const [filter, setFilter] = useState<BetKey>("all");
+  const [shown, setShown] = useState(GROUPS_STEP);
+  const counts = new Map<string, number>();
+  for (const p of positions) counts.set(betKey(p), (counts.get(betKey(p)) ?? 0) + 1);
+  const list = filter === "all" ? positions : positions.filter((p) => betKey(p) === filter);
+  const groups = groupBets(list);
+  const left = groups.length - shown;
+
+  return (
+    <>
+      <FilterTabs
+        label="Which bets"
+        value={filter}
+        onChange={(k) => {
+          setFilter(k);
+          setShown(GROUPS_STEP);
+        }}
+        items={[
+          { key: "all", label: "All", count: positions.length },
+          ...BET_TABS.filter((t) => counts.has(t.key)).map((t) => ({ ...t, count: counts.get(t.key) })),
+        ]}
+      />
+      <ul className="mt-2 divide-y divide-border overflow-hidden rounded-md border border-border">
+        {groups.slice(0, shown).map((g) =>
+          g.bets.length === 1 ? (
+            <li key={g.key}>
+              <BetLine bet={g.first} money={money} withMarket indent />
             </li>
-          ))}
-        </ul>
+          ) : (
+            <li key={g.key}>
+              <details className="group/bets">
+                <summary className="flex min-w-0 cursor-pointer list-none items-center gap-3 px-3 py-2 hover:bg-element [&::-webkit-details-marker]:hidden">
+                  <ChevronDown
+                    className="size-4 shrink-0 -rotate-90 text-tertiary transition-transform group-open/bets:rotate-0"
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13px] font-semibold">{g.first.eventTitle}</span>
+                    <span className="block truncate text-xs text-tertiary">
+                      {[marketName(g.first), `${g.bets.length} bets`, `${shortDate(g.bets[g.bets.length - 1]!.createdAt)} – ${shortDate(g.first.createdAt)}`]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </span>
+                  </span>
+                  <span className="hidden shrink-0 gap-1 sm:flex">
+                    {g.counts.map(([k, n]) => (
+                      <span key={k} className={`rounded-sm px-1.5 py-0.5 text-[11px] font-semibold ${STATUS[k]!.className}`}>
+                        {n} {STATUS[k]!.label.toLowerCase()}
+                      </span>
+                    ))}
+                  </span>
+                  <span className="shrink-0 text-right text-[13px] font-semibold tabular-nums">{money.format(g.stakeKobo)}</span>
+                </summary>
+                <div className="border-t border-border bg-page">
+                  <Link
+                    href={bookHref(g.first.eventSlug, g.first.eventId)}
+                    className="block px-3 pt-2 text-xs font-semibold text-accent-ink hover:underline"
+                  >
+                    Open the market
+                  </Link>
+                  <ul className="divide-y divide-border">
+                    {g.bets.map((b) => (
+                      <li key={b.id}>
+                        <BetLine bet={b} money={money} />
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </details>
+            </li>
+          ),
+        )}
+      </ul>
+      {left > 0 && (
+        <button type="button" onClick={() => setShown((n) => n + GROUPS_STEP)} className={`${BTN_QUIET} mt-2 w-full`}>
+          Show {Math.min(GROUPS_STEP, left)} more markets · {left} not shown
+        </button>
       )}
     </>
+  );
+}
+
+/** One bet: side, price and day (with the market when it stands alone), stake, result. */
+function BetLine({
+  bet: p,
+  money,
+  withMarket = false,
+  indent = false,
+}: {
+  bet: TraderPosition;
+  money: AdminMoney;
+  withMarket?: boolean;
+  /** Line up with the folded markets' titles, past their chevron. */
+  indent?: boolean;
+}) {
+  const detail = [marketName(p), `${p.outcomeLabel} @ ${(p.priceKobo / 100).toFixed(0)}¢`, shortDate(p.createdAt)]
+    .filter(Boolean)
+    .join(" · ");
+  return (
+    <div className="flex min-w-0 items-center gap-3 px-3 py-2">
+      {indent && <span className="size-4 shrink-0" aria-hidden />}
+      <span className="min-w-0 flex-1">
+        {withMarket ? (
+          <>
+            <Link href={bookHref(p.eventSlug, p.eventId)} className="block truncate text-[13px] font-semibold hover:underline">
+              {p.eventTitle}
+            </Link>
+            <span className="block truncate text-xs text-tertiary">{detail}</span>
+          </>
+        ) : (
+          <span className="block truncate text-[13px]">
+            {p.outcomeLabel} @ {(p.priceKobo / 100).toFixed(0)}¢
+            <span className="text-xs text-tertiary"> · {shortDate(p.createdAt)}</span>
+          </span>
+        )}
+      </span>
+      <span className="shrink-0 text-right text-[13px] font-semibold tabular-nums">{money.format(p.stakeKobo)}</span>
+      <StatusPill status={betKey(p)} />
+    </div>
   );
 }
 
@@ -860,7 +1175,7 @@ function Field({
   title,
 }: {
   label: string;
-  value: string;
+  value: React.ReactNode;
   sub?: string;
   valueClass?: string;
   title?: string;
@@ -915,11 +1230,10 @@ function BalanceBreakdown({
   const sumKobo = totals.reduce((s, t) => s + t.amountKobo, 0);
   const gapKobo = balanceKobo - sumKobo;
 
-  if (rows.length === 0) return null;
+  if (rows.length === 0) return <p className="text-sm text-tertiary">No money has moved on this account yet.</p>;
   return (
-    <details className="mb-3 rounded-md border border-border bg-surface px-3 py-2.5" open>
-      <summary className="cursor-pointer text-[13px] font-semibold">Where the balance comes from</summary>
-      <table className="mt-2 w-full text-[13px]">
+    <>
+      <table className="w-full text-[13px]">
         <tbody>
           {rows.map((r) => (
             <tr key={r.type} className="border-b border-border last:border-0">
@@ -960,7 +1274,7 @@ function BalanceBreakdown({
           Tell the developers.
         </p>
       )}
-    </details>
+    </>
   );
 }
 
@@ -1052,23 +1366,6 @@ function Stat({
         {shortened && <span className="sr-only"> ({exact})</span>}
       </p>
       <p className="mt-0.5 break-words text-xs font-medium leading-4 text-tertiary">{note}</p>
-    </div>
-  );
-}
-
-function Meta({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="flex min-w-0 gap-1.5">
-      <dt className="shrink-0 text-tertiary">{label}</dt>
-      <dd className={`min-w-0 ${mono ? "break-all font-mono text-[12px]" : ""}`}>{value}</dd>
     </div>
   );
 }

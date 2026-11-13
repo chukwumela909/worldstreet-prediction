@@ -290,14 +290,36 @@ check("…and the desk button that emailed them is gone (404)", gone.statusCode 
 console.log("clear debts");
 const owedBefore = -(await bal("u-spent"));
 const clearDry = (await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: true })).json() as {
-  data: { customers: number; owedKobo: number };
+  data: { customers: number; owedKobo: number; emailed: number; template: { subject: string; text: string } };
 };
 check("the preview finds the one customer below zero and what's owed", clearDry.data.customers === 1 && clearDry.data.owedKobo === owedBefore);
 check("…without moving money", (await bal("u-spent")) === -owedBefore);
-const cleared = (await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false })).json() as {
-  data: { customers: number; owedKobo: number };
+check(
+  "…and hands back the warm note to reword, with the name and amount left to fill in",
+  clearDry.data.emailed === 0 && clearDry.data.template.text.includes("{name}") && clearDry.data.template.text.includes("{amount}"),
+);
+const sentBeforeClear = sent.length;
+const note = {
+  subject: clearDry.data.template.subject,
+  text: `${clearDry.data.template.text}\n\nP.S. Thank you, {name}.`,
+};
+const cleared = (await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false, email: note })).json() as {
+  data: { customers: number; owedKobo: number; emailed: number };
 };
 check("clearing brings them back to exactly zero", cleared.data.customers === 1 && (await bal("u-spent")) === 0);
+const owedText = `₦${(owedBefore / 100).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+const clearedNote = sent.slice(sentBeforeClear).find((m) => m.to.includes("kemi@example.test"));
+check(
+  "…and each one cleared gets the desk's note, their own name and what they owed filled in",
+  cleared.data.emailed === 1 && sent.length === sentBeforeClear + 1 && clearedNote !== undefined &&
+    clearedNote.subject === "Good news: your WorldStreet Predict balance is back to ₦0" &&
+    clearedNote.text.startsWith("Hi kemi,") && clearedNote.text.includes(`to −${owedText}`) &&
+    clearedNote.text.includes("P.S. Thank you, kemi.") && !clearedNote.text.includes("{"),
+);
+check(
+  "a note with no message is refused (400)",
+  (await admin("POST", "/v1/admin/recovery/clear-debts", { dryRun: false, email: { subject: "Hi", text: "" } })).statusCode === 400,
+);
 check("…recorded as a write-off", (await LedgerEntry.countDocuments({ type: "debt_writeoff", authUserId: "u-spent" })) === 1);
 check("…and nobody else's balance moves", (await bal("u-win")) === adaBefore - 2 * (payout - 5_000_000));
 const afterClear = ((await admin("GET", "/v1/admin/recovery")).json() as { data: { totals: Record<string, number> } }).data.totals;

@@ -40,15 +40,19 @@ export function AccountControl({
   trader,
   actions,
   onChanged,
+  extra,
 }: {
   trader: AccountRef;
   /** Newest first; undefined until the person's detail loads. */
   actions: AccountAction[] | undefined;
   onChanged: () => void;
+  /** More buttons for the same row (the customer panel's Take back winnings). */
+  extra?: React.ReactNode;
 }) {
   const suspended = Boolean(trader.suspendedAt);
   const name = trader.displayName || trader.username || "this account";
   const [step, setStep] = useState<"idle" | "write" | "confirm">("idle");
+  const lock = useWithdrawalLock(trader, onChanged);
   const [reason, setReason] = useState("");
   const [notify, setNotify] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -90,7 +94,7 @@ export function AccountControl({
   };
 
   return (
-    <div className="mb-3">
+    <div className="flex flex-col gap-3">
       {suspended ? (
         <div className={`rounded-md border px-3 py-2.5 text-sm ${FLAG_TONE.danger.banner}`}>
           <p className="flex items-center gap-1.5 font-semibold text-no">
@@ -106,25 +110,32 @@ export function AccountControl({
             They can&rsquo;t place bets or move money in or out. Open bets still settle.
           </p>
         </div>
-      ) : null}
+      ) : (
+        lock.banner
+      )}
 
-      {step === "idle" && (
-        <button
-          type="button"
-          onClick={() => setStep("write")}
-          className={`mt-2 inline-flex h-9 items-center gap-1.5 rounded-sm border px-3 text-sm font-semibold ${
-            suspended
-              ? "border-border text-primary hover:border-border-hover"
-              : "border-no/40 text-no hover:bg-no-tint"
-          }`}
-        >
-          {!suspended && <Ban className="size-4" aria-hidden />}
-          {suspended ? "Lift suspension…" : "Suspend account…"}
-        </button>
+      {/* one row of actions; pressing one swaps the row for its form */}
+      {step === "idle" && !lock.open && (
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => setStep("write")}
+            className={`inline-flex h-9 items-center gap-1.5 rounded-sm border px-3 text-sm font-semibold ${
+              suspended
+                ? "border-border text-primary hover:border-border-hover"
+                : "border-no/40 text-no hover:bg-no-tint"
+            }`}
+          >
+            {!suspended && <Ban className="size-4" aria-hidden />}
+            {suspended ? "Lift suspension…" : "Suspend account…"}
+          </button>
+          {!suspended && lock.button}
+          {extra}
+        </div>
       )}
 
       {step === "write" && (
-        <div className="mt-2 rounded-md border border-border bg-surface p-3">
+        <div className="rounded-md border border-border bg-surface p-3">
           <label className="block">
             <span className="text-xs font-medium text-secondary">
               {suspended
@@ -183,7 +194,7 @@ export function AccountControl({
       )}
 
       {step === "confirm" && (
-        <div className="mt-2 rounded-md border border-border bg-surface p-3 text-sm">
+        <div className="rounded-md border border-border bg-surface p-3 text-sm">
           <p className="font-semibold">
             {suspended
               ? `Lift ${name}'s suspension? They'll be able to bet and move money again.`
@@ -223,37 +234,42 @@ export function AccountControl({
           </div>
         </div>
       )}
-      {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
+      {!suspended && lock.form}
+      {error && <p className="text-sm font-semibold text-no">{error}</p>}
 
-      {!suspended && <WithdrawalLock trader={trader} onChanged={onChanged} />}
-
-      {actions && actions.length > 0 && (
-        <details className="mt-2">
-          <summary className="cursor-pointer text-xs font-semibold text-secondary">
-            Account history ({actions.length})
-          </summary>
-          <ul className="mt-1 flex flex-col gap-1 text-xs text-secondary">
-            {actions.map((a) => (
-              <li key={`${a.action}-${a.at}`}>
-                <span
-                  className={`font-semibold ${
-                    a.action === "suspend" || a.action === "lock_withdrawals"
-                      ? "text-no"
-                      : a.action === "stake_level" && !a.reason.startsWith("Normal")
-                        ? "text-warning"
-                        : "text-yes"
-                  }`}
-                >
-                  {ACTION_LABEL[a.action] ?? a.action}
-                </span>{" "}
-                · {when(a.at)} · by {a.by}
-                {a.reason && <> — &ldquo;{a.reason}&rdquo;</>}
-              </li>
-            ))}
-          </ul>
-        </details>
-      )}
+      <AccountHistory actions={actions} />
     </div>
+  );
+}
+
+/** Every suspend, lift, lock and stake-level change on the account, newest first, folded away. */
+export function AccountHistory({ actions }: { actions: AccountAction[] | undefined }) {
+  if (!actions || actions.length === 0) return null;
+  return (
+    <details>
+      <summary className="cursor-pointer text-xs font-semibold text-secondary">
+        Account history ({actions.length})
+      </summary>
+      <ul className="mt-1 flex flex-col gap-1 text-xs text-secondary">
+        {actions.map((a) => (
+          <li key={`${a.action}-${a.at}`}>
+            <span
+              className={`font-semibold ${
+                a.action === "suspend" || a.action === "lock_withdrawals"
+                  ? "text-no"
+                  : a.action === "stake_level" && !a.reason.startsWith("Normal")
+                    ? "text-warning"
+                    : "text-yes"
+              }`}
+            >
+              {ACTION_LABEL[a.action] ?? a.action}
+            </span>{" "}
+            · {when(a.at)} · by {a.by}
+            {a.reason && <> — &ldquo;{a.reason}&rdquo;</>}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 
@@ -341,7 +357,7 @@ export function StakeLevelControl({ trader, onChanged }: { trader: TraderRow; on
   };
 
   return (
-    <div className="mb-3 rounded-md border border-border bg-surface p-3 text-sm">
+    <div className="rounded-md border border-border bg-surface p-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="font-semibold">
           Stake level: <span className={current === "normal" ? "" : current === "reduced" ? "text-warning" : "text-no"}>
@@ -430,7 +446,7 @@ export function StakeLevelControl({ trader, onChanged }: { trader: TraderRow; on
  * isn't emailed; they only see that their account is being checked when
  * they try to withdraw. The note is for the desk.
  */
-function WithdrawalLock({ trader, onChanged }: { trader: AccountRef; onChanged: () => void }) {
+function useWithdrawalLock(trader: AccountRef, onChanged: () => void) {
   const locked = Boolean(trader.withdrawalsLockedAt);
   const name = trader.displayName || trader.username || "this account";
   const [step, setStep] = useState<"idle" | "confirm">("idle");
@@ -455,31 +471,36 @@ function WithdrawalLock({ trader, onChanged }: { trader: AccountRef; onChanged: 
     }
   };
 
-  return (
-    <div className="mt-3">
-      {locked && (
-        <div className={`rounded-md border px-3 py-2.5 text-sm ${FLAG_TONE.caution.banner}`}>
-          <p className="flex items-center gap-1.5 font-semibold text-warning">
-            <Lock className="size-4 shrink-0" aria-hidden />
-            Withdrawals locked since {when(trader.withdrawalsLockedAt)}
-          </p>
-          <p className="mt-1 text-xs text-secondary">
-            They can still bet and add money. If they try to withdraw, they&rsquo;re told their account is going through
-            checks.
-          </p>
-        </div>
-      )}
-      {step === "idle" ? (
-        <button
-          type="button"
-          onClick={() => setStep("confirm")}
-          className="mt-2 inline-flex h-9 items-center gap-1.5 rounded-sm border border-border px-3 text-sm font-semibold text-primary hover:border-border-hover"
-        >
-          {!locked && <Lock className="size-4" aria-hidden />}
-          {locked ? "Unlock withdrawals…" : "Lock withdrawals only…"}
-        </button>
-      ) : (
-        <div className="mt-2 rounded-md border border-border bg-surface p-3 text-sm">
+  const banner = locked ? (
+    <div className={`rounded-md border px-3 py-2.5 text-sm ${FLAG_TONE.caution.banner}`}>
+      <p className="flex items-center gap-1.5 font-semibold text-warning">
+        <Lock className="size-4 shrink-0" aria-hidden />
+        Withdrawals locked since {when(trader.withdrawalsLockedAt)}
+      </p>
+      <p className="mt-1 text-xs text-secondary">
+        They can still bet and add money. If they try to withdraw, they&rsquo;re told their account is going through
+        checks.
+      </p>
+    </div>
+  ) : null;
+
+  const button = (
+    <button
+      type="button"
+      onClick={() => setStep("confirm")}
+      className="inline-flex h-9 items-center gap-1.5 rounded-sm border border-border px-3 text-sm font-semibold text-primary hover:border-border-hover"
+    >
+      {!locked && <Lock className="size-4" aria-hidden />}
+      {locked ? "Unlock withdrawals…" : "Lock withdrawals…"}
+    </button>
+  );
+
+  const form =
+    step === "idle" ? (
+      error && <p className="text-sm font-semibold text-no">{error}</p>
+    ) : (
+      <div className="flex flex-col gap-2">
+        <div className="rounded-md border border-border bg-surface p-3 text-sm">
           <p className="font-semibold">
             {locked
               ? `Let ${name} withdraw again?`
@@ -514,10 +535,11 @@ function WithdrawalLock({ trader, onChanged }: { trader: AccountRef; onChanged: 
             </button>
           </div>
         </div>
-      )}
-      {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
-    </div>
-  );
+        {error && <p className="text-sm font-semibold text-no">{error}</p>}
+      </div>
+    );
+
+  return { open: step !== "idle", banner, button, form };
 }
 
 function when(iso: string | null | undefined): string {

@@ -12,6 +12,7 @@ import {
   clearDebts,
   notifyReversals,
   type DebtClearing,
+  type DebtEmail,
   type RecoveryIncident,
   type RecoveryReport,
   type ReversalNotice,
@@ -252,17 +253,29 @@ function DebtStep({
   const [preview, setPreview] = useState<DebtClearing | null>(null);
   const [busy, setBusy] = useState<"preview" | "clear" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // the warm note: on by default, worded by the API, reworded here
+  const [sendNote, setSendNote] = useState(true);
+  const [note, setNote] = useState<DebtEmail | null>(null);
+
+  const canEmail = preview?.mailConfigured !== false && note !== null;
+  const emailing = sendNote && canEmail;
+  const noteReady = !emailing || (note!.subject.trim().length >= 3 && note!.text.trim().length >= 20);
 
   const go = async (dryRun: boolean) => {
     setBusy(dryRun ? "preview" : "clear");
     setError(null);
     try {
-      const result = await clearDebts(dryRun);
-      if (dryRun) setPreview(result);
-      else {
+      const result = await clearDebts(dryRun, !dryRun && emailing ? note! : undefined);
+      if (dryRun) {
+        setPreview(result);
+        setNote(result.template ?? null);
+      } else {
         setPreview(null);
+        const people = `${result.customers} customer${result.customers === 1 ? "" : "s"}`;
         showToast(
-          `Cleared ${money.format(result.owedKobo)} owed by ${result.customers} customer${result.customers === 1 ? "" : "s"}`,
+          `Cleared ${money.formatForConfirm(result.owedKobo)} owed by ${people}${
+            emailing ? ` — ${result.emailed ?? 0} emailed` : ""
+          }`,
           "success",
         );
         onDone();
@@ -290,18 +303,66 @@ function DebtStep({
         <div className="mt-3 rounded-md bg-element-2 px-3 py-3 text-sm">
           <p className="font-semibold">
             {preview.customers} customer{preview.customers === 1 ? "" : "s"} owing{" "}
-            {money.format(preview.owedKobo)}{" "}
+            {money.formatForConfirm(preview.owedKobo)}{" "}
             will be set back to ₦0. This is written off and can&rsquo;t be undone.
           </p>
-          <div className="mt-2 flex gap-2">
+
+          {preview.customers > 0 && (
+            <div className="mt-3 rounded-md border border-border bg-surface px-3 py-3">
+              <label className="flex items-center gap-2 font-semibold">
+                <input
+                  type="checkbox"
+                  checked={emailing}
+                  disabled={!canEmail}
+                  onChange={(e) => setSendNote(e.target.checked)}
+                  className="accent-[var(--accent)]"
+                />
+                <Mail className="size-4 text-secondary" aria-hidden />
+                Email each of them a note
+              </label>
+              {!canEmail ? (
+                <p className="mt-1 text-xs text-warning">
+                  Customer email isn&rsquo;t set up on the API (RESEND_API_KEY and a sender), so no note can go out.
+                </p>
+              ) : emailing ? (
+                <>
+                  <p className="mt-1 text-xs text-tertiary">
+                    Sent only once their balance is back to ₦0. <code className="font-mono">{"{name}"}</code> and{" "}
+                    <code className="font-mono">{"{amount}"}</code> (what they owed) are filled in for each customer.
+                  </p>
+                  <input
+                    value={note!.subject}
+                    onChange={(e) => setNote({ ...note!, subject: e.target.value })}
+                    aria-label="Email subject"
+                    maxLength={200}
+                    className="mt-2 h-9 w-full rounded-md border border-border bg-page px-3 text-sm font-semibold outline-none focus:border-accent"
+                  />
+                  <textarea
+                    value={note!.text}
+                    onChange={(e) => setNote({ ...note!, text: e.target.value })}
+                    aria-label="Email message"
+                    rows={12}
+                    maxLength={10_000}
+                    className="mt-2 w-full resize-y rounded-md border border-border bg-page px-3 py-2 text-sm outline-none focus:border-accent"
+                  />
+                </>
+              ) : null}
+            </div>
+          )}
+
+          <div className="mt-3 flex gap-2">
             {preview.customers > 0 && (
               <button
                 type="button"
                 onClick={() => go(false)}
-                disabled={busy !== null}
+                disabled={busy !== null || !noteReady}
                 className="pressable h-9 rounded-sm bg-no-solid px-4 text-sm font-semibold text-white disabled:opacity-40"
               >
-                {busy === "clear" ? "Clearing…" : `Clear ${money.format(preview.owedKobo)}`}
+                {busy === "clear"
+                  ? "Clearing…"
+                  : `Clear ${money.formatForConfirm(preview.owedKobo)}${
+                      emailing ? ` and email ${preview.customers}` : ""
+                    }`}
               </button>
             )}
             <button

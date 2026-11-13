@@ -552,12 +552,49 @@ export async function getRecovery(): Promise<RecoveryReport> {
 
 /* ---------------- clearing what's owed ---------------- */
 
+export interface DebtEmail {
+  subject: string;
+  text: string;
+}
+
 export interface DebtClearing {
   /** Customers with reversed bets now below zero (cleared, unless a dry run). */
   customers: number;
   /** What they owe(d) in all. */
   owedKobo: number;
   dryRun: boolean;
+  /** How many were emailed the note (0 on a dry run, or when no note was asked for). */
+  emailed: number;
+  mailConfigured: boolean;
+  /** The warm note as it starts, for the desk to reword. */
+  template: DebtEmail;
+}
+
+/**
+ * The note each cleared customer gets: their balance is back to ₦0 and
+ * they owe nothing. The desk can reword it before it goes; `{name}` and
+ * `{amount}` (what was owed, e.g. "₦12,815.39") are filled in per customer.
+ */
+export const DEBT_CLEARED_EMAIL: DebtEmail = {
+  subject: "Good news: your WorldStreet Predict balance is back to ₦0",
+  text: [
+    "Hi {name},",
+    "",
+    "We have good news for you. After the recent bet reversals, your balance went below zero, to −{amount}. We've cleared it: your balance is now ₦0, and you owe us nothing.",
+    "",
+    "You can place bets and make withdrawals again straight away.",
+    "",
+    "We know the reversals were upsetting, and we're truly sorry for the worry they caused. We did it so the platform can stay healthy and keep serving you and every other customer well, and we're strengthening our systems so this doesn't happen again.",
+    "",
+    "We truly value your custom and sincerely want you to stay with us.",
+    "",
+    "The WorldStreet team",
+  ].join("\n"),
+};
+
+function fillDebtEmail(note: DebtEmail, username: string, owedKobo: number): DebtEmail {
+  const fill = (s: string) => s.replaceAll("{name}", username || "there").replaceAll("{amount}", naira(owedKobo));
+  return { subject: fill(note.subject), text: fill(note.text) };
 }
 
 /**
@@ -565,11 +602,16 @@ export interface DebtClearing {
  * brought back to exactly zero (ledger type "debt_writeoff"), which lifts
  * the block on betting and withdrawing. Everything already recovered
  * stays recovered. A dry run only counts.
+ *
+ * Given `email`, each customer actually cleared is sent that note, with
+ * their own name and what they owed filled in — only once their debt is
+ * gone, so nobody is told they owe nothing while they still do.
  */
 export async function clearDebts(params: {
   dryRun: boolean;
   actor: string;
   log: FastifyBaseLogger;
+  email?: DebtEmail | undefined;
 }): Promise<DebtClearing> {
   const ids: string[] = await Position.distinct("authUserId", { reversedFrom: { $exists: true } });
   const owing = await NairaAccount.find(
@@ -577,12 +619,12 @@ export async function clearDebts(params: {
     { authUserId: 1, balanceKobo: 1 },
   ).lean();
   const owedKobo = owing.reduce((sum, a) => sum + -a.balanceKobo, 0);
+  const base = { mailConfigured: isCustomerMailConfigured(), template: DEBT_CLEARED_EMAIL };
   if (params.dryRun || owing.length === 0) {
-    return { customers: owing.length, owedKobo, dryRun: params.dryRun };
+    return { customers: owing.length, owedKobo, dryRun: params.dryRun, emailed: 0, ...base };
   }
 
-  let customers = 0;
-  let cleared = 0;
+  const cleared: { authUserId: string; amountKobo: number }[] = [];
   const at = Date.now();
   for (const a of owing) {
     const entry = await writeOffDebt({
@@ -591,13 +633,26 @@ export async function clearDebts(params: {
       description: "Balance owed after a reversal — written off",
       metadata: { actor: params.actor },
     });
-    if (entry) {
-      customers += 1;
-      cleared += entry.amountKobo;
-    }
+    if (entry) cleared.push({ authUserId: a.authUserId, amountKobo: entry.amountKobo });
   }
-  params.log.warn({ customers, cleared, actor: params.actor }, "reversal debts written off");
-  return { customers, owedKobo: cleared, dryRun: false };
+  const clearedKobo = cleared.reduce((s, c) => s + c.amountKobo, 0);
+  params.log.warn({ customers: cleared.length, cleared: clearedKobo, actor: params.actor }, "reversal debts written off");
+
+  let emailed = 0;
+  if (params.email && cleared.length > 0) {
+    const users = await User.find(
+      { authUserId: { $in: cleared.map((c) => c.authUserId) } },
+      { authUserId: 1, username: 1, email: 1 },
+    ).lean();
+    const byId = new Map(users.filter((u) => u.email).map((u) => [u.authUserId, u]));
+    const mails = cleared.flatMap((c) => {
+      const u = byId.get(c.authUserId);
+      return u ? [{ to: u.email, ...fillDebtEmail(params.email!, u.username, c.amountKobo) }] : [];
+    });
+    emailed = (await sendCustomerEmails(params.log, mails)).filter(Boolean).length;
+    params.log.warn({ emailed, of: cleared.length }, "debt-cleared notes sent");
+  }
+  return { customers: cleared.length, owedKobo: clearedKobo, dryRun: false, emailed, ...base };
 }
 
 /* ---------------- telling them ---------------- */

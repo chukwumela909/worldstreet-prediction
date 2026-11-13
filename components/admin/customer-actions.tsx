@@ -2,36 +2,34 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { ChevronDownIcon as ChevronDown } from "@heroicons/react/24/outline";
 import { fetchCustomerBetReview, type BetReviewRow, type TraderRow } from "@/lib/admin-api";
 import type { AdminMoney } from "@/lib/admin-money";
 
 /**
- * Everything the desk does to one customer's bets, in the opened trader:
- * their high-price bets (what the ₦90 rule flags), and taking back their
- * winnings, which opens Take action filled in with them, the one place
- * bets are reversed and the email is read, edited and sent.
- * Locking and suspending sit just above, in AccountControl.
+ * What the desk does to one customer's bets, in the opened customer:
+ * taking back their winnings — a button in the row with suspend and lock,
+ * which opens Take action filled in with them, the one place bets are
+ * reversed and the email is read, edited and sent — and their high-price
+ * bets (what the ₦90 rule flags).
  */
 
 const price = (kobo: number) => `₦${(kobo / 100).toFixed(2)}`;
 
-export function CustomerActions({ trader, money }: { trader: TraderRow; money: AdminMoney }) {
+export function TakeBackWinningsLink({ trader }: { trader: TraderRow }) {
   return (
-    <div className="mt-3 flex flex-col gap-3">
-      <HighPriceBets trader={trader} money={money} />
-      <Link
-        href={`/admin/customers/action?customer=${encodeURIComponent(trader.username)}`}
-        className="inline-flex h-9 w-fit items-center rounded-sm border border-no/40 px-3 text-sm font-semibold text-no hover:bg-no-tint"
-      >
-        Take back winnings…
-      </Link>
-    </div>
+    <Link
+      href={`/admin/customers/action?customer=${encodeURIComponent(trader.username)}`}
+      className="inline-flex h-9 w-fit items-center rounded-sm border border-no/40 px-3 text-sm font-semibold text-no hover:bg-no-tint"
+    >
+      Take back winnings…
+    </Link>
   );
 }
 
 /* ---------- their ₦90+ bets ---------- */
 
-function HighPriceBets({ trader, money }: { trader: TraderRow; money: AdminMoney }) {
+export function HighPriceBets({ trader, money }: { trader: TraderRow; money: AdminMoney }) {
   const [row, setRow] = useState<BetReviewRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -50,16 +48,22 @@ function HighPriceBets({ trader, money }: { trader: TraderRow; money: AdminMoney
   }, [trader.authUserId]);
 
   return (
-    <details className="rounded-md border border-border bg-surface p-3">
-      <summary className="cursor-pointer text-sm font-semibold">
-        High-price bets (₦90 or more a share)
-        {row && (
-          <span className="font-normal text-secondary">
-            {" "}
-            · {row.high.bets} bet{row.high.bets === 1 ? "" : "s"}, won {row.high.won}, lost {row.high.lost}, profit{" "}
-            {money.formatSigned(row.high.profitKobo)}
-          </span>
-        )}
+    <details className="group/high rounded-md border border-border bg-surface p-3">
+      <summary className="flex cursor-pointer list-none items-start gap-2 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+        <ChevronDown
+          className="mt-0.5 size-4 shrink-0 -rotate-90 text-tertiary transition-transform group-open/high:rotate-0"
+          aria-hidden
+        />
+        <span>
+          High-price bets (₦90 or more a share)
+          {row && (
+            <span className="font-normal text-secondary">
+              {" "}
+              · {row.high.bets} bet{row.high.bets === 1 ? "" : "s"}, won {row.high.won}, lost {row.high.lost}, profit{" "}
+              {money.formatSigned(row.high.profitKobo)}
+            </span>
+          )}
+        </span>
       </summary>
       {error && <p className="mt-2 text-sm font-semibold text-no">{error}</p>}
       {!row && !error && <p className="mt-2 text-sm text-secondary">Loading…</p>}

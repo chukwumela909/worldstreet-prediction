@@ -51,6 +51,7 @@ import { getWithdrawalDesk, resolveWithdrawalCheck } from "../trading/withdrawal
 import { listWalletChecks, readTestAccount, runWalletCheck } from "../trading/wallet-check.js";
 import { listAlerts, recipientsFor, resolveAlert, sendAlert } from "../alerts.js";
 import { deskLink, siteUrl } from "../links.js";
+import { getWalletUsdBalances, isWalletConfigured } from "../wallet.js";
 import { WithdrawalCheck } from "../trading/models.js";
 import { config } from "../config.js";
 
@@ -584,16 +585,32 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
 
   /**
    * Clear what reversal customers owe: everyone below zero back to zero,
-   * lifting their block. Keeps what's been recovered. `dryRun` only counts.
+   * lifting their block. Keeps what's been recovered. `dryRun` only counts
+   * (and hands back the warm note to reword). With `email`, every customer
+   * cleared is sent it, their name and what they owed filled in.
    */
+  const clearDebtsBody = z.object({
+    dryRun: z.boolean(),
+    email: z
+      .object({
+        subject: z.string().trim().min(3, "Give the email a subject").max(200),
+        text: z.string().trim().min(20, "Write the message").max(10_000),
+      })
+      .optional(),
+  });
   app.post(
     "/admin/recovery/clear-debts",
-    { schema: { body: recoveryNotifyBody }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
+    { schema: { body: clearDebtsBody }, config: { rateLimit: { max: 10, timeWindow: "1 minute" } } },
     async (request) => {
       const user = await requireAdmin(request);
       return {
         success: true,
-        data: await clearDebts({ dryRun: request.body.dryRun, actor: user.id, log: request.log }),
+        data: await clearDebts({
+          dryRun: request.body.dryRun,
+          actor: user.id,
+          log: request.log,
+          email: request.body.email,
+        }),
       };
     },
   );
@@ -922,6 +939,30 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
   app.get<{ Params: { authUserId: string } }>("/admin/traders/:authUserId/high-price-bets", async (request) => {
     await requireAdmin(request);
     return { success: true, data: await getCustomerBetReview(request.params.authUserId) };
+  });
+
+  /**
+   * The People list's WorldStreet wallets, read live for the customers on
+   * screen (≤ 50): what each can spend, and what the wallet is holding
+   * (locked — a payout to their bank on its way, say). Answers "my money
+   * hasn't arrived": dollars locked there mean the wait is on WorldStreet's
+   * side, not Predict's. Read-only; a wallet that can't be reached is null
+   * for that customer rather than failing the page.
+   */
+  const walletsQuery = z.object({
+    ids: z
+      .string()
+      .transform((s) => [...new Set(s.split(",").map((id) => id.trim()).filter(Boolean))])
+      .pipe(z.array(z.string().max(200)).min(1).max(50)),
+  });
+  app.get("/admin/traders/wallets", { schema: { querystring: walletsQuery } }, async (request) => {
+    await requireAdmin(request);
+    if (!isWalletConfigured()) return { success: true, data: { configured: false, wallets: {} } };
+    const balances = await getWalletUsdBalances(request.query.ids);
+    const wallets = Object.fromEntries(
+      [...balances].map(([id, b]) => [id, b ? { availableMinor: b.availableMinor, lockedMinor: b.lockedMinor } : null]),
+    );
+    return { success: true, data: { configured: true, wallets } };
   });
 
   /** Everyone with a withdrawal waiting: their requests stacked, their money beside them. */

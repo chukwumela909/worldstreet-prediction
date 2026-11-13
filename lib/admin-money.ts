@@ -319,6 +319,12 @@ export interface AdminMoney {
    * recover ₦12,000") — nobody should confirm money moving blind.
    */
   formatForConfirm: (kobo: number) => string;
+  /**
+   * A dollar amount (cents — a WorldStreet wallet's) in what the desk
+   * shows: naira at the conversion rate under ₦, dollars under $. With no
+   * rate to convert at, it stays in dollars ("$18.66"). Hidden like the rest.
+   */
+  formatUsd: (minor: number) => string;
 }
 
 export function useAdminMoney(): AdminMoney {
@@ -352,6 +358,9 @@ export function useAdminMoney(): AdminMoney {
       setHidden: setAdminAmountsHidden,
       hide,
       formatForConfirm: exact,
+      // naira per $1 × cents = kobo; under $ that converts straight back
+      formatUsd: (minor) =>
+        hide(rate !== null ? exact(Math.round(minor * rate)) : `$${(minor / 100).toFixed(2)}`),
     };
   }, [currency, preferred, rate, fx, status, hidden]);
 }

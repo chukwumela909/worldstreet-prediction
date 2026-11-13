@@ -707,15 +707,29 @@ export const notifyReversals = (dryRun: boolean, customer?: string, edited?: { s
     ...(edited ?? {}),
   });
 
+/** The note to cleared customers; `{name}` and `{amount}` are filled in for each. */
+export interface DebtEmail {
+  subject: string;
+  text: string;
+}
+
 export interface DebtClearing {
   customers: number;
   owedKobo: number;
   dryRun: boolean;
+  /** Absent on an older API. */
+  emailed?: number;
+  mailConfigured?: boolean;
+  /** The warm note as it starts, to reword before it goes. */
+  template?: DebtEmail;
 }
 
-/** Bring every reversal customer below zero back to zero; `dryRun` only counts. */
-export const clearDebts = (dryRun: boolean) =>
-  adminPost<DebtClearing>("/v1/admin/recovery/clear-debts", { dryRun });
+/**
+ * Bring every reversal customer below zero back to zero; `dryRun` only
+ * counts. With `email`, each one cleared is sent that note.
+ */
+export const clearDebts = (dryRun: boolean, email?: DebtEmail) =>
+  adminPost<DebtClearing>("/v1/admin/recovery/clear-debts", { dryRun, ...(email ? { email } : {}) });
 
 /* ------------------------------------------------------------------ */
 /* Worldstreet's own markets                                           */
@@ -1289,6 +1303,34 @@ export async function fetchTrader(authUserId: string): Promise<TraderDetail> {
     `/v1/admin/traders/${encodeURIComponent(authUserId)}`,
   );
   return res.data;
+}
+
+/**
+ * A customer's WorldStreet dollar wallet, read live: spendable, and held
+ * by the wallet (locked — a payout to their bank on its way, say). Cents.
+ */
+export interface WalletBalance {
+  availableMinor: number;
+  lockedMinor: number;
+}
+
+export interface TraderWallets {
+  /** false: the API has no wallet connection, so nothing can be read. */
+  configured: boolean;
+  /** By customer; null where the wallet couldn't be read just now. */
+  wallets: Record<string, WalletBalance | null>;
+}
+
+/** The wallets of the customers on screen (≤ 50 ids). */
+export async function fetchTraderWallets(authUserIds: string[]): Promise<TraderWallets> {
+  try {
+    const res = await apiFetch<{ data: TraderWallets }>(
+      `/v1/admin/traders/wallets?ids=${encodeURIComponent(authUserIds.join(","))}`,
+    );
+    return res.data;
+  } catch (err) {
+    throw unwrapNestedError(err);
+  }
 }
 
 export interface AccountActionResult {

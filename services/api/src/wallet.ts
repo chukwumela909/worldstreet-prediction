@@ -101,6 +101,27 @@ export function getWalletUsdBalance(
 }
 
 /**
+ * Many users' USD balances, a few requests at a time so a page of fifty
+ * doesn't hit the wallet all at once. null where the wallet couldn't say.
+ */
+export async function getWalletUsdBalances(
+  clerkUserIds: string[],
+  concurrency = 8,
+): Promise<Map<string, WalletCurrencyBalance | null>> {
+  const out = new Map<string, WalletCurrencyBalance | null>();
+  let next = 0;
+  const worker = async () => {
+    while (next < clerkUserIds.length) {
+      const id = clerkUserIds[next++]!;
+      const r = await getWalletUsdBalance(id);
+      out.set(id, r.ok ? r.data.balances.USD : null);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(concurrency, clerkUserIds.length) }, worker));
+  return out;
+}
+
+/**
  * Instant debit of the user's USD balance (e.g. buying into a market).
  * Idempotent per idempotencyKey; the wallet dedupes on its side too.
  */
