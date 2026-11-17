@@ -21,6 +21,8 @@ process.env.ALERT_EMAIL_TO = "desk@worldstreetgold.test";
 process.env.ALERT_URGENT_EMAIL_TO = "oncall@worldstreet.pagerduty.test";
 process.env.SUPPORT_EMAIL_TO = "support@worldstreetgold.test";
 process.env.SITE_URL = "https://predict.worldstreetgold.test";
+process.env.GRAFANA_IRM_WEBHOOK_URL = "https://oncall-smoke.grafana.net/integrations/v1/formatted_webhook/SMOKE/";
+process.env.GRAFANA_IRM_WEBHOOK_TOKEN = "glsa_smoke-token";
 
 import { MongoMemoryServer } from "mongodb-memory-server";
 import mongoose from "mongoose";
@@ -49,12 +51,31 @@ const log = { info() {}, warn() {}, error() {} } as unknown as import("fastify")
 
 // Resend, answered here
 const sent: { to: string[]; subject: string; text: string }[] = [];
+// Grafana IRM, answered here too
+const pages: {
+  url: string;
+  auth: string;
+  alert_uid: string;
+  title: string;
+  state: string;
+  message?: string;
+  link_to_upstream_details?: string;
+}[] = [];
+const lastPage = () => pages[pages.length - 1]!;
 const realFetch = globalThis.fetch;
 globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
   const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
   if (url.startsWith("https://api.resend.com/")) {
     sent.push(JSON.parse(String(init?.body)));
     return new Response(JSON.stringify({ id: "email" }), { status: 200 });
+  }
+  if (url.startsWith("https://oncall-smoke.grafana.net/")) {
+    pages.push({
+      url,
+      auth: new Headers(init?.headers).get("authorization") ?? "",
+      ...JSON.parse(String(init?.body)),
+    });
+    return new Response("Ok.", { status: 200 });
   }
   return realFetch(input, init);
 }) as typeof fetch;
@@ -83,6 +104,18 @@ check(
   urgentRow !== null &&
     last().text.split("\n")[2] === `Deal with it: https://predict.worldstreetgold.test/admin?alert=${String(urgentRow._id)}`,
 );
+check(
+  "…and pages Grafana IRM, keyed by the condition, with the same link",
+  urgent.pager === "sent" && pages.length === 1 &&
+    lastPage().url === "https://oncall-smoke.grafana.net/integrations/v1/formatted_webhook/SMOKE/" &&
+    lastPage().auth === "Bearer glsa_smoke-token" && lastPage().state === "alerting" &&
+    lastPage().title === "Market at its loss limit" &&
+    lastPage().alert_uid === "risk:limit:critical:m1" &&
+    lastPage().link_to_upstream_details === `https://predict.worldstreetgold.test/admin?alert=${String(urgentRow?._id)}` &&
+    (lastPage().message ?? "").startsWith("Money at risk.") &&
+    (lastPage().message ?? "").includes("market: Final — Winner"),
+);
+check("…remembered on its row", urgentRow?.paged === true);
 
 console.log("regular");
 const regular = await sendAlert(log, "Market overdue for resolution", { eventTitle: "Final" }, {
@@ -95,12 +128,17 @@ check(
   "a regular alert goes to the inbox only — it never pages",
   !regular.urgent && regular.recipients === 1 && last().to.length === 1 && last().to[0] === "desk@worldstreetgold.test",
 );
+check("…nor reaches Grafana IRM", regular.pager === "not_configured" && pages.length === 1);
 check("…untagged", last().subject === "[Worldstreet Local] Market overdue for resolution");
 check("…and links to its card too", last().text.includes("Settle it: https://predict.worldstreetgold.test/admin?alert="));
 
 console.log("fault");
 const fault = await sendAlert(log, "Money moved outside our records", { gap: "₦500" }, { kind: "fault" });
 check("a fault always pages, whatever the caller says", fault.urgent && last().to.includes("oncall@worldstreet.pagerduty.test"));
+check(
+  "…Grafana IRM too, under a key of its own",
+  fault.pager === "sent" && pages.length === 2 && lastPage().alert_uid.startsWith("fault:"),
+);
 
 console.log("withdrawal");
 await sendAlert(log, "Withdrawal waiting for approval", { amount: "₦5,000" }, {
@@ -130,19 +168,40 @@ check(
   last().text.includes("Reply: https://predict.worldstreetgold.test/admin/customers/support?ref=WS-ABC234"),
 );
 check("…and isn't kept on the alerts list", (await AlertRecord.countDocuments({ subject: /support request/ })) === 0);
+const urgentSupport = await sendAlert(log, "Support marked urgent", {}, { kind: "support", urgent: true });
+check("…and never pages, even marked urgent", urgentSupport.pager === "not_configured" && pages.length === 2);
+
+console.log("settling on the desk");
+const settle = (id: unknown) => admin("POST", "/v1/admin/alerts/resolve", { id: String(id), note: "Repriced it" });
+check("settling a paged alert works as before", (await settle(urgentRow?._id)).statusCode === 200);
+check(
+  "…and resolves it on Grafana IRM under the same key",
+  pages.length === 3 && lastPage().state === "ok" && lastPage().alert_uid === "risk:limit:critical:m1",
+);
+const regularRow = await AlertRecord.findOne({ key: "overdue:e2" }).lean();
+check(
+  "settling one that never paged tells Grafana IRM nothing",
+  (await settle(regularRow?._id)).statusCode === 200 && pages.length === 3,
+);
 
 console.log("the desk's tests");
 const sendTest = async (as?: string) =>
   (as === undefined ? await admin("POST", "/v1/admin/test-alert") : await admin("POST", "/v1/admin/test-alert", { as })).json() as {
-    data: { email: string; recipients: number; urgent: boolean };
+    data: { email: string; recipients: number; urgent: boolean; pager: string };
   };
 const t1 = await sendTest("urgent");
 check(
   "an urgent test pages, tagged as a test",
   t1.data.urgent && t1.data.recipients === 2 && last().subject === "[Worldstreet Local · URGENT · Test] Test urgent alert",
 );
+check(
+  "…Grafana IRM as well",
+  t1.data.pager === "sent" && pages.length === 4 && lastPage().title === "Test urgent alert" &&
+    (lastPage().message ?? "").startsWith("Test. Nothing to fix."),
+);
 const t2 = await sendTest("regular");
 check("a regular test reaches the inbox only", !t2.data.urgent && t2.data.recipients === 1 && last().subject === "[Worldstreet Local · Test] Test alert");
+check("…with no page", t2.data.pager === "not_configured" && pages.length === 4);
 const t3 = await sendTest("support");
 check(
   "a support test reaches the support list, linking to the inbox",
@@ -156,6 +215,7 @@ check("a made-up route is refused (400)", (await admin("POST", "/v1/admin/test-a
 const routes = (await admin("GET", "/v1/admin/alert-routes")).json() as {
   data: {
     emailConfigured: boolean;
+    pagerConfigured: boolean;
     linksConfigured: boolean;
     exampleLink: string | null;
     routes: { regular: { recipients: number }; urgent: { recipients: number; pagingList: number }; support: { recipients: number; ownList: boolean } };
@@ -167,6 +227,11 @@ check(
     routes.data.routes.regular.recipients === 1 && routes.data.routes.urgent.recipients === 2 &&
     routes.data.routes.urgent.pagingList === 1 && routes.data.routes.support.ownList &&
     !JSON.stringify(routes.data).includes("@"),
+);
+check(
+  "…and says Grafana IRM paging is set up, without its URL or token",
+  routes.data.pagerConfigured && !JSON.stringify(routes.data).includes("grafana.net") &&
+    !JSON.stringify(routes.data).includes("smoke-token"),
 );
 
 console.log(`\n${passed} passed, ${failed} failed`);

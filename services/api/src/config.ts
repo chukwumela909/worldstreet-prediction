@@ -72,6 +72,21 @@ const envSchema = z.object({
    */
   ALERT_URGENT_EMAIL_TO: z.string().default(""),
   /**
+   * Grafana Cloud IRM paging for the same urgent alerts: the URL of a
+   * "Formatted Webhook" integration (Grafana → Alerts & IRM → IRM →
+   * Integrations), e.g.
+   * "https://oncall-prod-….grafana.net/integrations/v1/formatted_webhook/…/".
+   * The URL is itself the secret. The alert is resolved there when the
+   * desk settles it. Works alongside ALERT_URGENT_EMAIL_TO or instead of
+   * it.
+   */
+  GRAFANA_IRM_WEBHOOK_URL: z.string().default(""),
+  /**
+   * Only when the integration has "Require a Grafana service account
+   * token" switched on: that token (glsa_…), sent as a Bearer header.
+   */
+  GRAFANA_IRM_WEBHOOK_TOKEN: z.string().default(""),
+  /**
    * Who hears about customers' support requests, comma-separated. Kept
    * apart from the alerts so a routine question never pages anyone.
    * Empty: ALERT_EMAIL_TO.

@@ -24,8 +24,9 @@ import { blockedNotice } from "@/components/admin/watch-parts";
  * Alert test: one card per way an alert travels, each sent through the
  * real path, so the set-up is proved before an incident needs it.
  *
- *  - Urgent: the inbox and the paging list (ALERT_URGENT_EMAIL_TO — a
- *    PagerDuty address calls or texts whoever is on duty).
+ *  - Urgent: the inbox, the paging list (ALERT_URGENT_EMAIL_TO — a
+ *    PagerDuty address calls or texts whoever is on duty) and Grafana
+ *    IRM (GRAFANA_IRM_WEBHOOK_URL — pages its on-call schedule).
  *  - Regular: the alert inbox (ALERT_EMAIL_TO).
  *  - Support: the support list (SUPPORT_EMAIL_TO, else the alert inbox).
  *
@@ -46,7 +47,7 @@ const CARDS: {
     title: "Urgent alert",
     icon: Urgent,
     what: "Money at risk right now: a market at its loss limit, bets being refused, a fault, a withdrawal the wallet never confirmed. Goes to the inbox and pages whoever is on duty.",
-    check: "Your phone should ring or get a text from PagerDuty within a minute, and the email should arrive tagged URGENT.",
+    check: "Your phone should ring, buzz or get a text from your paging tool within a minute, and the email should arrive tagged URGENT.",
   },
   {
     route: "regular",
@@ -79,7 +80,7 @@ export function AlertTestDesk() {
         lede="Send a test down each route and check it lands where it should — before a real problem needs it. Tests are marked as tests and need no action."
       />
 
-      <dl className="mt-6 grid gap-3 sm:grid-cols-3">
+      <dl className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Setup
           label="Email"
           ok={routes?.emailConfigured}
@@ -100,6 +101,13 @@ export function AlertTestDesk() {
           bad="Optional — not set"
           optional
         />
+        <Setup
+          label="Paging (Grafana IRM)"
+          ok={routes ? Boolean(routes.pagerConfigured) : undefined}
+          good="Urgent alerts page Grafana IRM"
+          bad="Optional — add GRAFANA_IRM_WEBHOOK_URL on the API"
+          optional
+        />
       </dl>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-3">
@@ -108,8 +116,8 @@ export function AlertTestDesk() {
           const count = !r ? null : card.route === "urgent" ? r.urgent.recipients : r[card.route].recipients;
           const hint = !r
             ? null
-            : card.route === "urgent" && r.urgent.pagingList === 0
-              ? "No paging list — add ALERT_URGENT_EMAIL_TO (your PagerDuty email address) so urgent alerts call or text someone."
+            : card.route === "urgent" && r.urgent.pagingList === 0 && !routes?.pagerConfigured
+              ? "Nobody is paged — add GRAFANA_IRM_WEBHOOK_URL (Grafana IRM), or ALERT_URGENT_EMAIL_TO (a PagerDuty email address), so urgent alerts reach whoever is on duty."
               : card.route === "support" && !r.support.ownList
                 ? "No support list of its own — add SUPPORT_EMAIL_TO, or questions keep landing in the alert inbox."
                 : count === 0
@@ -239,7 +247,13 @@ function RouteCard({
 function describe(r: AlertTestResult): string {
   if (r.email === "sent") {
     const hook = r.webhook === "sent" ? " and the webhook" : "";
-    return `Sent to ${r.recipients} address${r.recipients === 1 ? "" : "es"}${hook}.`;
+    const page =
+      r.pager === "sent"
+        ? " Grafana IRM was paged."
+        : r.pager === "failed"
+          ? " Grafana IRM refused the page — see the API logs."
+          : "";
+    return `Sent to ${r.recipients} address${r.recipients === 1 ? "" : "es"}${hook}.${page}`;
   }
   if (r.email === "not_configured") return "Not sent — this route has no email set up on the API.";
   return `Resend refused it — ${r.emailError ?? "see the API logs"}`;

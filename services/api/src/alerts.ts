@@ -11,9 +11,10 @@ import { AlertRecord, AlertState, User, type AlertKind } from "./models.js";
  * label none of its outcomes match, one long overdue, a payout run that
  * failed). Somebody has to look at these; money is sitting behind them.
  *
- * Three channels, all optional and all best-effort: the log always, an
- * email through Resend when it's configured, and the generic webhook
- * that predates it. A failing channel is logged and swallowed — an
+ * Four channels, all optional and all best-effort: the log always, an
+ * email through Resend when it's configured, the generic webhook that
+ * predates it, and — urgent alerts only — a page through Grafana IRM.
+ * A failing channel is logged and swallowed — an
  * alert that can't be delivered must not take down the settlement pass
  * that raised it.
  *
@@ -33,7 +34,8 @@ import { AlertRecord, AlertState, User, type AlertKind } from "./models.js";
  *    a market at its loss limit, bets being refused, a withdrawal the
  *    wallet never confirmed) → ALERT_URGENT_EMAIL_TO as well, which is
  *    where a PagerDuty address goes so they call or text the person on
- *    duty;
+ *    duty — and to Grafana IRM (GRAFANA_IRM_WEBHOOK_URL), which pages its
+ *    on-call schedule and is told when the desk settles the alert;
  *  - support requests → SUPPORT_EMAIL_TO only, so they never page;
  *  - the desk's test alerts (Admin → Alert test) go where the real thing
  *    would — urgent, regular or support — so each route can be proved.
@@ -58,6 +60,8 @@ export interface AlertDelivery {
   email: "sent" | "failed" | "not_configured";
   emailError?: string;
   webhook: "sent" | "failed" | "not_configured";
+  /** The Grafana IRM page; "not_configured" too when the alert isn't urgent. */
+  pager: "sent" | "failed" | "not_configured";
   /** How many addresses the email went to (0 when throttled). */
   recipients: number;
   urgent: boolean;
@@ -97,13 +101,22 @@ export async function sendAlert(
   const kind = opts.kind ?? "other";
   const urgent = kind === "fault" || opts.urgent === true;
   log.warn({ alert: subject, urgent, ...detail }, "settlement alert");
-  const recordId = await recordAlert(log, subject, detail, opts);
+  // an unkeyed alert is a one-off: a key of its own
+  const key = throttleKey ?? `${kind}:${randomUUID()}`;
+  const recordId = await recordAlert(log, subject, detail, opts, key);
 
   const decision = throttleKey
     ? await claimAlert(log, throttleKey, subject)
     : { send: true, suppressedSinceLast: 0 };
   if (!decision.send) {
-    return { throttled: true, email: "not_configured", webhook: "not_configured", recipients: 0, urgent };
+    return {
+      throttled: true,
+      email: "not_configured",
+      webhook: "not_configured",
+      pager: "not_configured",
+      recipients: 0,
+      urgent,
+    };
   }
 
   const body =
@@ -116,11 +129,31 @@ export async function sendAlert(
   const link = opts.link ?? (recordId ? deskLink.alert(recordId) : deskLink.today());
   const to = recipientsFor(kind, urgent);
 
-  const [email, webhook] = await Promise.all([
-    emailAlert(log, subject, body, { kind, urgent, to, line: deskLine(opts.action ?? "Open it", link) }),
-    webhookAlert(log, subject, body, { kind, urgent, link: siteUrl(link.path) }),
+  const line = deskLine(opts.action ?? "Open it", link);
+  const url = siteUrl(link.path);
+
+  const [email, webhook, pager] = await Promise.all([
+    emailAlert(log, subject, body, { kind, urgent, to, line }),
+    webhookAlert(log, subject, body, { kind, urgent, link: url }),
+    // support never pages, whatever a caller marks it
+    urgent && kind !== "support"
+      ? pageAlert(log, {
+          alert_uid: key,
+          title: subject,
+          state: "alerting",
+          // Markdown there: a blank line between each, or they run together
+          message: [KIND_NOTE[kind], line, ...detailLines(body)].join("\n\n"),
+          ...(url ? { link_to_upstream_details: url } : {}),
+        })
+      : Promise.resolve<AlertDelivery["pager"]>("not_configured"),
   ]);
-  return { throttled: false, ...email, webhook, recipients: to.length, urgent };
+  if (pager === "sent" && recordId) {
+    // remembered so settling it on the desk resolves it on Grafana IRM
+    await AlertRecord.updateOne({ _id: recordId }, { $set: { paged: true } }).catch((err: unknown) =>
+      log.error({ err, key }, "could not mark alert as paged"),
+    );
+  }
+  return { throttled: false, ...email, webhook, pager, recipients: to.length, urgent };
 }
 
 /** Each list once, even when an address is on two of them. A test goes where the real thing would. */
@@ -267,10 +300,11 @@ const KIND_NOTE: Record<AlertKind | "support", string> = {
  * details.
  */
 function emailBody(subject: string, detail: Record<string, unknown>, route: EmailRoute): string {
-  const lines = Object.entries(detail).map(
-    ([key, value]) => `${key}: ${format(value)}`,
-  );
-  return [subject, `Type: ${KIND_NOTE[route.kind]}`, route.line, "", ...lines].join("\n");
+  return [subject, `Type: ${KIND_NOTE[route.kind]}`, route.line, "", ...detailLines(detail)].join("\n");
+}
+
+function detailLines(detail: Record<string, unknown>): string[] {
+  return Object.entries(detail).map(([key, value]) => `${key}: ${format(value)}`);
 }
 
 function format(value: unknown): string {
@@ -306,6 +340,44 @@ async function webhookAlert(
   }
 }
 
+/**
+ * One event on a Grafana IRM "Formatted Webhook" integration. The same
+ * `alert_uid` is the same alert group there: "alerting" opens it (and
+ * pages, through the escalation chain set on the integration's route),
+ * "ok" resolves it under the integration's default templates.
+ */
+interface PageEvent {
+  alert_uid: string;
+  title: string;
+  state: "alerting" | "ok";
+  message?: string;
+  link_to_upstream_details?: string;
+}
+
+async function pageAlert(log: FastifyBaseLogger, event: PageEvent): Promise<AlertDelivery["pager"]> {
+  if (!config.GRAFANA_IRM_WEBHOOK_URL) return "not_configured";
+  try {
+    const res = await fetch(config.GRAFANA_IRM_WEBHOOK_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(config.GRAFANA_IRM_WEBHOOK_TOKEN
+          ? { Authorization: `Bearer ${config.GRAFANA_IRM_WEBHOOK_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify(event),
+      signal: AbortSignal.timeout(DELIVERY_TIMEOUT_MS),
+    });
+    if (res.ok) return "sent";
+    const body = await res.text().catch(() => "");
+    log.error({ status: res.status, body: body.slice(0, 300) }, "Grafana IRM page rejected");
+    return "failed";
+  } catch (err) {
+    log.error({ err }, "Grafana IRM page failed");
+    return "failed";
+  }
+}
+
 /* ---------------- the desk's record ---------------- */
 
 /**
@@ -318,14 +390,14 @@ async function recordAlert(
   subject: string,
   detail: Record<string, unknown>,
   opts: AlertOptions,
+  key: string,
 ): Promise<string | null> {
   if (opts.kind === "support") return null;
   const kind = opts.kind ?? "other";
   const now = new Date();
   try {
     const row = await AlertRecord.findOneAndUpdate(
-      // an unkeyed alert is a one-off: a row of its own
-      { key: opts.throttleKey ?? `${kind}:${randomUUID()}` },
+      { key },
       {
         $set: {
           kind,
@@ -459,15 +531,21 @@ export async function resolveAlert(
   id: string,
   actor: string,
   note: string,
+  log?: FastifyBaseLogger,
 ): Promise<{ kind: string; subject: string; authUserIds: string[] }> {
+  // the row as it was: whether it was paged, before this clears it
   const res = await AlertRecord.findOneAndUpdate(
     { _id: id, status: "open" },
-    { $set: { status: "resolved", resolvedBy: actor, resolvedAt: new Date(), note } },
-    { new: true, projection: { kind: 1, subject: 1, authUserIds: 1 } },
+    { $set: { status: "resolved", resolvedBy: actor, resolvedAt: new Date(), note, paged: false } },
+    { returnDocument: "before", projection: { kind: 1, subject: 1, authUserIds: 1, key: 1, paged: 1 } },
   ).lean();
   if (!res) {
     if (!(await AlertRecord.exists({ _id: id }))) throw new ApiError(404, "No such alert", "NOT_FOUND");
     throw new ApiError(409, "This alert is already settled", "ALREADY_SETTLED");
+  }
+  if (res.paged && log) {
+    // best-effort: the desk's record is settled either way
+    await pageAlert(log, { alert_uid: res.key, title: res.subject, state: "ok" });
   }
   return { kind: res.kind, subject: res.subject, authUserIds: res.authUserIds ?? [] };
 }

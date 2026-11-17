@@ -105,6 +105,8 @@ export interface AlertTestResult {
   email: "sent" | "failed" | "not_configured";
   emailError?: string;
   webhook: "sent" | "failed" | "not_configured";
+  /** The Grafana IRM page (urgent alerts only). Absent on an older API. */
+  pager?: "sent" | "failed" | "not_configured";
   recipients: number;
   /** Absent on an older API. */
   urgent?: boolean;
@@ -123,6 +125,8 @@ export async function sendTestAlert(as: AlertRoute = "regular"): Promise<AlertTe
 export interface AlertRoutes {
   emailConfigured: boolean;
   webhookConfigured: boolean;
+  /** Grafana IRM paging is set up. Absent on an older API. */
+  pagerConfigured?: boolean;
   linksConfigured: boolean;
   /** e.g. "https://predict…/admin", or null without SITE_URL. */
   exampleLink: string | null;

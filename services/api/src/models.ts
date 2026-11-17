@@ -126,6 +126,8 @@ const alertRecordSchema = new Schema(
     resolvedBy: { type: String, default: "" },
     resolvedAt: { type: Date },
     note: { type: String, default: "" },
+    /** Firing on Grafana IRM — so settling it here resolves it there. */
+    paged: { type: Boolean, default: false },
   },
   { timestamps: true },
 );

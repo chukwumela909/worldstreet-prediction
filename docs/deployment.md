@@ -131,6 +131,18 @@ Notes:
   on every detection.
 - Alerts always reach the log regardless; `ALERT_WEBHOOK_URL` still works
   alongside mail if you'd rather also push them somewhere else.
+- Paging through Grafana Cloud IRM: set `GRAFANA_IRM_WEBHOOK_URL` to the
+  URL of a "Formatted Webhook" integration (Grafana → Alerts & IRM → IRM →
+  Integrations). The URL is itself the secret; `GRAFANA_IRM_WEBHOOK_TOKEN`
+  is only needed if the integration is set to require a service account
+  token. Only urgent alerts go there — a market at its loss limit, bets
+  being refused, a fault, a withdrawal the wallet never confirmed — never
+  regular alerts or support requests. Who gets paged is decided on
+  Grafana's side (the integration's route to an escalation chain). On the
+  free plan that means the mobile app's push alerts: calls and SMS to
+  Nigerian numbers need a paid plan. Settling the alert on the admin desk
+  resolves it there. It works with or without `ALERT_URGENT_EMAIL_TO`, and
+  Admin → Alert test → "Send a test" on the urgent card proves it.
 
 ## 3. Register the service token with the wallet
 

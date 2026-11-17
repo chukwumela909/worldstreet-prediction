@@ -380,6 +380,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
       data: {
         emailConfigured: mail,
         webhookConfigured: Boolean(config.ALERT_WEBHOOK_URL),
+        pagerConfigured: Boolean(config.GRAFANA_IRM_WEBHOOK_URL),
         linksConfigured: siteUrl("/admin") !== null,
         exampleLink: siteUrl(deskLink.today().path),
         routes: {
@@ -909,7 +910,7 @@ export const adminRoutes: FastifyPluginAsync = async (rawApp) => {
    */
   app.post("/admin/alerts/resolve", { schema: { body: resolveAlertBody } }, async (request) => {
     const actor = await requireAdmin(request);
-    const alert = await resolveAlert(request.body.id, actor.label, request.body.note);
+    const alert = await resolveAlert(request.body.id, actor.label, request.body.note, request.log);
     const restored =
       alert.kind === "abuse"
         ? await restoreAutoStakeLevels({
